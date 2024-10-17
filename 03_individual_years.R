@@ -40,16 +40,16 @@ for (LC in unique(raw.data$type)){
       gamyr <- gam(NDVIReprojected ~ s(yday, k=18), data=datyr)
     }
     
-    gampred <- predict(gamyr, newdata=newDF)
+    #gampred <- predict(gamyr, newdata=newDF)
     post <- post.distns(model.gam=gamyr, newdata=newDF, vars="yday")
     post$type <- LC
     post$year <- yr
-    post$NDVIpred <- gampred
+    #post$NDVIpred <- gampred
     
     df <- rbind(df,post)
   }
 }
 
-write.csv(df, file.path(pathShare, "years.csv"), row.names=F) #save file
+write.csv(df, file.path(pathShare, "individual_years_post_GAM.csv"), row.names=F) #save file
 
 ######################
