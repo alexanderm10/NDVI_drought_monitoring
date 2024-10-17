@@ -28,7 +28,7 @@ gamcrop_norm <- gam(NDVIReprojected ~ s(yday, k=18), data=raw.data[raw.data$type
 NDVIcrop_norm <- predict(gamcrop_norm, newdata=newDF) #normal crop values for a year
 crop_norm <- post.distns(model.gam=gamcrop_norm, newdata=newDF, vars="yday")
 crop_norm$type <- "crop"
-crop_norm$NDVIpred <- NDVIcrop_norm
+#crop_norm$NDVIpred <- NDVIcrop_norm
 
 ######################
 #forest
@@ -38,7 +38,7 @@ gamforest_norm <- gam(NDVIReprojected ~ s(yday, k=18), data=raw.data[raw.data$ty
 NDVIforest_norm <- predict(gamforest_norm, newdata=newDF)
 forest_norm <- post.distns(model.gam = gamforest_norm, newdata = newDF, vars="yday")
 forest_norm$type <- "forest"
-forest_norm$NDVIpred <- NDVIforest_norm
+#forest_norm$NDVIpred <- NDVIforest_norm
 
 ######################
 #grassland
@@ -48,7 +48,7 @@ gamgrass_norm <- gam(NDVIReprojected ~ s(yday, k=18), data=raw.data[raw.data$typ
 NDVIgrass_norm <- predict(gamgrass_norm, newdata=newDF)
 grass_norm <- post.distns(model.gam = gamgrass_norm, newdata = newDF, vars="yday")
 grass_norm$type <- "grassland"
-grass_norm$NDVIpred <- NDVIgrass_norm
+#grass_norm$NDVIpred <- NDVIgrass_norm
 
 ######################
 #urban-high
@@ -58,7 +58,7 @@ gamUrbHigh_norm <- gam(NDVIReprojected ~ s(yday, k=18), data=raw.data[raw.data$t
 NDVIUrbHigh_norm <- predict(gamUrbHigh_norm, newdata=newDF)
 UrbHigh_norm <- post.distns(model.gam = gamUrbHigh_norm, newdata = newDF, vars="yday")
 UrbHigh_norm$type <- "urban-high"
-UrbHigh_norm$NDVIpred <- NDVIUrbHigh_norm
+#UrbHigh_norm$NDVIpred <- NDVIUrbHigh_norm
 
 ######################
 #urban-medium
@@ -68,7 +68,7 @@ gamUrbMed_norm <- gam(NDVIReprojected ~ s(yday, k=18), data=raw.data[raw.data$ty
 NDVIUrbMed_norm <- predict(gamUrbMed_norm, newdata=newDF)
 UrbMed_norm <- post.distns(model.gam = gamUrbMed_norm, newdata = newDF, vars="yday")
 UrbMed_norm$type <- "urban-medium"
-UrbMed_norm$NDVIpred <- NDVIUrbMed_norm
+#UrbMed_norm$NDVIpred <- NDVIUrbMed_norm
 
 ######################
 #urban-low
@@ -78,7 +78,7 @@ gamUrbLow_norm <- gam(NDVIReprojected ~ s(yday, k=18), data=raw.data[raw.data$ty
 NDVIUrbLow_norm <- predict(gamUrbLow_norm, newdata=newDF)
 UrbLow_norm <- post.distns(model.gam = gamUrbLow_norm, newdata = newDF, vars="yday")
 UrbLow_norm$type <- "urban-low"
-UrbLow_norm$NDVIpred <- NDVIUrbLow_norm
+#UrbLow_norm$NDVIpred <- NDVIUrbLow_norm
 
 ######################
 #urban-open
@@ -88,13 +88,13 @@ gamUrbOpen_norm <- gam(NDVIReprojected ~ s(yday, k=18), data=raw.data[raw.data$t
 NDVIUrbOpen_norm <- predict(gamUrbOpen_norm, newdata=newDF)
 UrbOpen_norm <- post.distns(model.gam = gamUrbOpen_norm, newdata = newDF, vars="yday")
 UrbOpen_norm$type <- "urban-open"
-UrbOpen_norm$NDVIpred <- NDVIUrbOpen_norm
+#UrbOpen_norm$NDVIpred <- NDVIUrbOpen_norm
 
 ######################
 #combine into one large dataframe & save
 ######################
 
 norms <- rbind(crop_norm, forest_norm, grass_norm, UrbHigh_norm, UrbMed_norm, UrbLow_norm, UrbOpen_norm)
-write.csv(norms, file.path(pathShare, "norms.csv"), row.names=F)
+write.csv(norms, file.path(pathShare, "norms_all_LC_types.csv"), row.names=F)
 
 ######################
