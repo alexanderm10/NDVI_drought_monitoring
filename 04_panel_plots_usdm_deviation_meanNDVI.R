@@ -62,9 +62,9 @@ dev2005$lwrdev <- lwrdev
 
 ###
 
-deviation <- yrs2012[yrs2012$type=="crop",]$mean - norms2012[norms2012$type=="crop",]$mean
-lwrdev <- yrs2012[yrs2012$type=="crop",]$lwr - norms2012[norms2012$type=="crop",]$mean
-uprdev <- yrs2012[yrs2012$type=="crop",]$upr - norms2012[norms2012$type=="crop",]$mean
+deviation <- yrs2012[yrs2012$type=="urban-open",]$mean - norms2012[norms2012$type=="urban-open",]$mean
+lwrdev <- yrs2012[yrs2012$type=="urban-open",]$lwr - norms2012[norms2012$type=="urban-open",]$mean
+uprdev <- yrs2012[yrs2012$type=="urban-open",]$upr - norms2012[norms2012$type=="urban-open",]$mean
 
 dev2012 <- data.frame(yday=seq(1:365))
 dev2012$deviation <- deviation
@@ -113,22 +113,22 @@ plot_grid(p1,p2,align="hv") #2005
 ######################
 
 p3 <- ggplot()+
-  geom_ribbon(data=yrs2012[yrs2012$type=="crop",], aes(x=date, ymin=lwr, ymax=upr), fill="#E69F00", alpha=0.2) +
-  geom_ribbon(data=norms2012[norms2012$type=="crop",],aes(x=date, ymin=lwr, ymax=upr), color=NA, alpha=0.2) +
-  geom_line(data=yrs2012[yrs2012$type=="crop",], aes(x=date,y=mean,color="2012"))+
-  geom_line(data=norms2012[norms2012$type=="crop",], aes(x=date,y=mean,color="normal"))+
-  geom_point(data=raw2012[raw2012$type=="crop",], aes(x=date, y=NDVIReprojected,color="gray50"),alpha=0.7)+
+  geom_ribbon(data=yrs2012[yrs2012$type=="urban-open",], aes(x=date, ymin=lwr, ymax=upr), fill="#E69F00", alpha=0.2) +
+  geom_ribbon(data=norms2012[norms2012$type=="urban-open",],aes(x=date, ymin=lwr, ymax=upr), color=NA, alpha=0.2) +
+  geom_line(data=yrs2012[yrs2012$type=="urban-open",], aes(x=date,y=mean,color="2012"))+
+  geom_line(data=norms2012[norms2012$type=="urban-open",], aes(x=date,y=mean,color="normal"))+
+  geom_point(data=raw2012[raw2012$type=="urban-open",], aes(x=date, y=NDVIReprojected,color="gray50"),alpha=0.7)+
   scale_color_manual(name="year", values=c("normal" = "black", "2012"="#E69F00")) +
   scale_fill_manual(name="year", values=c("normal" = "black", "2012"="#E69F00")) +
-  ylab(" Mean NDVI")+ theme(legend.position="bottom") +ggtitle("2012 crop")
+  ylab(" Mean NDVI")+ theme(legend.position="bottom") +ggtitle("2012 urban-open")
 
 p4 <- ggplot()+
   geom_area(data=usdm2012, aes(x=date, y=percentage, fill=severity),alpha=0.8)+
   scale_fill_manual(values=c("yellow","burlywood", "darkorange","red","brown4")) + theme(legend.position = "bottom") +
-  geom_line(data=dev2012, aes(x=date, y=(deviation+0.2)*250)) +
-  geom_ribbon(data=dev2012, aes(x=date, ymin=(lwrdev+0.2)*250, ymax=(uprdev+0.2)*250), fill="black", alpha=0.3) +
+  geom_line(data=dev2012, aes(x=date, y=(deviation+0.3)*167)) +
+  geom_ribbon(data=dev2012, aes(x=date, ymin=(lwrdev+0.3)*167, ymax=(uprdev+0.3)*167), fill="black", alpha=0.3) +
   geom_hline(yintercept=50)+
-  scale_y_continuous(name="percentage", sec.axis = sec_axis(~./250-0.2,name="deviation")) 
+  scale_y_continuous(name="percentage", sec.axis = sec_axis(~./167-0.3,name="deviation")) 
 
 plot_grid(p3,p4,align="hv") #2012
 
