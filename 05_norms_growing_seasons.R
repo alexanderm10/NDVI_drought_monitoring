@@ -13,7 +13,7 @@ pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/d
 ######################
 #usdmcat <- read.csv("~/Downloads/dm_export_20000101_20241017.csv") #usdm chicago region categorical data
 #usdmcum <- read.csv("~/Downloads/dm_export_20000101_20241024.csv") #usdm chicago region cumulative data
-#yrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/individual_years_post_GAM.csv")) #individual years
+yrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/individual_years_post_GAM.csv")) #individual years
 norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/norms_all_LC_types.csv")) #normals
 
 ######################
@@ -73,10 +73,25 @@ season_end <- urbend[which.min(abs(urbend$mean-upper_thresh)),"yday"]
 urban_high_grow <- urbhigh[urbhigh$yday >= season_start & urbhigh$yday <= season_end,]
 
 ######################
-#saving as separate df just to be safe
+#saving as separate df
 ######################
 
 grow_norms <- rbind(growcrop, growforest, growgrassland, `growurban-low`, `growurban-medium`, `growurban-open`, urban_high_grow)
 write.csv(grow_norms, file.path(pathShare, "growing_season_norms.csv"), row.names =F)
+
+######################
+#loop to make a dataset of growing season for the years dataset
+######################
+
+for (LC in unique(yrs$type)){
+  df <- yrs[yrs$type==LC,]
+  growLC <- grow_norms[grow_norms$type==LC,]
+  df <- df[df$yday %in% growLC$yday,]
+  LC <- gsub("-","",LC)
+  assign(paste0("growyrs",LC),df)
+}
+
+growyrs <- rbind(growyrscrop, growyrsforest, growyrsgrassland, growyrsurbanlow, growyrsurbanmedium, growyrsurbanopen, growyrsurbanhigh)
+write.csv(growyrs, file.path(pathShare, "growing_season_yrs.csv"), row.names=F)
 
 ######################
