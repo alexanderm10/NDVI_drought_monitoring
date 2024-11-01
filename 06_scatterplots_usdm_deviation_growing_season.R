@@ -42,7 +42,7 @@ for (LC in unique(growyrs$type)){
 #grow_subset <- df[df$date %in% usdmcum$start,]
 
 grow_merge <- merge(x=df, y=usdmcum, by="date", all.x=F, all.y=T)
-
+grow_merge <- grow_merge %>% pivot_longer(cols = c(12:16), names_to = "severity", values_to = "percentage") #combining index columns
 ######################
 #crop
 ######################
@@ -347,42 +347,15 @@ plot_grid(p0,p1,p2,p3,p4)
 ######################
 #box plots 
 ######################
-cropd0 <- crop[crop$D0==0 | crop$D0>50,]
-cropd0 <- na.omit(cropd0)
-cropd0$D0[cropd0$D0>50] <- "50+"
-cropd0$D0 <- as.factor(cropd0$D0)
-p0 <- ggplot()+
-  geom_boxplot(data=cropd0, aes(x=D0, y=deviation, fill=D0)) + xlab("Percentage area in D0") +
-  scale_fill_manual(name="D0", values=c("0"="gray50", "50+"="yellow"))+
+cropusdm <- crop[crop$percentage==0 | crop$percentage>50,]
+cropusdm <- na.omit(cropusdm)
+cropusdm$percentage[cropusdm$percentage>50] <- "50+"
+cropusdm$severity[cropusdm$percentage==0] <- "0"
+cropusdm$percentage <- as.factor(cropusdm$percentage)
+ggplot()+
+  geom_boxplot(data=cropusdm, aes(x=percentage, y=deviation, fill=severity)) + xlab("Percent Area") +
+  scale_fill_manual(name="Category", values=c("0"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
   ylim(-0.2,0.2) + ggtitle("Crop")
-
-cropd1 <- crop[crop$D1==0 | crop$D1>50,]
-cropd1 <- na.omit(cropd1)
-cropd1$D1[cropd1$D1>50] <- "50+"
-cropd1$D1 <- as.factor(cropd1$D1)
-p1 <- ggplot()+
-  geom_boxplot(data=cropd1, aes(x=D1, y=deviation, fill=D1)) + xlab("Percentage area in D1") +
-  scale_fill_manual(name="D1", values=c("0"="gray50", "50+"="burlywood"))+
-  ylim(-0.2,0.2)
-
-cropd2 <- crop[crop$D2==0 | crop$D2>50,]
-cropd2 <- na.omit(cropd2)
-cropd2$D2[cropd2$D2>50] <- "50+"
-cropd2$D2 <- as.factor(cropd2$D2)
-p2 <- ggplot()+
-  geom_boxplot(data=cropd2, aes(x=D2, y=deviation, fill=D2)) + xlab("Percentage area in D2") +
-  scale_fill_manual(name="D2", values=c("0"="gray50", "50+"="darkorange")) +
-  ylim(-0.2,0.2) #+ ggtitle("Crop")
-
-cropd3 <- crop[crop$D3==0 | crop$D3>50,]
-cropd3 <- na.omit(cropd3)
-cropd3$D3[cropd3$D3>50] <- "50+"
-cropd3$D3 <- as.factor(cropd3$D3)
-p3 <- ggplot()+
-  geom_boxplot(data=cropd3, aes(x=D3, y=deviation, fill=D3)) + xlab("Percentage area in D3") +
-  scale_fill_manual(name="D3", values=c("0"="gray50", "50+"="red"))+
-  ylim(-0.2,0.2) #+ ggtitle("Crop")
-
 ######################
 forestd0 <- forest[forest$D0==0 | forest$D0>50,]
 forestd0 <- na.omit(forestd0)
