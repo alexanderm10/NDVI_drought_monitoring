@@ -349,11 +349,11 @@ plot_grid(p0,p1,p2,p3,p4)
 ######################
 cropusdm <- crop[crop$percentage==0 | crop$percentage>50,]
 cropusdm <- na.omit(cropusdm)
-cropusdm$percentage[cropusdm$percentage>50] <- "50+"
 cropusdm$severity[cropusdm$percentage==0] <- "0"
+cropusdm$percentage<- "Percent"
 cropusdm$percentage <- as.factor(cropusdm$percentage)
 ggplot()+
-  geom_boxplot(data=cropusdm, aes(x=percentage, y=deviation, fill=severity)) + xlab("Percent Area") +
+  geom_boxplot(data=cropusdm, aes(x=percentage, y=deviation, fill=severity)) + xlab("Percent Area 0 or over 50") +
   scale_fill_manual(name="Category", values=c("0"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
   ylim(-0.2,0.2) + ggtitle("Crop")
 ######################
