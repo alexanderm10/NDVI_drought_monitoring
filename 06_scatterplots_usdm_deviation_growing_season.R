@@ -6,6 +6,7 @@ library(dplyr)
 library(tidyverse)
 library(lubridate)
 library(cowplot)
+library(ggdist)
 
 Sys.setenv(GOOGLE_DRIVE = "~/Google Drive/Shared drives/Urban Ecological Drought")
 google.drive <- Sys.getenv("GOOGLE_DRIVE")
@@ -359,6 +360,19 @@ ggplot(data=grow_merge)+
   scale_fill_manual(name="Category", values=c("0"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
   facet_wrap(~type)+
   ylim(-0.2,0.2)
+
+######################
+#raincloud plot
+######################
+grow_merge$severity <- as.factor(grow_merge$severity)
+
+ggplot(data=grow_merge, aes(x=severity, y=deviation, fill=severity))+
+  facet_wrap(~type)+
+  stat_halfeye(.width = 0,justification=-0.2) + ylim(-0.2,0.2)+ xlab("category")+ geom_boxplot(width=0.2,outlier.colour = NA)+
+  #stat_dots(side="left", justification=1.2,color=NA)+
+  scale_fill_manual(name="Category", values=c("0"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
+  coord_flip() #+ ggtitle()
+
 
 # ######################
 # forestd0 <- forest[forest$D0==0 | forest$D0>50,]
