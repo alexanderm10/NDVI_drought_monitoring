@@ -353,13 +353,61 @@ plot_grid(p0,p1,p2,p3,p4)
 grow_merge <- grow_merge[grow_merge$percentage==0 | grow_merge$percentage>50,]
 grow_merge$severity[grow_merge$percentage==0] <- "0"
 grow_merge$percentage <- ""
-grow_merge <- na.omit(grow_merge)
+# grow_merge <- na.omit(grow_merge)
+grow_merge <- grow_merge[!is.na(grow_merge$deviation),]
 
 ggplot(data=grow_merge)+
   geom_boxplot(aes(x=percentage, y=deviation, fill=severity)) + xlab("0% or over 50%") +
   scale_fill_manual(name="Category", values=c("0"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
   facet_wrap(~type)+
   ylim(-0.2,0.2)
+
+######################
+#anova
+######################
+summary(grow_merge)
+grow_merge <- grow_merge[!is.na(grow_merge$yday),]
+# summary(grow_merge[!is.na(grow_merge$yday),])
+
+#grow_merge$severity <- as.factor(grow_merge$severity, levels=c("0", "D0", "D1", "D2", "D3"))
+anovUrbLow <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="urban-low",])
+anova(anovUrbLow)
+summary(anovUrbLow)
+
+anovcrop <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="crop",])
+anova(anovcrop)
+summary(anovcrop)
+
+anovForest <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="forest",])
+anova(anovForest)
+summary(anovForest)
+
+anovgrass <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="grassland",])
+anova(anovgrass)
+summary(anovgrass)
+
+anovurbmed <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="urban-medium",])
+anova(anovurbmed)
+summary(anovurbmed)
+
+anovurbhi <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="urban-high",])
+anova(anovurbhi)
+summary(anovurbhi)
+
+anovurbop <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="urban-open",])
+anova(anovurbop)
+summary(anovurbop)
+
+ library(nlme)
+anovForestLME <- lme(deviation~ severity, random=list(year=~1), data=grow_merge[grow_merge$type=="forest",])
+anova(anovForestLME)
+summary(anovForestLME)
+
+
+lmeAll <- lme(deviation~ severity, random=list(year=~1, type=~1), data=grow_merge)
+anova(lmeAll)
+summary(lmeAll)
+
 
 ######################
 #raincloud plot
