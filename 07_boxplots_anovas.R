@@ -1,0 +1,156 @@
+#boxplots, raincloud plots, anovas, etc.
+
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(cowplot)
+library(ggdist)
+
+Sys.setenv(GOOGLE_DRIVE = "~/Google Drive/Shared drives/Urban Ecological Drought")
+google.drive <- Sys.getenv("GOOGLE_DRIVE")
+path.google <- ("~/Google Drive/My Drive/")
+pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/figures/07_boxplots_anovas")
+
+######################
+
+usdmcat <- read.csv("~/Downloads/dm_export_20000101_20241017.csv") #usdm chicago region categorical data
+usdmcum <- read.csv("~/Downloads/dm_export_20000101_20241024.csv") #usdm chicago region cumulative data
+grow_norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/growing_season_norms.csv")) #normals
+growyrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/growing_season_yrs.csv")) #individual years
+
+######################
+#loop to add date and deviation column
+######################
+usdmcum$date <- as.Date(usdmcum$ValidStart)
+
+df <- data.frame()
+for (LC in unique(growyrs$type)){
+  datLC <- growyrs[growyrs$type==LC,]
+  
+  for (yr in unique(datLC$year)){
+    datyr <- datLC[datLC$year==yr,]
+    originyr <- yr - 1
+    origindate <- paste(originyr,12,31,sep="-")
+    datyr$date <- as.Date(datyr$yday, origin=origindate)
+    datyr$deviation <- datyr$mean - (grow_norms[grow_norms$type==LC,])$mean 
+    df <- rbind(df,datyr)
+  }
+}
+
+
+#grow_subset <- df[df$date %in% usdmcum$start,]
+
+grow_merge <- merge(x=df, y=usdmcum, by="date", all.x=F, all.y=T)
+
+grow_merge <- grow_merge %>% pivot_longer(cols = c(11:16), names_to = "severity", values_to = "percentage") #combining index columns
+
+
+######################
+#box plots 
+######################
+#grow_merge <- grow_merge[grow_merge$percentage==0 | grow_merge$percentage>50,]
+grow_merge <- grow_merge[grow_merge$percentage>50,]
+#grow_merge$severity[grow_merge$percentage==0] <- "0"
+grow_merge$percentage <- ""
+# grow_merge <- na.omit(grow_merge)
+grow_merge <- grow_merge[!is.na(grow_merge$deviation),]
+grow_merge$severity <- factor(grow_merge$severity, levels=c("None", "D0", "D1", "D2", "D3"))
+
+ggplot(data=grow_merge)+
+  geom_boxplot(aes(x=percentage, y=deviation, fill=severity)) + xlab("0% or over 50%") +
+  scale_fill_manual(name="Category", values=c("None"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
+  facet_wrap(~type)+
+  ylim(-0.2,0.2)
+
+######################
+#anova
+######################
+summary(grow_merge)
+grow_merge <- grow_merge[!is.na(grow_merge$yday),]
+# summary(grow_merge[!is.na(grow_merge$yday),])
+
+#grow_merge$severity <- as.factor(grow_merge$severity, levels=c("0", "D0", "D1", "D2", "D3"))
+anovUrbLow <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="urban-low",])
+anova(anovUrbLow)
+summary(anovUrbLow)
+urblow <- aov(anovUrbLow)
+
+anovcrop <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="crop",])
+summary(anovcrop)
+summary(crop)
+crop <- aov(anovcrop)
+
+anovForest <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="forest",])
+anova(anovForest)
+summary(anovForest)
+forest <- aov(anovForest)
+
+anovgrass <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="grassland",])
+anova(anovgrass)
+summary(anovgrass)
+grass <- aov(anovgrass)
+
+anovurbmed <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="urban-medium",])
+anova(anovurbmed)
+summary(anovurbmed)
+urbmed <- aov(anovurbmed)
+
+anovurbhi <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="urban-high",])
+anova(anovurbhi)
+summary(anovurbhi)
+urbhi <- aov(anovurbhi)
+
+anovurbop <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="urban-open",])
+anova(anovurbop)
+summary(anovurbop)
+urbop <- aov(anovurbop)
+
+######################
+#Tukey tests
+######################
+tukeycrop <- TukeyHSD(crop, conf.level=0.95)
+tukeyforest <- TukeyHSD(forest, conf.level=0.95)
+tukeygrass <- TukeyHSD(grass, conf.level=0.95)
+tukeyurblow <- TukeyHSD(urblow, conf.level=0.95)
+tukeyurbmed <- TukeyHSD(urbmed, conf.level=0.95)
+tukeyurbhi <- TukeyHSD(urbhi, conf.level=0.95)
+tukeyurbop <- TukeyHSD(urbop, conf.level=0.95)
+
+png("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/figures/07_boxplots_anovas/tukey_tests_drought_categories.png")
+par(mfrow=c(3,3), col.main="black", mar=c(5,5,4,2))
+plot(tukeycrop, las=1) + title(main ='crop', col.main="red",line=0.6)
+plot(tukeyforest, las=1) + title(main='forest',col.main="red",line=0.6)
+plot(tukeygrass, las=1) + title(main ='grassland',col.main="red",line=0.6)
+plot(tukeyurbhi, las=1) + title(main='urban-high', col.main="red",line=0.6)
+plot(tukeyurbmed, las=1) + title(main='urban-medium', col.main="red",line=0.6)
+plot(tukeyurblow, las=1) + title(main='urban-low', col.main="red",line=0.6)
+plot(tukeyurbop, las=1) + title(main='urban-open', col.main="red",line=0.6)
+dev.off()
+
+
+######################
+library(nlme)
+anovForestLME <- lme(deviation~ severity, random=list(year=~1), data=grow_merge[grow_merge$type=="forest",])
+anova(anovForestLME)
+summary(anovForestLME)
+
+
+lmeAll <- lme(deviation~ severity, random=list(year=~1, type=~1), data=grow_merge)
+anova(lmeAll)
+summary(lmeAll)
+
+######################
+#raincloud plot
+######################
+#grow_merge$severity <- as.factor(grow_merge$severity)
+
+ggplot(data=grow_merge, aes(x=severity, y=deviation, fill=severity))+
+  facet_wrap(~type)+
+  stat_halfeye(.width = 0,justification=-0.2) + ylim(-0.2,0.2)+ xlab("category")+ geom_boxplot(width=0.2,outlier.colour = NA)+
+  #stat_dots(side="left", justification=1.2,color=NA)+
+  scale_fill_manual(name="Category", values=c("None"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
+  coord_flip() #+ ggtitle()
+
+# ######################
