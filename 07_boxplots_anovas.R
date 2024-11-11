@@ -58,14 +58,23 @@ grow_merge$percentage <- ""
 grow_merge <- grow_merge[!is.na(grow_merge$deviation),]
 grow_merge$severity <- factor(grow_merge$severity, levels=c("None", "D0", "D1", "D2", "D3"))
 
-ggplot(data=grow_merge)+
+ggplot(data=grow_merge)+ #boxplots by drought category for each LC type
   geom_boxplot(aes(x=percentage, y=deviation, fill=severity)) + xlab("0% or over 50%") +
   scale_fill_manual(name="Category", values=c("None"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
   facet_wrap(~type)+
+  geom_hline(yintercept=0, linetype="dashed")+
+  ylim(-0.2,0.2)
+
+grow_merge$type <- factor(grow_merge$type, levels = c("crop", "forest", "grassland", "urban-high", "urban-medium", "urban-low", "urban-open"))
+ggplot(data=grow_merge) + xlab("≥ 50% coverage") + #boxplots by LC type for each drought category
+  geom_boxplot(aes(x=percentage, y=deviation, fill=type)) +
+  scale_fill_manual(name="Category", values=c("crop"="darkorange3", "forest"="darkgreen", "grassland"="navajowhite1","urban-high"="darkred", "urban-medium"="red", "urban-low"="indianred","urban-open"="lightpink3"))+
+  facet_wrap(~severity)+
+  geom_hline(yintercept=0, linetype="dashed")+
   ylim(-0.2,0.2)
 
 ######################
-#anova
+#anovas by LC type
 ######################
 summary(grow_merge)
 grow_merge <- grow_merge[!is.na(grow_merge$yday),]
@@ -108,7 +117,7 @@ summary(anovurbop)
 urbop <- aov(anovurbop)
 
 ######################
-#Tukey tests
+#Tukey tests by type
 ######################
 tukeycrop <- TukeyHSD(crop, conf.level=0.95)
 tukeyforest <- TukeyHSD(forest, conf.level=0.95)
@@ -129,12 +138,66 @@ plot(tukeyurblow, las=1) + title(main='urban-low', col.main="red",line=0.6)
 plot(tukeyurbop, las=1) + title(main='urban-open', col.main="red",line=0.6)
 dev.off()
 
+######################
+#anovas by drought category
+######################
+anovnone <- lm(deviation~ type -1, data=grow_merge[grow_merge$severity=="None",])
+anova(anovnone)
+summary(anovnone)
+none <- aov(anovnone)
+
+anovd0 <- lm(deviation~ type -1, data=grow_merge[grow_merge$severity=="D0",])
+anova(anovd0)
+summary(anovd0)
+d0 <- aov(anovd0)
+
+anovd1 <- lm(deviation~ type -1, data=grow_merge[grow_merge$severity=="D1",])
+anova(anovd1)
+summary(anovd1)
+d1 <- aov(anovd1)
+
+anovd2 <- lm(deviation~ type -1, data=grow_merge[grow_merge$severity=="D2",])
+anova(anovd2)
+summary(anovd2)
+d2 <- aov(anovd2)
+
+anovd3 <- lm(deviation~ type -1, data=grow_merge[grow_merge$severity=="D3",])
+anova(anovd3)
+summary(anovd3)
+d3 <- aov(anovd3)
 
 ######################
+#Tukey tests by drought category
+######################
+tukeynone <- TukeyHSD(none, conf.level = 0.95)
+tukeyd0 <- TukeyHSD(d0, conf.level = 0.95)
+tukeyd1 <- TukeyHSD(d1, conf.level = 0.95)
+tukeyd2 <- TukeyHSD(d2, conf.level = 0.95)
+tukeyd3 <- TukeyHSD(d3, conf.level = 0.95)
+
+par(mfrow=c(2,3), col.main="black", mar=c(4,10,4,5))
+plot(tukeynone, las=1) + title(main='none', col.main="red", line=0.6)
+plot(tukeyd0, las=1) + title(main ='D0', col.main="red",line=0.6)
+plot(tukeyd1, las=1) + title(main ='D1', col.main="red",line=0.6)
+plot(tukeyd2, las=1) + title(main ='D2', col.main="red",line=0.6)
+plot(tukeyd3, las=1) + title(main ='D3', col.main="red",line=0.6)
+
+######################
+#adding random effect of date
+######################
 library(nlme)
-anovForestLME <- lme(deviation~ severity, random=list(year=~1), data=grow_merge[grow_merge$type=="forest",])
-anova(anovForestLME)
-summary(anovForestLME)
+
+anovnoneLME <- lme(deviation~ type -1, random=list(date=~1),data=grow_merge[grow_merge$severity=="None",])
+anova.lme(anovnoneLME)
+summary(anovnoneLME)
+noneLME <- anova.lme(anovnoneLME)
+
+TukeyHSD(noneLME, conf.level = 0.95)
+
+
+#anovForestLME <- lme(deviation~ severity, random=list(year=~1), data=grow_merge[grow_merge$type=="forest",])
+#anova(anovForestLME)
+#summary(anovForestLME)
 
 
 lmeAll <- lme(deviation~ severity, random=list(year=~1, type=~1), data=grow_merge)
@@ -153,4 +216,15 @@ ggplot(data=grow_merge, aes(x=severity, y=deviation, fill=severity))+
   scale_fill_manual(name="Category", values=c("None"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
   coord_flip() #+ ggtitle()
 
-# ######################
+######################
+#ridgeline plot
+######################
+library(ggridges)
+ggplot(data=grow_merge, aes(x=deviation, y=type, fill=type))+
+  facet_wrap(~severity)+
+  geom_density_ridges()+
+  scale_fill_manual(name="Category", values=c("crop"="darkorange3", "forest"="darkgreen", "grassland"="navajowhite1","urban-high"="darkred", "urban-medium"="red", "urban-low"="indianred","urban-open"="lightpink3"))+
+  xlim(-0.2,0.2)+
+  geom_vline(xintercept=0,linetype="dashed")+
+  scale_y_discrete(limits=rev)
+  
