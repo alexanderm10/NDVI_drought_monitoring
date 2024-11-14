@@ -1,4 +1,4 @@
-#boxplots, raincloud plots, anovas, etc for DERIVATIVES.
+#calculate growing season dates for DERIVATIVES.
 
 library(ggplot2)
 library(tidyr)
