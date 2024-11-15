@@ -1,4 +1,4 @@
-#histograms/misc NDVI plots
+#histograms/misc. NDVI plots
 
 library(ggplot2)
 library(tidyr)
@@ -10,7 +10,7 @@ library(cowplot)
 Sys.setenv(GOOGLE_DRIVE = "~/Google Drive/Shared drives/Urban Ecological Drought")
 google.drive <- Sys.getenv("GOOGLE_DRIVE")
 path.google <- ("~/Google Drive/My Drive/")
-pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/figures/06_scatterplots_usdm_deviation_growing_season")
+pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/figures/08_histograms_NDVI")
 
 ######################
 usdmcum <- read.csv("~/Downloads/dm_export_20000101_20241024.csv") #usdm chicago region cumulative data
@@ -27,25 +27,25 @@ growyrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/growin
 ######################
 #all time cumulative
 ######################
-usdm <- usdmcum[usdmcum$percentage>50,]
+usdm <- usdmcum[usdmcum$percentage>50,] #filter data to show more than 50% area coverage 
 
 for (level in unique(usdm$severity)){
-  df <- usdm[usdm$severity==level,]
+  df <- usdm[usdm$severity==level,] #filter data by drought category and order by date ascending
   df <- arrange(df, date)
-  df$consecutive <- c(NA, diff(df$date)==7)
-  x <- rle(df$consecutive)
-  x <- x$lengths[x$values==TRUE]
-  x <- x[!is.na(x)]
-  x <- sequence(x)
-  x <- data.frame(x)
-  x$category <- paste0("",level)
+  df$consecutive <- c(NA, diff(df$date)==7) #marking consecutive weeks as TRUE
+  x <- rle(df$consecutive) #finding length of values in a row
+  x <- x$lengths[x$values==TRUE] #finding lengths of only TRUE values/the consecutive ones
+  x <- x[!is.na(x)] #remove NA
+  x <- sequence(x) #order lengths as a sequence of values including all values below it
+  x <- data.frame(x) #turn into df
+  x$category <- paste0("",level) #save as separate dfs
   assign(paste0("df",level),x)
 }
 
-df <- rbind(dfD0, dfD1, dfD2,dfD3)
+df <- rbind(dfD0, dfD1, dfD2,dfD3) #save again as a combined df
 df$category <- as.factor(df$category)
 
-ggplot(data=df, aes(x=x,fill=category)) +
+ggplot(data=df, aes(x=x,fill=category)) + #plot for the full date range of cumulative USDM data
   geom_histogram(bins=52) + ylab("frequency") + xlab("consecutive weeks in drought")+
   ggtitle("Cumulative full data range")+
   scale_fill_manual(name="Category", values=c("D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))
@@ -78,10 +78,10 @@ grow <- grow_merge[grow_merge$percentage>50,]
 
 grow <- (grow[!is.na(grow$yday),])
 
-for (level in unique(grow$severity)){
+for (level in unique(grow$severity)){ #repeating loop process for dates within determined growing season of ANY lc type
   df <- grow[grow$severity==level,]
   df <- arrange(df, date)
-  df <- distinct(df, date, .keel_all=TRUE)
+  df <- distinct(df, date, .keep_all=TRUE) #use this to sort through repeat dates
   df$consecutive <- c(NA, diff(df$date)==7)
   x <- rle(df$consecutive)
   x <- x$lengths[x$values==TRUE]
@@ -95,7 +95,7 @@ for (level in unique(grow$severity)){
 df <- rbind(dfD0, dfD1, dfD2,dfD3)
 df$category <- as.factor(df$category)
 
-ggplot(data=df, aes(x=x,fill=category)) +
+ggplot(data=df, aes(x=x,fill=category)) + #cumulative consecutive weeks in drought for growing season
   geom_histogram(bins=23) + ylab("frequency") + xlab("consecutive weeks in drought")+
   ggtitle("Cumulative growing season")+
   scale_fill_manual(name="Category", values=c("D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))
@@ -123,7 +123,7 @@ for (level in unique(usdm$severity)){
 df <- rbind(dfD0, dfD1, dfD2,dfD3)
 df$category <- as.factor(df$category)
 
-ggplot(data=df, aes(x=x,fill=category)) +
+ggplot(data=df, aes(x=x,fill=category)) + #categorical full range data
   geom_histogram(bins=11) + ylab("frequency") + xlab("consecutive weeks in drought")+
   ggtitle("Categorical full data range")+
   scale_fill_manual(name="Category", values=c("D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))
@@ -160,7 +160,7 @@ grow <- (grow[!is.na(grow$yday),])
 for (level in unique(grow$severity)){
   df <- grow[grow$severity==level,]
   df <- arrange(df, date)
-  df <- distinct(df, date, .keel_all=TRUE)
+  df <- distinct(df, date, .keep_all=TRUE)
   df$consecutive <- c(NA, diff(df$date)==7)
   x <- rle(df$consecutive)
   x <- x$lengths[x$values==TRUE]
@@ -174,7 +174,7 @@ for (level in unique(grow$severity)){
 df <- rbind(dfD0, dfD1, dfD2,dfD3)
 df$category <- as.factor(df$category)
 
-ggplot(data=df, aes(x=x,fill=category)) +
+ggplot(data=df, aes(x=x,fill=category)) + #growing season categorical
   geom_histogram(bins=8) + ylab("frequency") + xlab("consecutive weeks in drought")+
   ggtitle("Categorical growing season")+
   scale_fill_manual(name="Category", values=c("D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))
