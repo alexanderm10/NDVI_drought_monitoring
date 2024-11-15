@@ -59,16 +59,16 @@ grow_merge <- grow_merge[!is.na(grow_merge$deviation),]
 grow_merge$severity <- factor(grow_merge$severity, levels=c("None", "D0", "D1", "D2", "D3"))
 
 ggplot(data=grow_merge)+ #boxplots by drought category for each LC type
-  geom_boxplot(aes(x=percentage, y=deviation, fill=severity)) + xlab("0% or over 50%") +
+  geom_boxplot(aes(x=percentage, y=deviation, fill=severity)) + xlab("> 50% coverage") +
   scale_fill_manual(name="Category", values=c("None"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
   facet_wrap(~type)+
   geom_hline(yintercept=0, linetype="dashed")+
   ylim(-0.2,0.2)
 
-grow_merge$type <- factor(grow_merge$type, levels = c("crop", "forest", "grassland", "urban-high", "urban-medium", "urban-low", "urban-open"))
-ggplot(data=grow_merge) + xlab("≥ 50% coverage") + #boxplots by LC type for each drought category
+grow_merge$type <- factor(grow_merge$type, levels = c("crop", "forest", "grassland", "urban-open", "urban-low", "urban-medium", "urban-high"))
+ggplot(data=grow_merge) + xlab("> 50% coverage") + #boxplots by LC type for each drought category
   geom_boxplot(aes(x=percentage, y=deviation, fill=type)) +
-  scale_fill_manual(name="Category", values=c("crop"="darkorange3", "forest"="darkgreen", "grassland"="navajowhite1","urban-high"="darkred", "urban-medium"="red", "urban-low"="indianred","urban-open"="lightpink3"))+
+  scale_fill_manual(name="Type", values=c("crop"="darkorange3", "forest"="darkgreen", "grassland"="navajowhite1","urban-high"="darkred", "urban-medium"="red", "urban-low"="indianred","urban-open"="lightpink3"))+
   facet_wrap(~severity)+
   geom_hline(yintercept=0, linetype="dashed")+
   ylim(-0.2,0.2)
@@ -132,10 +132,10 @@ par(mfrow=c(3,3), col.main="black", mar=c(5,5,4,2))
 plot(tukeycrop, las=1) + title(main ='crop', col.main="red",line=0.6)
 plot(tukeyforest, las=1) + title(main='forest',col.main="red",line=0.6)
 plot(tukeygrass, las=1) + title(main ='grassland',col.main="red",line=0.6)
-plot(tukeyurbhi, las=1) + title(main='urban-high', col.main="red",line=0.6)
-plot(tukeyurbmed, las=1) + title(main='urban-medium', col.main="red",line=0.6)
-plot(tukeyurblow, las=1) + title(main='urban-low', col.main="red",line=0.6)
 plot(tukeyurbop, las=1) + title(main='urban-open', col.main="red",line=0.6)
+plot(tukeyurblow, las=1) + title(main='urban-low', col.main="red",line=0.6)
+plot(tukeyurbmed, las=1) + title(main='urban-medium', col.main="red",line=0.6)
+plot(tukeyurbhi, las=1) + title(main='urban-high', col.main="red",line=0.6)
 dev.off()
 
 ######################
@@ -175,13 +175,13 @@ tukeyd1 <- TukeyHSD(d1, conf.level = 0.95)
 tukeyd2 <- TukeyHSD(d2, conf.level = 0.95)
 tukeyd3 <- TukeyHSD(d3, conf.level = 0.95)
 
-par(mfrow=c(2,3), col.main="black", mar=c(4,10,4,5))
+par(mfrow=c(2,3), col.main="black", mar=c(4,12,4,4))
 plot(tukeynone, las=1) + title(main='none', col.main="red", line=0.6)
 plot(tukeyd0, las=1) + title(main ='D0', col.main="red",line=0.6)
 plot(tukeyd1, las=1) + title(main ='D1', col.main="red",line=0.6)
 plot(tukeyd2, las=1) + title(main ='D2', col.main="red",line=0.6)
 plot(tukeyd3, las=1) + title(main ='D3', col.main="red",line=0.6)
-
+dev.off()
 ######################
 #adding random effect of date
 ######################
@@ -223,7 +223,7 @@ library(ggridges)
 ggplot(data=grow_merge, aes(x=deviation, y=type, fill=type))+
   facet_wrap(~severity)+
   geom_density_ridges()+
-  scale_fill_manual(name="Category", values=c("crop"="darkorange3", "forest"="darkgreen", "grassland"="navajowhite1","urban-high"="darkred", "urban-medium"="red", "urban-low"="indianred","urban-open"="lightpink3"))+
+  scale_fill_manual(name="Type", values=c("crop"="darkorange3", "forest"="darkgreen", "grassland"="navajowhite1","urban-high"="darkred", "urban-medium"="red", "urban-low"="indianred","urban-open"="lightpink3"))+
   xlim(-0.2,0.2)+
   geom_vline(xintercept=0,linetype="dashed")+
   scale_y_discrete(limits=rev)
