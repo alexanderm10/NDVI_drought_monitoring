@@ -179,3 +179,53 @@ ggplot(data=df, aes(x=x,fill=category)) + #growing season categorical
   ggtitle("Categorical growing season")+
   scale_fill_manual(name="Category", values=c("D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))
 # + ylim(0,40) + xlim(0,55)
+
+######################
+#time spent in drought boxplots
+######################
+usdmcum <- read.csv("~/Downloads/dm_export_20000101_20241024.csv") #usdm chicago region cumulative data
+usdmcum$date <- as.Date(usdmcum$ValidStart)
+
+growyrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/growing_season_yrs.csv")) #individual years
+grow_norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/growing_season_norms.csv")) #normals
+
+df <- data.frame()
+for (LC in unique(growyrs$type)){
+  datLC <- growyrs[growyrs$type==LC,]
+  
+  for (yr in unique(datLC$year)){
+    datyr <- datLC[datLC$year==yr,]
+    originyr <- yr - 1
+    origindate <- paste(originyr,12,31,sep="-")
+    datyr$date <- as.Date(datyr$yday, origin=origindate)
+    datyr$deviation <- datyr$mean - (grow_norms[grow_norms$type==LC,])$mean 
+    df <- rbind(df,datyr)
+  }
+}
+
+grow_merge <- merge(x=df, y=usdmcum, by="date", all.x=F, all.y=T)
+
+grow_merge <- grow_merge %>% pivot_longer(cols = c(12:16), names_to = "severity", values_to = "percentage") #combining index columns
+
+grow <- grow_merge[grow_merge$percentage>50,]
+
+grow <- (grow[!is.na(grow$yday),])
+
+weeks <- data.frame()
+for (LC in unique(grow$type)){
+  df <- grow[grow$type==LC & grow$severity=="D3",]
+  df <- distinct(df, date, .keep_all=TRUE)
+  df$consecutive <- c(NA,diff(df$date)==7)
+  x <- rle(df$consecutive)
+  df$count <- sequence(x$lengths)
+  df <- df[df$consecutive==TRUE,]
+  df$count <- df$count + 1
+  df <- df[!is.na(df$count),]
+  weeks <- rbind(weeks,df)
+}
+
+weeks$type <- factor(weeks$type, levels = c("crop", "forest", "grassland", "urban-open", "urban-low", "urban-medium", "urban-high"))
+
+ggplot(data=weeks)+ ggtitle("Consecutive weeks in D3+")+
+  facet_wrap(~type)+ xlab("consecutive weeks in drought") +
+  geom_boxplot(aes(x=count,y=deviation, group = count)) + ylim(-0.15,0.15)
