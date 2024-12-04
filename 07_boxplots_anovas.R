@@ -63,7 +63,7 @@ ggplot(data=grow_merge)+ #boxplots by drought category for each LC type
   scale_fill_manual(name="Category", values=c("None"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
   facet_wrap(~type)+
   geom_hline(yintercept=0, linetype="dashed")+
-  ylim(-0.2,0.2)
+  ylim(-0.2,0.2) + theme_bw()
 
 grow_merge$type <- factor(grow_merge$type, levels = c("crop", "forest", "grassland", "urban-open", "urban-low", "urban-medium", "urban-high"))
 ggplot(data=grow_merge) + xlab("> 50% coverage") + #boxplots by LC type for each drought category
