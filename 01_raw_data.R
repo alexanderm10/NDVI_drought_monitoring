@@ -27,7 +27,7 @@ summary(ndvi.latest)
 
 ndvicrop=ndvi.latest[ndvi.latest$type=="crop",]
 
-gamcrop <- gam(NDVI ~ s(yday, k=18, by=mission) + mission-1, data=ndvicrop) #k=1.5 months in a year
+gamcrop <- gam(NDVI ~ s(yday, k=12, by=mission) + mission-1, data=ndvicrop) #k=1.5 months in a year
 summary(gamcrop)
 AIC(gamcrop)
 
@@ -49,7 +49,7 @@ summary(ndvicrop)
 
 ndviforest=ndvi.latest[ndvi.latest$type=="forest",]
 
-gamforest <- gam(NDVI ~ s(yday, k=18, by=mission) + mission-1, data=ndviforest) #k=1.5 months in a year
+gamforest <- gam(NDVI ~ s(yday, k=12, by=mission) + mission-1, data=ndviforest) #k=1.5 months in a year
 summary(gamforest)
 AIC(gamforest)
 
@@ -70,7 +70,7 @@ summary(ndviforest)
 
 ndvigrass <- ndvi.latest[ndvi.latest$type=="grassland",]
 
-gamgrass <- gam(NDVI ~ s(yday, k=18, by=mission) + mission-1, data=ndvigrass)
+gamgrass <- gam(NDVI ~ s(yday, k=12, by=mission) + mission-1, data=ndvigrass)
 summary(gamgrass)
 AIC(gamgrass)
 
@@ -91,7 +91,7 @@ summary(ndvigrass)
 
 ndviUrbHigh <- ndvi.latest[ndvi.latest$type=="urban-high",]
 
-gamUrbHigh <- gam(NDVI ~ s(yday, k=18, by=mission) + mission-1, data=ndviUrbHigh)
+gamUrbHigh <- gam(NDVI ~ s(yday, k=12, by=mission) + mission-1, data=ndviUrbHigh)
 summary(gamUrbHigh)
 AIC(gamUrbHigh)
 
@@ -112,7 +112,7 @@ summary(ndviUrbHigh)
 
 ndviUrbMed <- ndvi.latest[ndvi.latest$type=="urban-medium",]
 
-gamUrbMed <- gam(NDVI ~ s(yday, k=18, by=mission) + mission-1, data=ndviUrbMed)
+gamUrbMed <- gam(NDVI ~ s(yday, k=12, by=mission) + mission-1, data=ndviUrbMed)
 summary(gamUrbMed)
 AIC(gamUrbMed)
 
@@ -133,7 +133,7 @@ summary(ndviUrbMed)
 
 ndviUrbLow <- ndvi.latest[ndvi.latest$type=="urban-low",]
 
-gamUrbLow <- gam(NDVI ~ s(yday, k=18, by=mission) + mission-1, data=ndviUrbLow)
+gamUrbLow <- gam(NDVI ~ s(yday, k=12, by=mission) + mission-1, data=ndviUrbLow)
 summary(gamUrbLow)
 AIC(gamUrbLow)
 
@@ -154,7 +154,7 @@ summary(ndviUrbLow)
 
 ndviUrbOpen <- ndvi.latest[ndvi.latest$type=="urban-open",]
 
-gamUrbOpen <- gam(NDVI ~ s(yday, k=18, by=mission) + mission-1, data=ndviUrbOpen)
+gamUrbOpen <- gam(NDVI ~ s(yday, k=12, by=mission) + mission-1, data=ndviUrbOpen)
 summary(gamUrbOpen)
 AIC(gamUrbOpen)
 
@@ -174,6 +174,6 @@ summary(ndviUrbOpen)
 ######################
 
 raw_data <- rbind(ndvicrop, ndviforest, ndvigrass, ndviUrbHigh, ndviUrbMed, ndviUrbLow, ndviUrbOpen)
-write.csv(raw_data, file.path(pathShare, "raw_data.csv"), row.names=F)
+write.csv(raw_data, file.path(pathShare, "raw_data_k=12.csv"), row.names=F)
 
 ######################
