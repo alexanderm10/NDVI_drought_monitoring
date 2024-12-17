@@ -16,9 +16,10 @@ pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/d
 ######################
 
 usdmcat <- read.csv("~/Downloads/dm_export_20000101_20241017.csv") #usdm chicago region categorical data
-usdmcum <- read.csv("~/Downloads/dm_export_20000101_20241024.csv") #usdm chicago region cumulative data
-grow_norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/growing_season_norms.csv")) #normals
-growyrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/growing_season_yrs.csv")) #individual years
+#usdmcum <- read.csv("~/Downloads/dm_export_20000101_20241024.csv") #usdm chicago region cumulative data
+usdmcum <- read.csv("~/Downloads/dm_export_20000101_20241217.csv") #usdm chicago region cumulative data
+grow_norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_growing_season_norms.csv")) #normals
+growyrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_growing_season_yrs.csv")) #individual years
 
 ######################
 #loop to add date and deviation column
@@ -71,7 +72,7 @@ ggplot(data=grow_merge) + xlab("> 50% coverage") + #boxplots by LC type for each
   scale_fill_manual(name="Type", values=c("crop"="darkorange3", "forest"="darkgreen", "grassland"="navajowhite1","urban-high"="darkred", "urban-medium"="red", "urban-low"="indianred","urban-open"="lightpink3"))+
   facet_wrap(~severity)+
   geom_hline(yintercept=0, linetype="dashed")+
-  ylim(-0.2,0.2)
+  ylim(-0.2,0.2) + theme_bw()
 
 ######################
 #anovas by LC type
@@ -87,8 +88,8 @@ summary(anovUrbLow)
 urblow <- aov(anovUrbLow)
 
 anovcrop <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="crop",])
+anova(anovcrop)
 summary(anovcrop)
-summary(crop)
 crop <- aov(anovcrop)
 
 anovForest <- lm(deviation~ severity, data=grow_merge[grow_merge$type=="forest",])
