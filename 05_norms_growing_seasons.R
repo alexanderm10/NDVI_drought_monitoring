@@ -13,8 +13,8 @@ pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/d
 ######################
 #usdmcat <- read.csv("~/Downloads/dm_export_20000101_20241017.csv") #usdm chicago region categorical data
 #usdmcum <- read.csv("~/Downloads/dm_export_20000101_20241024.csv") #usdm chicago region cumulative data
-yrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/individual_years_post_GAM.csv")) #individual years
-norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/norms_all_LC_types.csv")) #normals
+yrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_individual_years_post_GAM.csv")) #individual years
+norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_norms_all_LC_types.csv")) #normals
 
 ######################
 #loops to find growing season
@@ -24,9 +24,9 @@ norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/norms_all
 #find 95% of upper max --> end of growing season
 
 for (LC in unique(norms$type)){
-  if (LC=="urban-high"){                 #doing urban-high out of loop b/c too wiggly
-    next
-  }
+  #if (LC=="urban-high"){                 #doing urban-high out of loop b/c too wiggly
+    #next
+  #}
   df <- norms[norms$type==LC,] #subset normal data
   
   LCmax <- max(df$mean) #max mean NDVI
@@ -52,32 +52,32 @@ for (LC in unique(norms$type)){
 #doing urban-high separately since it's a bit funky
 ######################
 
-urbhigh <- norms[norms$type=="urban-high",]
+#urbhigh <- norms[norms$type=="urban-high",]
 
-maxmin <- local.min.max(urbhigh$mean) #this function finds local max & min
-localmax <- maxmin$maxima[3] #this is the local maximum we are basing the threshold off of
+#maxmin <- local.min.max(urbhigh$mean) #this function finds local max & min
+#localmax <- maxmin$maxima[3] #this is the local maximum we are basing the threshold off of
 
-maxday <- urbhigh[urbhigh$mean==localmax,"yday"]
-localminday <- urbhigh[urbhigh$mean==maxmin$minima[3],"yday"]
+#maxday <- urbhigh[urbhigh$mean==localmax,"yday"]
+#localminday <- urbhigh[urbhigh$mean==maxmin$minima[3],"yday"]
 
-urbhigh_min <- min(urbhigh$mean)
-minday <- urbhigh[urbhigh$mean==urbhigh_min, "yday"]
+#urbhigh_min <- min(urbhigh$mean)
+#minday <- urbhigh[urbhigh$mean==urbhigh_min, "yday"]
 
-lower_thresh <- (localmax-urbhigh_min)*.15 + urbhigh_min
-upper_thresh <- .95*localmax
+#lower_thresh <- (localmax-urbhigh_min)*.15 + urbhigh_min
+#upper_thresh <- .95*localmax
 
-urbstart <- urbhigh[urbhigh$yday>=minday & urbhigh$yday<=maxday,]
-season_start <- urbstart[which.min(abs(urbstart$mean-lower_thresh)),"yday"]
-urbend <- urbhigh[urbhigh$yday>=maxday & urbhigh$yday<=localminday,]
-season_end <- urbend[which.min(abs(urbend$mean-upper_thresh)),"yday"]
-urban_high_grow <- urbhigh[urbhigh$yday >= season_start & urbhigh$yday <= season_end,]
+#urbstart <- urbhigh[urbhigh$yday>=minday & urbhigh$yday<=maxday,]
+#season_start <- urbstart[which.min(abs(urbstart$mean-lower_thresh)),"yday"]
+#urbend <- urbhigh[urbhigh$yday>=maxday & urbhigh$yday<=localminday,]
+#season_end <- urbend[which.min(abs(urbend$mean-upper_thresh)),"yday"]
+#urban_high_grow <- urbhigh[urbhigh$yday >= season_start & urbhigh$yday <= season_end,]
 
 ######################
 #saving as separate df
 ######################
 
-grow_norms <- rbind(growcrop, growforest, growgrassland, `growurban-low`, `growurban-medium`, `growurban-open`, urban_high_grow)
-write.csv(grow_norms, file.path(pathShare, "growing_season_norms.csv"), row.names =F)
+grow_norms <- rbind(growcrop, growforest, growgrassland, `growurban-low`, `growurban-medium`, `growurban-open`, `growurban-high`)
+write.csv(grow_norms, file.path(pathShare, "k=12_growing_season_norms.csv"), row.names =F)
 
 ######################
 #loop to make a dataset of growing season for the years dataset
@@ -92,6 +92,6 @@ for (LC in unique(yrs$type)){
 }
 
 growyrs <- rbind(growyrscrop, growyrsforest, growyrsgrassland, growyrsurbanlow, growyrsurbanmedium, growyrsurbanopen, growyrsurbanhigh)
-write.csv(growyrs, file.path(pathShare, "growing_season_yrs.csv"), row.names=F)
+write.csv(growyrs, file.path(pathShare, "k=12_growing_season_yrs.csv"), row.names=F)
 
 ######################
