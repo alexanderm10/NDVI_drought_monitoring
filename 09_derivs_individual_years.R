@@ -16,7 +16,7 @@ source("~/Documents/GitHub/NDVI_drought_monitoring/0_Calculate_GAMM_Derivs_Copy.
 #loading in raw data from 01_raw_data.R
 ######################
 
-raw.data <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data.csv"))
+raw.data <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data_k=12.csv"))
 newDF <- data.frame(yday=seq(1:365)) #create new data frame to predict over
 
 dat24 <- raw.data[raw.data$year==2024,] #subset for curent yr
@@ -35,9 +35,9 @@ for (LC in unique(raw.data$type)){
     datyr <- datLC[datLC$year==yr,]
     
     if(yr==2024){
-      gamyr <- gam(NDVIReprojected ~ s(yday, k=nmonths*1.5), data=datyr)
+      gamyr <- gam(NDVIReprojected ~ s(yday, k=nmonths), data=datyr)
     }else{
-      gamyr <- gam(NDVIReprojected ~ s(yday, k=18), data=datyr)
+      gamyr <- gam(NDVIReprojected ~ s(yday, k=12), data=datyr)
     }
     
     #gampred <- predict(gamyr, newdata=newDF)
@@ -50,6 +50,6 @@ for (LC in unique(raw.data$type)){
   }
 }
 
-write.csv(df, file.path(pathShare, "individual_years_derivs_GAM.csv"), row.names=F) #save file
+write.csv(df, file.path(pathShare, "k=12_individual_years_derivs_GAM.csv"), row.names=F) #save file
 
 ######################
