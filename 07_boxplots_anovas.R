@@ -75,6 +75,71 @@ ggplot(data=grow_merge) + xlab("> 50% coverage") + #boxplots by LC type for each
   ylim(-0.2,0.2) + theme_bw()
 
 ######################
+#tukey matrix function https://rdrr.io/github/PhilippJanitza/rootdetectR/man/tukey_to_matrix.html
+######################
+
+tukey_to_matrix <- function(tukeyHSD_output) {
+  if (!is.data.frame(tukeyHSD_output)) {
+    tukeyHSD_output <- as.data.frame(tukeyHSD_output)
+  }
+  
+  temp <- data.frame(name = rownames(tukeyHSD_output), p.val = tukeyHSD_output$`p adj`)
+  
+  temp_new <- tidyr::separate(temp, "name", into = c("V1", "V2"), sep = "-")
+  labs <- sort(unique(c(temp_new$V1, temp_new$V2)))
+  nr_labs <- length(labs)
+  # create empty matrix
+  mat <- matrix(NA, nrow = nr_labs, ncol = nr_labs)
+  colnames(mat) <- labs
+  rownames(mat) <- labs
+  
+  
+  for (j in 1:(nr_labs - 1)) {
+    for (k in (j + 1):nr_labs) {
+      # get p-values and put them into the matrix
+      idx <- which(paste(labs[j], "-", labs[k], sep = "") == temp$name)
+      if (length(idx) == 0) {
+        idx <- which(paste(labs[k], "-", labs[j], sep = "") == temp$name)
+      }
+      if (length(idx) != 0) {
+        mat[j, k] <- temp[idx, 2]
+      }
+    }
+  }
+  return(mat)
+}
+
+######################
+#tukey significance letters https://rdrr.io/github/PhilippJanitza/rootdetectR/man/tukey_to_matrix.html
+######################
+
+get_sig_letters <- function(tukmatrix) {
+  # get Letters for twofacaov output
+  mat_names <- character()
+  mat_values <- numeric()
+  # loop over matrix and get names + values
+  for (j in 1:(length(row.names(tukmatrix)) - 1)) {
+    for (k in (j + 1):length(colnames(tukmatrix))) {
+      v <- tukmatrix[j, k]
+      t <- paste(row.names(tukmatrix)[j],
+                 colnames(tukmatrix)[k],
+                 sep = "-"
+      )
+      mat_names <- c(mat_names, t)
+      mat_values <- c(mat_values, v)
+    }
+  }
+  
+  # combine names + values
+  names(mat_values) <- mat_names
+  # get df with letters and replace : with label delim!!
+  letters <-
+    data.frame(multcompView::multcompLetters(mat_values)["Letters"])
+  
+  return(letters)
+}
+
+######################
 #anovas by LC type
 ######################
 summary(grow_merge)
