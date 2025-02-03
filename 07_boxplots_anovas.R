@@ -15,9 +15,10 @@ pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/d
 
 ######################
 
-usdmcat <- read.csv("~/Downloads/dm_export_20000101_20241017.csv") #usdm chicago region categorical data
+usdmcat <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/categorical_dm_export_20000101_20241219.csv")) #usdm chicago region categorical data
+#usdmcat <- read.csv("~/Downloads/dm_export_20000101_20241017.csv") #usdm chicago region categorical data
 #usdmcum <- read.csv("~/Downloads/dm_export_20000101_20241024.csv") #usdm chicago region cumulative data
-usdmcum <- read.csv("~/Downloads/dm_export_20000101_20241217.csv") #usdm chicago region cumulative data
+usdmcum <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/cumulative_dm_export_20000101_20241217.csv")) #usdm chicago region cumulative data
 grow_norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_growing_season_norms.csv")) #normals
 growyrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_growing_season_yrs.csv")) #individual years
 
@@ -59,13 +60,16 @@ grow_merge$percentage <- ""
 grow_merge <- grow_merge[!is.na(grow_merge$deviation),]
 grow_merge$severity <- factor(grow_merge$severity, levels=c("None", "D0", "D1", "D2", "D3"))
 
+png("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/figures/k=12_boxplots_redo/k=12_drought_category_deviations_box.png", height=6, width=12, units="in", res=320)
 ggplot(data=grow_merge)+ #boxplots by drought category for each LC type
   geom_boxplot(aes(x=percentage, y=deviation, fill=severity)) + xlab("> 50% coverage") +
   scale_fill_manual(name="Category", values=c("None"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
   facet_wrap(~type)+
   geom_hline(yintercept=0, linetype="dashed")+
   ylim(-0.2,0.2) + theme_bw()
+dev.off()
 
+png("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/figures/k=12_boxplots_redo/k=12_deviation_LCtype_redo.png", height=6, width=12, units="in", res=320)
 grow_merge$type <- factor(grow_merge$type, levels = c("crop", "forest", "grassland", "urban-open", "urban-low", "urban-medium", "urban-high"))
 ggplot(data=grow_merge) + xlab("> 50% coverage") + #boxplots by LC type for each drought category
   geom_boxplot(aes(x=percentage, y=deviation, fill=type)) +
@@ -73,6 +77,7 @@ ggplot(data=grow_merge) + xlab("> 50% coverage") + #boxplots by LC type for each
   facet_wrap(~severity)+
   geom_hline(yintercept=0, linetype="dashed")+
   ylim(-0.2,0.2) + theme_bw()
+dev.off()
 
 ######################
 #tukey matrix function https://rdrr.io/github/PhilippJanitza/rootdetectR/man/tukey_to_matrix.html
@@ -193,7 +198,7 @@ tukeyurbmed <- TukeyHSD(urbmed, conf.level=0.95)
 tukeyurbhi <- TukeyHSD(urbhi, conf.level=0.95)
 tukeyurbop <- TukeyHSD(urbop, conf.level=0.95)
 
-png("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/figures/07_boxplots_anovas/tukey_tests_drought_categories.png")
+png("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/figures/k=12_boxplots_redo/k=12_tukey_category.png",height=6, width=6, units="in", res=320)
 par(mfrow=c(3,3), col.main="black", mar=c(5,5,4,2))
 plot(tukeycrop, las=1) + title(main ='crop', col.main="red",line=0.6)
 plot(tukeyforest, las=1) + title(main='forest',col.main="red",line=0.6)
@@ -241,6 +246,7 @@ tukeyd1 <- TukeyHSD(d1, conf.level = 0.95)
 tukeyd2 <- TukeyHSD(d2, conf.level = 0.95)
 tukeyd3 <- TukeyHSD(d3, conf.level = 0.95)
 
+png("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/figures/k=12_boxplots_redo/k=12_tukey_LC.png",height=6, width=12, units="in", res=320)
 par(mfrow=c(2,3), col.main="black", mar=c(4,12,4,4))
 plot(tukeynone, las=1) + title(main='none', col.main="red", line=0.6)
 plot(tukeyd0, las=1) + title(main ='D0', col.main="red",line=0.6)
@@ -251,41 +257,37 @@ dev.off()
 ######################
 #adding random effect of date
 ######################
-library(nlme)
 
-anovnoneLME <- lme(deviation~ type -1, random=list(date=~1),data=grow_merge[grow_merge$severity=="None",])
-anova.lme(anovnoneLME)
-summary(anovnoneLME)
-noneLME <- anova.lme(anovnoneLME)
-
-TukeyHSD(noneLME, conf.level = 0.95)
-
-
-#anovForestLME <- lme(deviation~ severity, random=list(year=~1), data=grow_merge[grow_merge$type=="forest",])
-#anova(anovForestLME)
-#summary(anovForestLME)
-
-
-lmeAll <- lme(deviation~ severity, random=list(year=~1, type=~1), data=grow_merge)
-anova(lmeAll)
-summary(lmeAll)
+# library(nlme)
+# anovnoneLME <- lme(deviation~ type -1, random=list(date=~1),data=grow_merge[grow_merge$severity=="None",])
+# anova.lme(anovnoneLME)
+# summary(anovnoneLME)
+# noneLME <- anova.lme(anovnoneLME)
+# TukeyHSD(noneLME, conf.level = 0.95)
+# #anovForestLME <- lme(deviation~ severity, random=list(year=~1), data=grow_merge[grow_merge$type=="forest",])
+# #anova(anovForestLME)
+# #summary(anovForestLME)
+# lmeAll <- lme(deviation~ severity, random=list(year=~1, type=~1), data=grow_merge)
+# anova(lmeAll)
+# summary(lmeAll)
 
 ######################
 #raincloud plot
 ######################
 #grow_merge$severity <- as.factor(grow_merge$severity)
-
+png("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/figures/k=12_boxplots_redo/k=12_raincloud_LCtype.png",height=6, width=12, units="in", res=320)
 ggplot(data=grow_merge, aes(x=severity, y=deviation, fill=severity))+
   facet_wrap(~type)+
   stat_halfeye(.width = 0,justification=-0.2) + ylim(-0.2,0.2)+ xlab("category")+ geom_boxplot(width=0.2,outlier.colour = NA)+
   #stat_dots(side="left", justification=1.2,color=NA)+
   scale_fill_manual(name="Category", values=c("None"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
   coord_flip() #+ ggtitle()
-
+dev.off()
 ######################
 #ridgeline plot
 ######################
 library(ggridges)
+png("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/figures/k=12_boxplots_redo/k=12_ridgeline_drought_category.png",height=6, width=6, units="in", res=320)
 ggplot(data=grow_merge, aes(x=deviation, y=type, fill=type))+
   facet_wrap(~severity)+
   geom_density_ridges()+
@@ -293,4 +295,4 @@ ggplot(data=grow_merge, aes(x=deviation, y=type, fill=type))+
   xlim(-0.2,0.2)+
   geom_vline(xintercept=0,linetype="dashed")+
   scale_y_discrete(limits=rev)
-  
+dev.off()
