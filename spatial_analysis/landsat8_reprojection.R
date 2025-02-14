@@ -132,8 +132,8 @@ l8Mosaic = mosaicByDate(landsat8, 7)$select(c('blue_median', 'green_median', 're
 #landsat8$first()$projection()$getInfo()
 #l8 crs: "EPSG:32616"
 #transform: 30       0  371085       0     -30 4734615
-
 #l8Mosaic <- l8Mosaic$setDefaultProjection(crs="EPSG:32616")
+
 ##################### 
 # Read in GRIDMET data for reprojection
 ##################### 
@@ -142,24 +142,21 @@ GRIDMET <- ee$ImageCollection("IDAHO_EPSCOR/GRIDMET")$filterBounds(Chicago)$map(
   return(image$clip(Chicago))})
 #ee_print(GRIDMET)
 
-projGRID = GRIDMET$first()$projection()
+projGRID = GRIDMET$first()$projection() #get GRIDMET projection info
 #projGRID$getInfo()
 
 ##################### 
-# reproject landsat8 to GRIDMET
+# reproject landsat8 to GRIDMET, flatten, and save
 ##################### 
 
 l8reproj = l8Mosaic$map(function(img){
   return(img$reproject(projGRID)$reduceResolution(reducer=ee$Reducer$mean()))
 })$map(addTime); # add year here!
 
-l8Reproj <- l8Mosaic$reduceResolution(reducer = ee$Reducer$mean())$reproject(projGRID)
-
-
-dateMod <- ee$List(l8reproj$aggregate_array("system:id"))$distinct()
+dateMod <- ee$List(l8reproj$aggregate_array("system:id"))$distinct() #make lists of dates to rename bands
 dateString <- ee$List(paste0("X", dateMod$getInfo()))
 
-l8_flat <- ee$ImageCollection$toBands(l8reproj$select("NDVI"))$rename(dateString)
+l8_flat <- ee$ImageCollection$toBands(l8reproj$select("NDVI"))$rename(dateString) #flatten mosaic into one image with dates as bands
 #ee_print(l8_flat)
 
 export_l8 <- ee_image_to_drive(image=l8_flat, description="Save_landsat8_reproject", region=Chicago$geometry(), fileNamePrefix="landsat8_reproject", folder=L8save, timePrefix=F)
