@@ -164,3 +164,54 @@ export_l8$start()
 
 #savel8 <- ee_image_to_asset(l8_flat, description="Save_landsat8_reproject", assetId=file.path(assetHome, "landsat8_reproject"), maxPixels = 10e9, scale=926.6, region = maskBBox, crs="SR-ORG:6974", crsTransform=c(926.625433056, 0, -20015109.354, 0, -926.625433055, 10007554.677), overwrite=T)
 #savel8$start()
+
+##################### 
+# Read in & Format Landsat 9 ----
+##################### 
+# "LANDSAT/LC09/C02/T1_L2"
+# Load MODIS NDVI data; attach month & year
+# https://developers.google.com/earth-engine/datasets/catalog/LANDSAT_LC09_C02_T1_L2
+landsat9 <- ee$ImageCollection("LANDSAT/LC09/C02/T1_L2")$filterBounds(Chicago)$map(function(image){
+  return(image$clip(Chicago))
+})$map(function(img){
+  d= ee$Date(img$get('system:time_start'));
+  dy= d$get('day');    
+  m= d$get('month');
+  y= d$get('year');
+  
+  # # Add masks 
+  img <- applyLandsatBitMask(img)
+  
+  # #scale correction; doing here & separating form NDVI so it gets saved on the image
+  lAdj = img$select(c('SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7'))$multiply(0.0000275)$add(-0.2);
+  lst_k = img$select('ST_B10')$multiply(0.00341802)$add(149);
+  
+  # img3 = img2$addBands(srcImg=lAdj, overwrite=T)$addBands(srcImg=lst_k, overwrite=T)$set('date',d, 'day',dy, 'month',m, 'year',y)
+  return(img$addBands(srcImg=lAdj, overwrite=T)$addBands(srcImg=lst_k, overwrite=T)$set('date',d, 'day',dy, 'month',m, 'year',y))
+})$select(c('SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'ST_B10'),c('blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'LST_K'))$map(addNDVI)
+# Map$addLayer(landsat9$first()$select('NDVI'), ndviVis, "NDVI - First")
+# ee_print(landsat9)
+# Map$addLayer(landsat9$first()$select('NDVI'))
+
+l9Mosaic = mosaicByDate(landsat9, 7)$select(c('blue_median', 'green_median', 'red_median', 'nir_median', 'swir1_median', 'swir2_median', 'LST_K_median', "NDVI_median"),c('blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'LST_K', "NDVI"))$sort("date")
+# ee_print(l9Mosaic, "landsat9-Mosaic")
+# Map$addLayer(l9Mosaic$first()$select('NDVI'), ndviVis, "NDVI - First")
+
+##################### 
+# reproject landsat9 to GRIDMET, flatten, and save
+##################### 
+
+l9reproj = l9Mosaic$map(function(img){
+  return(img$reproject(projGRID)$reduceResolution(reducer=ee$Reducer$mean()))
+})$map(addTime); # add year here!
+
+dateMod <- ee$List(l9reproj$aggregate_array("system:id"))$distinct() #make lists of dates to rename bands
+dateString <- ee$List(paste0("X", dateMod$getInfo()))
+
+l9_flat <- ee$ImageCollection$toBands(l9reproj$select("NDVI"))$rename(dateString) #flatten mosaic into one image with dates as bands
+#ee_print(l8_flat)
+
+export_l9 <- ee_image_to_drive(image=l9_flat, description="Save_landsat9_reproject", region=Chicago$geometry(), fileNamePrefix="landsat9_reproject", folder=L8save, timePrefix=F)
+export_l9$start()
+
+##################### 
