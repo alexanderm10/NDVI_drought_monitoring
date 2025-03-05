@@ -92,7 +92,7 @@ mosaicByDate <- function(imcol, dayWindow){
 ##################### 
 
 Chicago = ee$FeatureCollection("projects/breidyee/assets/SevenCntyChiReg") 
-ee_print(Chicago)
+#ee_print(Chicago)
 
 chiBounds <- Chicago$geometry()$bounds()
 chiBBox <- ee$Geometry$BBox(-88.70738, 41.20155, -87.52453, 42.49575)
@@ -125,7 +125,7 @@ landsat8 <- ee$ImageCollection("LANDSAT/LC08/C02/T1_L2")$filterBounds(Chicago)$m
 # ee_print(landsat8)
 # Map$addLayer(landsat8$first()$select('NDVI'))
 
-l8Mosaic = mosaicByDate(landsat8, 7)$select(c('blue_median', 'green_median', 'red_median', 'nir_median', 'swir1_median', 'swir2_median', 'LST_K_median', "NDVI_median"),c('blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'LST_K', "NDVI"))$sort("date")
+#l8Mosaic = mosaicByDate(landsat8, 7)$select(c('blue_median', 'green_median', 'red_median', 'nir_median', 'swir1_median', 'swir2_median', 'LST_K_median', "NDVI_median"),c('blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'LST_K', "NDVI"))$sort("date")
 # ee_print(l8Mosaic, "landsat8-Mosaic")
 # Map$addLayer(l8Mosaic$first()$select('NDVI'), ndviVis, "NDVI - First")
 
@@ -149,7 +149,7 @@ projGRID = GRIDMET$first()$projection() #get GRIDMET projection info
 # reproject landsat8 to GRIDMET, flatten, and save
 ##################### 
 
-l8reproj = l8Mosaic$map(function(img){
+l8reproj = landsat8$map(function(img){
   return(img$reproject(projGRID)$reduceResolution(reducer=ee$Reducer$mean()))
 })$map(addTime); # add year here!
 
@@ -159,7 +159,7 @@ dateString <- ee$List(paste0("X", dateMod$getInfo()))
 l8_flat <- ee$ImageCollection$toBands(l8reproj$select("NDVI"))$rename(dateString) #flatten mosaic into one image with dates as bands
 #ee_print(l8_flat)
 
-export_l8 <- ee_image_to_drive(image=l8_flat, description="Save_landsat8_reproject", region=Chicago$geometry(), fileNamePrefix="landsat8_reproject", folder=L8save, timePrefix=F)
+export_l8 <- ee_image_to_drive(image=l8_flat, description="Save_landsat8_reproject", region=Chicago$geometry(), fileNamePrefix="landsat8_reproject_no_mosaic", folder=L8save, timePrefix=F)
 export_l8$start()
 
 #savel8 <- ee_image_to_asset(l8_flat, description="Save_landsat8_reproject", assetId=file.path(assetHome, "landsat8_reproject"), maxPixels = 10e9, scale=926.6, region = maskBBox, crs="SR-ORG:6974", crsTransform=c(926.625433056, 0, -20015109.354, 0, -926.625433055, 10007554.677), overwrite=T)
@@ -193,7 +193,7 @@ landsat9 <- ee$ImageCollection("LANDSAT/LC09/C02/T1_L2")$filterBounds(Chicago)$m
 # ee_print(landsat9)
 # Map$addLayer(landsat9$first()$select('NDVI'))
 
-l9Mosaic = mosaicByDate(landsat9, 7)$select(c('blue_median', 'green_median', 'red_median', 'nir_median', 'swir1_median', 'swir2_median', 'LST_K_median', "NDVI_median"),c('blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'LST_K', "NDVI"))$sort("date")
+#l9Mosaic = mosaicByDate(landsat9, 7)$select(c('blue_median', 'green_median', 'red_median', 'nir_median', 'swir1_median', 'swir2_median', 'LST_K_median', "NDVI_median"),c('blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'LST_K', "NDVI"))$sort("date")
 # ee_print(l9Mosaic, "landsat9-Mosaic")
 # Map$addLayer(l9Mosaic$first()$select('NDVI'), ndviVis, "NDVI - First")
 
@@ -201,7 +201,7 @@ l9Mosaic = mosaicByDate(landsat9, 7)$select(c('blue_median', 'green_median', 're
 # reproject landsat9 to GRIDMET, flatten, and save
 ##################### 
 
-l9reproj = l9Mosaic$map(function(img){
+l9reproj = landsat9$map(function(img){
   return(img$reproject(projGRID)$reduceResolution(reducer=ee$Reducer$mean()))
 })$map(addTime); # add year here!
 
@@ -211,7 +211,7 @@ dateString <- ee$List(paste0("X", dateMod$getInfo()))
 l9_flat <- ee$ImageCollection$toBands(l9reproj$select("NDVI"))$rename(dateString) #flatten mosaic into one image with dates as bands
 #ee_print(l8_flat)
 
-export_l9 <- ee_image_to_drive(image=l9_flat, description="Save_landsat9_reproject", region=Chicago$geometry(), fileNamePrefix="landsat9_reproject", folder=L8save, timePrefix=F)
+export_l9 <- ee_image_to_drive(image=l9_flat, description="Save_landsat9_reproject", region=Chicago$geometry(), fileNamePrefix="landsat9_reproject_no_mosaic", folder=L8save, timePrefix=F)
 export_l9$start()
 
 ##################### 
