@@ -93,7 +93,7 @@ mosaicByDate <- function(imcol, dayWindow){
 ##################### 
 
 Chicago = ee$FeatureCollection("projects/breidyee/assets/SevenCntyChiReg") 
-ee_print(Chicago)
+#ee_print(Chicago)
 
 chiBounds <- Chicago$geometry()$bounds()
 chiBBox <- ee$Geometry$BBox(-88.70738, 41.20155, -87.52453, 42.49575)
@@ -137,7 +137,7 @@ landsat5 <- ee$ImageCollection("LANDSAT/LT05/C02/T1_L2")$filterBounds(Chicago)$f
 # ee_print(landsat5)
 # Map$addLayer(landsat5$first()$select('NDVI'))
 
-l5Mosaic = mosaicByDate(landsat5, 7)$select(c('blue_median', 'green_median', 'red_median', 'nir_median', 'swir1_median', 'swir2_median', 'LST_K_median', "NDVI_median"),c('blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'LST_K', "NDVI"))$sort("date")
+#l5Mosaic = mosaicByDate(landsat5, 7)$select(c('blue_median', 'green_median', 'red_median', 'nir_median', 'swir1_median', 'swir2_median', 'LST_K_median', "NDVI_median"),c('blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'LST_K', "NDVI"))$sort("date")
 # ee_print(l5Mosaic, "landsat5-Mosaic")
 # Map$addLayer(l5Mosaic$first()$select('NDVI'), ndviVis, "NDVI - First")
 
@@ -145,7 +145,7 @@ l5Mosaic = mosaicByDate(landsat5, 7)$select(c('blue_median', 'green_median', 're
 # reproject landsat5 to GRIDMET, flatten, and save
 ##################### 
 
-l5reproj = l5Mosaic$map(function(img){
+l5reproj = landsat5$map(function(img){
   return(img$reproject(projGRID)$reduceResolution(reducer=ee$Reducer$mean()))
 })$map(addTime); # add year here!
 
@@ -155,7 +155,7 @@ dateString <- ee$List(paste0("X", dateMod$getInfo()))
 l5_flat <- ee$ImageCollection$toBands(l5reproj$select("NDVI"))$rename(dateString) #flatten mosaic into one image with dates as bands
 #ee_print(l8_flat)
 
-export_l5 <- ee_image_to_drive(image=l5_flat, description="Save_landsat5_reproject", region=Chicago$geometry(), fileNamePrefix="landsat5_reproject", folder=L8save, timePrefix=F)
+export_l5 <- ee_image_to_drive(image=l5_flat, description="Save_landsat5_reproject", region=Chicago$geometry(), fileNamePrefix="landsat5_reproject_no_mosaic", folder=L8save, timePrefix=F)
 export_l5$start()
 
 ##################### 
@@ -186,7 +186,7 @@ landsat7 <- ee$ImageCollection("LANDSAT/LE07/C02/T1_L2")$filterBounds(Chicago)$f
 # ee_print(landsat7)
 # Map$addLayer(landsat7$first()$select('NDVI'))
 
-l7Mosaic = mosaicByDate(landsat7, 7)$select(c('blue_median', 'green_median', 'red_median', 'nir_median', 'swir1_median', 'swir2_median', 'LST_K_median', "NDVI_median"),c('blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'LST_K', "NDVI"))$sort("date")
+#l7Mosaic = mosaicByDate(landsat7, 7)$select(c('blue_median', 'green_median', 'red_median', 'nir_median', 'swir1_median', 'swir2_median', 'LST_K_median', "NDVI_median"),c('blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'LST_K', "NDVI"))$sort("date")
 # ee_print(l7Mosaic, "landsat7-Mosaic")
 # Map$addLayer(l7Mosaic$first()$select('NDVI'), ndviVis, "NDVI - First")
 
@@ -194,7 +194,7 @@ l7Mosaic = mosaicByDate(landsat7, 7)$select(c('blue_median', 'green_median', 're
 # reproject landsat7 to GRIDMET, flatten, and save
 ##################### 
 
-l7reproj = l7Mosaic$map(function(img){
+l7reproj = landsat7$map(function(img){
   return(img$reproject(projGRID)$reduceResolution(reducer=ee$Reducer$mean()))
 })$map(addTime); # add year here!
 
@@ -204,6 +204,6 @@ dateString <- ee$List(paste0("X", dateMod$getInfo()))
 l7_flat <- ee$ImageCollection$toBands(l7reproj$select("NDVI"))$rename(dateString) #flatten mosaic into one image with dates as bands
 #ee_print(l7_flat)
 
-export_l7 <- ee_image_to_drive(image=l7_flat, description="Save_landsat7_reproject", region=Chicago$geometry(), fileNamePrefix="landsat7_reproject", folder=L8save, timePrefix=F)
+export_l7 <- ee_image_to_drive(image=l7_flat, description="Save_landsat7_reproject", region=Chicago$geometry(), fileNamePrefix="landsat7_reproject_no_mosaic", folder=L8save, timePrefix=F)
 export_l7$start()
 ##################### 
