@@ -21,6 +21,9 @@ ndvi.latest$type <- as.factor(ndvi.latest$type)
 ndvi.latest$mission <- as.factor(ndvi.latest$mission)
 summary(ndvi.latest)
 
+#for this project we're using 2001-2024
+ndvi.latest <- subset(ndvi.latest, date >= as.Date('2001-01-01') & date <= as.Date('2024-12-31'))
+
 ######################
 #crop
 ######################
