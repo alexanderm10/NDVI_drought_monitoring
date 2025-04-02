@@ -5,140 +5,141 @@ library(mgcv)
 library(lubridate)
 library(stringr)
 
-###################
-#load & format L8 data
-###################
-
-l8 <- brick("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/landsat8_reproject_no_mosaic.tif")
-l8 <- as.data.frame(l8, xy=TRUE) #include xy coordinates
-
-l8$values <- rowSums(!is.na(l8[3:ncol(l8)])) #total non-missing values and get rid of coordinates with nothing
-l8 <- l8[!(l8$values==0),]
-
-l8 <- l8 %>% pivot_longer(cols=c(3:(ncol(l8)-1)), names_to = "date", values_to = "NDVI") #make dataframe into long format
-
-l8$date <- str_sub(l8$date, -8,-1) #format is weird but last 8 characters of band name represent date!!
-l8$date <- as.Date(l8$date, "%Y%m%d")
-l8$yday <- lubridate::yday(l8$date)
-l8$year <- lubridate::year(l8$date)
-
-l8$xy <- paste(l8$x, l8$y) #column for coord pairs
+Sys.setenv(GOOGLE_DRIVE = "~/Google Drive/Shared drives/Urban Ecological Drought")
+google.drive <- Sys.getenv("GOOGLE_DRIVE")
+path.google <- ("~/Google Drive/My Drive/")
+pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/data/spatial_NDVI_monitoring/")
 
 ###################
-#load & format L9 data
+#load data
 ###################
 
-l9 <- brick("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/landsat9_reproject_no_mosaic.tif")
-l9 <- as.data.frame(l9, xy=TRUE) #include xy coordinates
-
-l9$values <- rowSums(!is.na(l9[3:ncol(l9)])) #total non-missing values and get rid of coordinates with nothing
-l9 <- l9[!(l9$values==0),]
-
-l9 <- l9 %>% pivot_longer(cols=c(3:(ncol(l9)-1)), names_to = "date", values_to = "NDVI") #make dataframe into long format
-
-l9$date <- str_sub(l9$date, -8,-1) #format is weird but last 8 characters of band name represent date!!
-l9$date <- as.Date(l9$date, "%Y%m%d")
-l9$yday <- lubridate::yday(l9$date)
-l9$year <- lubridate::year(l9$date)
-
-l9$xy <- paste(l9$x, l9$y) #column for coord pairs
-
-###################
-#load & format L7 data
-###################
-
-l7 <- brick("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/landsat7_reproject_no_mosaic.tif")
-l7 <- as.data.frame(l7, xy=TRUE) #include xy coordinates
-
-l7$values <- rowSums(!is.na(l7[3:ncol(l7)])) #total non-missing values and get rid of coordinates with nothing
-l7 <- l7[!(l7$values==0),]
-
-l7 <- l7 %>% pivot_longer(cols=c(3:(ncol(l7)-1)), names_to = "date", values_to = "NDVI") #make dataframe into long format
-
-l7$date <- str_sub(l7$date, -8,-1) #format is weird but last 8 characters of band name represent date!!
-l7$date <- as.Date(l7$date, "%Y%m%d")
-l7$yday <- lubridate::yday(l7$date)
-l7$year <- lubridate::year(l7$date)
-
-l7$xy <- paste(l7$x, l7$y) #column for coord pairs
-
-###################
-#load & format L5 data
-###################
-
-l5 <- brick("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/landsat5_reproject_no_mosaic.tif")
-l5 <- as.data.frame(l5, xy=TRUE) #include xy coordinates
-
-l5$values <- rowSums(!is.na(l5[3:ncol(l5)])) #total non-missing values and get rid of coordinates with nothing
-l5 <- l5[!(l5$values==0),]
-
-l5 <- l5 %>% pivot_longer(cols=c(3:(ncol(l5)-1)), names_to = "date", values_to = "NDVI") #make dataframe into long format
-
-l5$date <- str_sub(l5$date, -8,-1) #format is weird but last 8 characters of band name represent date!!
-l5$date <- as.Date(l5$date, "%Y%m%d")
-l5$yday <- lubridate::yday(l5$date)
-l5$year <- lubridate::year(l5$date)
-
-l5$xy <- paste(l5$x, l5$y) #column for coord pairs
-
-###################
-#calculate mean NDVI for each pixel
-###################
-
-l8_mean_NDVI <- l8 %>% group_by(x,y) %>%
-  summarise_at(vars("NDVI"), mean, na.rm=TRUE) %>% as.data.frame()
-
-ggplot(l8_mean_NDVI, aes(x=NDVI))+
-  geom_histogram() + labs(x="mean NDVI")
+landsatAll <- read.csv(file.path(google.drive, "data/spatial_NDVI_monitoring/spatial_raw_data_all_satellites.csv"))
 
 ###
 
-l9_mean_NDVI <- l9 %>% group_by(x,y) %>%
-  summarise_at(vars("NDVI"), mean, na.rm=TRUE) %>% as.data.frame()
-
-ggplot(l9_mean_NDVI, aes(x=x,y=y, fill=NDVI))+
-  geom_tile()+ coord_equal()+ scale_fill_gradientn(colors = hcl.colors(20, "RdYlGn")) +
-  ggtitle("Landsat 9 Mean NDVI")+labs(fill="mean NDVI")
-
-ggplot(l9_mean_NDVI, aes(x=NDVI))+
-  geom_histogram() + labs(x="mean NDVI") + ggtitle("Landsat 9 Mean NDVI")
-
-###
-
-l7_mean_NDVI <- l7 %>% group_by(x,y) %>%
-  summarise_at(vars("NDVI"), mean, na.rm=TRUE) %>% as.data.frame()
-
-ggplot(l7_mean_NDVI, aes(x=x,y=y, fill=NDVI))+
-  geom_tile()+ coord_equal()+ scale_fill_gradientn(colors = hcl.colors(20, "RdYlGn")) +
-  ggtitle("Landsat 7 Mean NDVI")+labs(fill="mean NDVI")
-
-ggplot(l7_mean_NDVI, aes(x=NDVI))+
-  geom_histogram() + labs(x="mean NDVI") + ggtitle("Landsat 7 Mean NDVI")
-
-###
+l5 <- landsatAll[landsatAll$mission=="landsat 5",]
 
 l5_mean_NDVI <- l5 %>% group_by(x,y) %>%
   summarise_at(vars("NDVI"), mean, na.rm=TRUE) %>% as.data.frame()
 
-ggplot(l5_mean_NDVI, aes(x=x,y=y, fill=NDVI))+
-  geom_tile()+ coord_equal()+ scale_fill_gradientn(colors = hcl.colors(20, "RdYlGn")) +
-  ggtitle("Landsat 5 Mean NDVI")+labs(fill="mean NDVI")
+l5_mean_NDVI <- l5_mean_NDVI[l5_mean_NDVI$NDVI>0.1,]
+l5_mean_NDVI$xy <- paste(l5_mean_NDVI$x, l5_mean_NDVI$y)
+l5 <- filter(l5, xy %in% l5_mean_NDVI$xy)
 
-ggplot(l5_mean_NDVI, aes(x=NDVI))+
-  geom_histogram() + labs(x="mean NDVI") + ggtitle("Landsat 5 Mean NDVI")
+###
+
+l7 <- landsatAll[landsatAll$mission=="landsat 7",]
+
+l7_mean_NDVI <- l7 %>% group_by(x,y) %>%
+  summarise_at(vars("NDVI"), mean, na.rm=TRUE) %>% as.data.frame()
+
+l7_mean_NDVI <- l7_mean_NDVI[l7_mean_NDVI$NDVI>0.1,]
+l7_mean_NDVI$xy <- paste(l7_mean_NDVI$x, l7_mean_NDVI$y)
+l7 <- filter(l7, xy %in% l7_mean_NDVI$xy)
+
+###
+
+l8 <- landsatAll[landsatAll$mission=="landsat 8",]
+
+l8_mean_NDVI <- l8 %>% group_by(x,y) %>%
+  summarise_at(vars("NDVI"), mean, na.rm=TRUE) %>% as.data.frame()
+
+l8_mean_NDVI <- l8_mean_NDVI[l8_mean_NDVI$NDVI>0.1,]
+l8_mean_NDVI$xy <- paste(l8_mean_NDVI$x, l8_mean_NDVI$y)
+l8 <- filter(l8, xy %in% l8_mean_NDVI$xy)
+
+###
+
+l9 <- landsatAll[landsatAll$mission=="landsat 9",]
+
+l9_mean_NDVI <- l9 %>% group_by(x,y) %>%
+  summarise_at(vars("NDVI"), mean, na.rm=TRUE) %>% as.data.frame()
+
+l9_mean_NDVI <- l9_mean_NDVI[l9_mean_NDVI$NDVI>0.1,]
+l9_mean_NDVI$xy <- paste(l9_mean_NDVI$x, l9_mean_NDVI$y)
+l9 <- filter(l9, xy %in% l9_mean_NDVI$xy)
+
+landsatAll <- rbind (l5,l7,l8,l9)
+landsatAll$mission <- as.factor(landsatAll$mission)
 
 ###################
 #Run test GAM for all
 ###################
 
-l8$mission <- "landsat 8"
-l9$mission <- "landsat 9"
-l7$mission <- "landsat 7"
-l5$mission <- "landsat 5"
-
-landsatAll <- rbind(l8, l9, l7, l5)
-landsatAll$mission <- as.factor(landsatAll$mission)
-
 all_gam <- gam(NDVI ~ s(y,x,yday,by=mission) + mission-1,data=landsatAll) #DEFAULT K
+gam.check(all_gam)
+tidy_gam(all_gam)
+plot.gam(all_gam)
 
+saveRDS(all_gam, file.path(pathShare, "3D_gam_all_satellites.RDS"))
 
+###################
+#Precict function
+###################
+
+landsatAll$MissionPred <- predict(all_gam, newdata=landsatAll)
+landsatAll$resid <- landsatAll$NDVI - landsatAll$MissionPred
+
+ggplot(data=landsatAll, aes(x=yday, y=resid))+
+  geom_point(alpha=0.5) + ggtitle("Residuals vs. Day of Year all satellites")
+
+all_resid_mean <- landsatAll %>% group_by(x,y) %>% #mean residuals at each coord
+  summarise_at(vars("resid"), mean, na.rm=TRUE) %>% as.data.frame()
+
+all_resid_mean <- all_resid_mean %>% #formatting for plotly widget
+  mutate(text = paste0("x: ", round(x,2), "\n", "y: ", round(y,2), "\n", "Residual: ",round(resid,3), "\n"))
+
+#p1 <- mean resids
+ggplot(all_resid_mean, aes(x=x,y=y, fill=resid, text=text))+ #mean resids plot
+  geom_tile()+ coord_equal()+ scale_fill_gradient(low="white", high="blue")+
+  ggtitle("All Satellites NDVI Mean Residuals")+labs(fill="residuals")
+
+###
+
+landsatAll$resid_sq <- (landsatAll$resid)^2
+all_resid_sq_mean <- landsatAll %>% group_by(x,y) %>%
+  summarise_at(vars("resid_sq"), mean, na.rm=TRUE) %>% as.data.frame()
+
+all_resid_sq_mean$RMSE <- sqrt(all_resid_sq_mean$resid_sq)
+
+all_resid_sq_mean <- all_resid_sq_mean %>%
+  mutate(text = paste0("x: ", round(x,2), "\n", "y: ", round(y,2), "\n", "RMSE: ",round(RMSE,3), "\n"))
+
+#p2 <- RMSE
+ggplot(all_resid_sq_mean, aes(x=x,y=y, fill=RMSE,text=text))+ #RMSE plot
+  geom_tile()+ coord_equal()+ scale_fill_gradient(low="white", high="blue")+
+  ggtitle("All Satellites NDVI RMSE")+labs(fill="RMSE")
+
+###
+all_mean_NDVI <- landsatAll %>% group_by(x,y) %>%
+  summarise_at(vars("NDVI"), mean, na.rm=TRUE) %>% as.data.frame()
+
+all_resid_mean$normalized_resid <- all_resid_mean$resid/all_mean_NDVI$NDVI
+
+ggplot(all_resid_mean, aes(x=x,y=y, fill=normalized_resid))+ #mean resids plot
+  geom_tile()+ coord_equal()+ scale_fill_gradient(low="white", high="blue")+
+  ggtitle("All Satellites NDVI Mean Residuals/Mean NDVI")+labs(fill="mean resid/mean NDVI")
+
+###################
+#Reproject
+###################
+
+df_dupe <- landsatAll
+df_dupe$mission <- "landsat 8"
+
+landsatAll$ReprojPred <- predict(all_gam, newdata=df_dupe)
+landsatAll$NDVIReprojected <- landsatAll$resid + landsatAll$ReprojPred
+
+reproj_mean_NDVI <- landsatAll %>% group_by(x,y) %>%
+  summarise_at(vars("NDVIReprojected"), mean, na.rm=TRUE) %>% as.data.frame()
+
+ggplot(reproj_mean_NDVI, aes(x=x,y=y, fill=NDVIReprojected))+ #mean resids plot
+  geom_tile()+ coord_equal()+ scale_fill_gradientn(colors = hcl.colors(20, "RdYlGn"))+
+  ggtitle("All Satellites Mean Reprojected NDVI")+labs(fill="mean NDVI reproj")
+
+###################
+#Save Raw Data
+###################
+
+write.csv(landsatAll, file.path(pathShare, "reprojected_NDVI_all_satellites.csv"),row.names = FALSE)
