@@ -37,25 +37,50 @@ addNDVI <- function(img){
 }
 
 
+# applyLandsatBitMask = function(img){
+#   qaPix <- img$select('QA_PIXEL');
+#   qaRad <- img$select('QA_RADSAT');
+#   terrMask <- qaRad$bitwiseAnd(11)$eq(0); ## get rid of any terrain occlusion
+#   # satMask <- qaRad$bitwiseAnd(3 << 4)$eq(0); ## get rid of any saturated bands we use to calculate NDVI
+#   satMask <- bitwiseExtract(qaRad, 3, 4)$eq(0) ## get rid of any saturated bands we use to calculate NDVI 
+#   # clearMask <- qaPix$bitwiseAnd(1<<7)$eq(0)
+#   clearMask <- bitwiseExtract(qaPix, 1, 5)$eq(0)
+#   waterMask <- bitwiseExtract(qaPix, 7, 7)$eq(0)
+#   cloudConf = bitwiseExtract(qaPix, 8, 9)$lte(1) ## we can only go with low confidence; doing finer leads to NOTHING making the cut
+#   shadowConf <- bitwiseExtract(qaPix, 10, 11)$lte(1) ## we can only go with low confidence; doing finer leads to NOTHING making the cut
+#   snowConf <- bitwiseExtract(qaPix, 12, 13)$lte(1) ## we can only go with low confidence; doing finer leads to NOTHING making the cut
+#   
+#   
+#   img <- img$updateMask(clearMask$And(waterMask)$And(cloudConf)$And(shadowConf)$And(snowConf)$And(terrMask)$And(satMask));
+#   
+#   return(img)
+#   
+# }
+
 applyLandsatBitMask = function(img){
   qaPix <- img$select('QA_PIXEL');
-  qaRad <- img$select('QA_RADSAT');
-  terrMask <- qaRad$bitwiseAnd(11)$eq(0); ## get rid of any terrain occlusion
+  # qaRad <- img$select('QA_RADSAT');
+  # terrMask <- qaRad$bitwiseAnd(11)$eq(0); ## get rid of any terrain occlusion
   # satMask <- qaRad$bitwiseAnd(3 << 4)$eq(0); ## get rid of any saturated bands we use to calculate NDVI
-  satMask <- bitwiseExtract(qaRad, 3, 4)$eq(0) ## get rid of any saturated bands we use to calculate NDVI 
+  # satMask <- bitwiseExtract(qaRad, 3, 4)$eq(0) ## get rid of any saturated bands we use to calculate NDVI
   # clearMask <- qaPix$bitwiseAnd(1<<7)$eq(0)
-  clearMask <- bitwiseExtract(qaPix, 1, 5)$eq(0)
-  waterMask <- bitwiseExtract(qaPix, 7, 7)$eq(0)
+  
+  fillMask <- bitwiseExtract(qaPix, 0, 0)$eq(0) # 0 means no filler
+  shadowMask <- bitwiseExtract(qaPix, 4, 4)$eq(0) # 0 means no snow
+  snowMask <- bitwiseExtract(qaPix, 5, 5)$eq(0) # 0 means no snow
+  clearMask <- bitwiseExtract(qaPix, 6, 6)$eq(1) # 1 means its clear
+  waterMask <- bitwiseExtract(qaPix, 7, 7)$eq(0) # 0 means it's not water
   cloudConf = bitwiseExtract(qaPix, 8, 9)$lte(1) ## we can only go with low confidence; doing finer leads to NOTHING making the cut
   shadowConf <- bitwiseExtract(qaPix, 10, 11)$lte(1) ## we can only go with low confidence; doing finer leads to NOTHING making the cut
   snowConf <- bitwiseExtract(qaPix, 12, 13)$lte(1) ## we can only go with low confidence; doing finer leads to NOTHING making the cut
   
   
-  img <- img$updateMask(clearMask$And(waterMask)$And(cloudConf)$And(shadowConf)$And(snowConf)$And(terrMask)$And(satMask));
+  img <- img$updateMask(fillMask$And(shadowMask)$And(snowMask)$And(clearMask)$And(waterMask)$And(cloudConf)$And(shadowConf)$And(snowConf));
   
   return(img)
   
 }
+
 
 # Function for combining images with the same date
 # 2nd response from here: https:#gis.stackexchange.com/questions/280156/mosaicking-image-collection-by-date-day-in-google-earth-engine 
