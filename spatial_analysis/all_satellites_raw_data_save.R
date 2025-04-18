@@ -13,7 +13,7 @@ pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/d
 ###################
 #load & format L8 data
 ###################
-l8 <- brick("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/landsat8_reproject_no_mosaic.tif")
+l8 <- brick("~/Google Drive/Shared drives/Urban Ecological Drought/data/spatial_NDVI_monitoring/landsat8_reproject_no_mosaic.tif")
 l8 <- as.data.frame(l8, xy=TRUE) #include xy coordinates
 
 l8$values <- rowSums(!is.na(l8[3:ncol(l8)])) #total non-missing values and get rid of coordinates with nothing
@@ -32,7 +32,7 @@ l8$xy <- paste(l8$x, l8$y) #column for coord pairs
 #load & format L9 data
 ###################
 
-l9 <- brick("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/landsat9_reproject_no_mosaic.tif")
+l9 <- brick("~/Google Drive/Shared drives/Urban Ecological Drought/data/spatial_NDVI_monitoring/landsat9_reproject_no_mosaic.tif")
 l9 <- as.data.frame(l9, xy=TRUE) #include xy coordinates
 
 l9$values <- rowSums(!is.na(l9[3:ncol(l9)])) #total non-missing values and get rid of coordinates with nothing
@@ -51,7 +51,7 @@ l9$xy <- paste(l9$x, l9$y) #column for coord pairs
 #load & format L7 data
 ###################
 
-l7 <- brick("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/landsat7_reproject_no_mosaic.tif")
+l7 <- brick("~/Google Drive/Shared drives/Urban Ecological Drought/data/spatial_NDVI_monitoring/landsat7_reproject_no_mosaic.tif")
 l7 <- as.data.frame(l7, xy=TRUE) #include xy coordinates
 
 l7$values <- rowSums(!is.na(l7[3:ncol(l7)])) #total non-missing values and get rid of coordinates with nothing
@@ -70,7 +70,7 @@ l7$xy <- paste(l7$x, l7$y) #column for coord pairs
 #load & format L5 data
 ###################
 
-l5 <- brick("~/Google Drive/Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/landsat5_reproject_no_mosaic.tif")
+l5 <- brick("~/Google Drive/Shared drives/Urban Ecological Drought/data/spatial_NDVI_monitoring/landsat5_reproject_no_mosaic.tif")
 l5 <- as.data.frame(l5, xy=TRUE) #include xy coordinates
 
 l5$values <- rowSums(!is.na(l5[3:ncol(l5)])) #total non-missing values and get rid of coordinates with nothing
