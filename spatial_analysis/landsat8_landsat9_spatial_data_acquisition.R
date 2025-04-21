@@ -1,8 +1,7 @@
 #NDVI spatial data acquisition
 
 library(rgee); library(raster); library(terra)
-ee_check() # For some reason, it's important to run this before initializing right now
-rgee::ee_Initialize(user = 'jharr@mortonarb.org', drive=T)
+# ee_check() # For some reason, it's important to run this before initializing right now
 path.google <- ("~/Google Drive/My Drive/")
 path.google.share <- "~/Google Drive/Shared drives/Urban Ecological Drought/"
 L8save <- "landsat8_spatial_data"
@@ -41,19 +40,19 @@ addNDVI <- function(img){
 #   qaRad <- img$select('QA_RADSAT');
 #   terrMask <- qaRad$bitwiseAnd(11)$eq(0); ## get rid of any terrain occlusion
 #   # satMask <- qaRad$bitwiseAnd(3 << 4)$eq(0); ## get rid of any saturated bands we use to calculate NDVI
-#   satMask <- bitwiseExtract(qaRad, 3, 4)$eq(0) ## get rid of any saturated bands we use to calculate NDVI 
+#   satMask <- bitwiseExtract(qaRad, 3, 4)$eq(0) ## get rid of any saturated bands we use to calculate NDVI
 #   # clearMask <- qaPix$bitwiseAnd(1<<7)$eq(0)
 #   clearMask <- bitwiseExtract(qaPix, 1, 5)$eq(0)
 #   waterMask <- bitwiseExtract(qaPix, 7, 7)$eq(0)
 #   cloudConf = bitwiseExtract(qaPix, 8, 9)$lte(1) ## we can only go with low confidence; doing finer leads to NOTHING making the cut
 #   shadowConf <- bitwiseExtract(qaPix, 10, 11)$lte(1) ## we can only go with low confidence; doing finer leads to NOTHING making the cut
 #   snowConf <- bitwiseExtract(qaPix, 12, 13)$lte(1) ## we can only go with low confidence; doing finer leads to NOTHING making the cut
-#   
-#   
+# 
+# 
 #   img <- img$updateMask(clearMask$And(waterMask)$And(cloudConf)$And(shadowConf)$And(snowConf)$And(terrMask)$And(satMask));
-#   
+# 
 #   return(img)
-#   
+# 
 # }
 
 applyLandsatBitMask = function(img){
@@ -80,37 +79,17 @@ applyLandsatBitMask = function(img){
   
 }
 
-# Function for combining images with the same date
-# 2nd response from here: https:#gis.stackexchange.com/questions/280156/mosaicking-image-collection-by-date-day-in-google-earth-engine 
-mosaicByDate <- function(imcol, dayWindow){
-  # imcol: An image collection
-  # returns: An image collection
-  imlist = imcol$toList(imcol$size())
-  
-  # Note: needed to specify the ee_utils_pyfunc since it's not an image collection
-  unique_dates <- imlist$map(ee_utils_pyfunc(function(img){
-    return(ee$Image(img)$date()$format("YYYY-MM-dd"))
-  }))$distinct()
-  
-  # Same as above: what we're mappign through is a List, so need to call python
-  mosaic_imlist = unique_dates$map(ee_utils_pyfunc(function(d){
-    d = ee$Date(d)
-    dy= d$get('day');    
-    m= d$get('month');
-    y= d$get('year');
-    
-    im = imcol$filterDate(d$advance(-dayWindow, "day"), d$advance(dayWindow, "day"))$reduce(ee$Reducer$median()) # shoudl influence the window for image aggregation
-    
-    return(im$set("system:time_start", d$millis(), 
-                  "system:id", d$format("YYYY-MM-dd"),
-                  'date', d, 'day', dy, 'month', m, 'year', y))
-  }))
-  
-  # testOUT <- ee$ImageCollection(mosaic_imlist)
-  # ee_print(testOUT)
-  return (ee$ImageCollection(mosaic_imlist))
-}
+Map$setCenter(-88.04526, 41.81513, 11);
 
+ndviVis = list(
+  min= 0.0,
+  max= 1,
+  palette= c(
+    '#FFFFFF', '#CE7E45', '#DF923D', '#F1B555', '#FCD163', '#99B718', '#74A901',
+    '#66A000', '#529400', '#3E8601', '#207401', '#056201', '#004C00', '#023B01',
+    '#012E01', '#011D01', '#011301'
+  )
+)
 ##################### 
 # Chicago geometry
 ##################### 
@@ -176,9 +155,13 @@ projGRID = GRIDMET$first()$projection() #get GRIDMET projection info
 l8reproj = landsat8$map(function(img){
   return(img$reproject(projGRID)$reduceResolution(reducer=ee$Reducer$mean()))
 })$map(addTime); # add year here!
+# ee_print(l8reproj)
+# Map$addLayer(l8reproj$first()$select('NDVI'), ndviVis, "NDVI - First")
+
 
 dateMod <- ee$List(l8reproj$aggregate_array("system:id"))$distinct() #make lists of dates to rename bands
 dateString <- ee$List(paste0("X", dateMod$getInfo()))
+dateString$getInfo()
 
 l8_flat <- ee$ImageCollection$toBands(l8reproj$select("NDVI"))$rename(dateString) #flatten mosaic into one image with dates as bands
 #ee_print(l8_flat)
