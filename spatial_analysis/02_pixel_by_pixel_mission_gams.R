@@ -29,13 +29,14 @@ landsatAll$mission <- as.factor(landsatAll$mission)
 #gam coord loop by mission
 ###################
 #df <- data.frame()
-
+#x=unique(landsatAll$x)[11]
 for (x in unique(landsatAll$x)){
   datx <- landsatAll[landsatAll$x==x,]
   
   for (y in unique(datx$y)){
+    # y=unique(datx$y)[2]
     datxy <- datx[datx$y==y,]
-    if(length(which(!is.na(datxy$NDVI)))<40 | length(unique(datxy$yday[!is.na(datxy$NDVI)]))<24) next
+    if(length(which(!is.na(datxy$NDVI)))<40 | length(unique(datxy$yday[!is.na(datxy$NDVI)]))<24 | length(unique(datxy$mission))<length(unique(landsatAll$mission))) next
     
     indXY <- which(landsatAll$x==x & landsatAll$y==y)
     
