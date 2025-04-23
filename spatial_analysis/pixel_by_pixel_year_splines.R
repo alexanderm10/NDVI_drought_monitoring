@@ -22,6 +22,18 @@ landsatAll <- read.csv(file.path(google.drive, "data/spatial_NDVI_monitoring/rep
 dat25 <- landsatAll[landsatAll$year==2025,] #subset for curent yr
 nmonths <- length(unique(lubridate::month(dat25$date))) # Number of knots per month for 2025
 
+landsatYears <- data.frame(yday=1:365,
+                           year=rep(unique(landsatAll$year), each=365),
+                           xy=rep(unique(landsatAll$xy), each=365*length(unique(landsatAll$year))))
+landsatYears$x <- unlist(lapply(strsplit(landsatYears$xy, " "), FUN=function(x){x[1]}))
+landsatYears$y <- unlist(lapply(strsplit(landsatYears$xy, " "), FUN=function(x){x[2]}))
+head(landsatYears)
+tail(landsatYears)
+
+landsatYears <- landsatYears[order(landsatYears$xy, landsatYears$year, landsatYears$yday),]
+head(landsatYears)
+tail(landsatYears)
+
 ######################
 #Year Splines
 ######################
@@ -37,19 +49,23 @@ for (x in unique(landsatAll$x)){
     for (yr in unique(datxy$year)){
       datyr <- datxy[datxy$year==yr,]
       
-      if(length(which(!is.na(datyr$NDVIReprojected)))<40 | length(unique(datyr$yday[!is.na(datyr$NDVIReprojected)]))<24) next
+      xyYrInd <- which(landsatYears$x == x & landsatYears$y==y & landsatYears$year==yr)
+      
+      if(length(which(!is.na(datyr$NDVIReprojected)))<15 | length(unique(datyr$yday[!is.na(datyr$NDVIReprojected)]))<15) next
       if (yr==2025){
         gamyr <- gam(NDVIReprojected ~ s(yday, k=nmonths), data=datyr)
       }else{
         gamyr <- gam(NDVIReprojected ~ s(yday, k=12), data=datyr)
       }
       
-      pixelyr <- post.distns(model.gam=gamyr, newdata=newDF, vars="yday")
-      pixelyr$x <- x
-      pixelyr$y <- y
-      pixelyr$year <- yr
+      pixelyr <- post.distns(model.gam=gamyr, newdata=landsatYears[xyYrInd,], vars="yday")
+      # pixelyr$x <- x
+      # pixelyr$y <- y
+      # pixelyr$year <- yr
+      # 
+      # pixel_yrs <- rbind(pixel_yrs, pixelyr)
+      landsatYears[xyYrInd,c("mean", "lwr", "upr")] <- pixelyr[,c("mean", "lwr", "upr")]
       
-      pixel_yrs <- rbind(pixel_yrs, pixelyr)
       saveRDS(gamyr, file.path(pathShare, paste0(x,"_", y,"_", yr, "_gam.RDS")))
     }
   }

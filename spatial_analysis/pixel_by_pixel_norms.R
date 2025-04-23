@@ -11,18 +11,30 @@ path.google <- ("~/Google Drive/My Drive/")
 pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/data/spatial_NDVI_monitoring/pixel_by_pixel_gam_models/norm_gams")
 pathShare2 <- file.path(path.google, "../Shared drives/Urban Ecological Drought/data/spatial_NDVI_monitoring")
 
-source("~/Documents/GitHub/NDVI_drought_monitoring/0_Calculate_GAMM_Posteriors_Updated_Copy.R")
+source("../0_Calculate_GAMM_Posteriors_Updated_Copy.R")
 
 ######################
 #loading in and formatting raw data from 01_raw_data.R
 ######################
 
 landsatAll <- read.csv(file.path(google.drive, "data/spatial_NDVI_monitoring/reprojected_NDVI_all_satellites_pixel_by_pixel.csv"))
+summary(landsatAll)
+
+# Shouldn't need to do this with the new one, but just in case...
+landsatAll <- aggregate(cbind(NDVI, MissionPred, MissionResid, ReprojPred, NDVIReprojected) ~ x + y  + xy + mission + date + year + yday, data=landsatAll, FUN=median, na.rm=T)
+summary(landsatAll)
+
+landsatNormdf <- data.frame(xy=rep(unique(landsatAll$xy), each=365),
+                            yday=1:365)
+landsatNormdf$x <- unlist(lapply(strsplit(landsatNormdf$xy, " "), FUN=function(x){x[1]}))
+landsatNormdf$y <- unlist(lapply(strsplit(landsatNormdf$xy, " "), FUN=function(x){x[2]}))
+head(landsatNormdf)
+tail(landsatNormdf)
 
 ######################
 #Norms
 ######################
-newDF <- data.frame(yday=seq(1:365)) #create new data frame with column to represent day of year sequence
+# newDF <- data.frame(yday=seq(1:365)) #create new data frame with column to represent day of year sequence
 pixel_norms <- data.frame()
 
 for (x in unique(landsatAll$x)){
@@ -30,13 +42,18 @@ for (x in unique(landsatAll$x)){
   
   for (y in unique(datx$y)){
     datxy <- datx[datx$y==y,]
+    
+    xyInd <- which(landsatNormdf$x == x & landsatNormdf$y==y)
+    dfNow <- landsatNormdf[xyInd,]
     if(length(which(!is.na(datxy$NDVIReprojected)))<40 | length(unique(datxy$yday[!is.na(datxy$NDVIReprojected)]))<24) next
     norm_gam <- gam(NDVIReprojected ~ s(yday, k=12), data=datxy)
-    pixelnorm <- post.distns(model.gam=norm_gam, newdata=newDF, vars="yday")
-    pixelnorm$x <- x
-    pixelnorm$y <- y
+    pixelnorm <- post.distns(model.gam=norm_gam, newdata=landsatNormdf[xyInd,], vars="yday")
     
-    pixel_norms <- rbind(pixel_norms, pixelnorm)
+    landsatNormdf[xyInd,c("mean", "lwr", "upr")] <- pixelnorm[,c("mean", "lwr", "upr")]
+    # pixelnorm$x <- x
+    # pixelnorm$y <- y
+    
+    # pixel_norms <- rbind(pixel_norms, pixelnorm)
     saveRDS(norm_gam, file.path(pathShare, paste0(x,"_", y,"_norm_gam.RDS")))
     
   }
