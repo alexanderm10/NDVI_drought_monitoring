@@ -5,6 +5,7 @@ library(dplyr)
 library(MASS)
 library(lubridate)
 library(gganimate)
+library(scales)
 
 Sys.setenv(GOOGLE_DRIVE = "~/Google Drive/Shared drives/Urban Ecological Drought")
 google.drive <- Sys.getenv("GOOGLE_DRIVE")
@@ -37,8 +38,8 @@ tail(landsatYears)
 ######################
 #Year Splines
 ######################
-newDF <- data.frame(yday=seq(1:365)) #create new data frame with column to represent day of year sequence
-pixel_yrs <- data.frame()
+#newDF <- data.frame(yday=seq(1:365)) #create new data frame with column to represent day of year sequence
+#pixel_yrs <- data.frame()
 
 for (x in unique(landsatAll$x)){
   datx <- landsatAll[landsatAll$x==x,]
@@ -71,8 +72,26 @@ for (x in unique(landsatAll$x)){
   }
 }
 
-write.csv(pixel_yrs, file.path(pathShare2, "pixel_by_pixel_years.csv"), row.names=F)
+landsatYears$x <- as.numeric(landsatYears$x)
+landsatYears$y <- as.numeric(landsatYears$y)
 
+write.csv(landsatYears, file.path(pathShare2, "pixel_by_pixel_years.csv"), row.names=F)
 
-# yr_2012 <- landsatAll[landsatAll$year==2012,]
-# yr_xy <- yr_2012[yr_2012$xy=="-88.7249999666667 42.4833333333333",]
+######################
+#Plots
+######################
+
+landsatYears2012 <- landsatYears[landsatYears$year==2012,]
+landsatYears180 <- landsatYears[landsatYears$yday==180,]
+
+p <- ggplot(landsatYears180, aes(x=x,y=y, fill=mean))+
+  geom_tile()+ coord_equal()+ scale_fill_gradientn(limits=c(0,1),colors = hcl.colors(20, "BrBG"))+
+  transition_time(year)+
+  ggtitle('Year splines yday =180, {frame_time}')+labs(fill="mean")
+
+gganimate::animate(p, length = 15, width = 700, height = 400, nframes=25,fps=2)
+anim_save("years_yday_180.gif",p)
+
+ggplot(landsatYears2012[landsatYears2012$yday==180,], aes(x=x,y=y, fill=mean))+ 
+  geom_tile()+ coord_equal()+ scale_fill_gradientn(limits=c(0,1),colors = hcl.colors(20, "BrBG"))+
+  ggtitle("norms yday=180")
