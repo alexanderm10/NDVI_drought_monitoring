@@ -24,17 +24,18 @@ summary(landsatAll)
 # landsatAll <- aggregate(cbind(NDVI, MissionPred, MissionResid, ReprojPred, NDVIReprojected) ~ x + y  + xy + mission + date + year + yday, data=landsatAll, FUN=median, na.rm=T)
 # summary(landsatAll)
 
-# landsatNormdf <- data.frame(xy=rep(unique(landsatAll$xy), each=365),
-#                             yday=1:365)
-# landsatNormdf$x <- unlist(lapply(strsplit(landsatNormdf$xy, " "), FUN=function(x){x[1]}))
-# landsatNormdf$y <- unlist(lapply(strsplit(landsatNormdf$xy, " "), FUN=function(x){x[2]}))
-# head(landsatNormdf)
-# tail(landsatNormdf)
+landsatNormdf <- data.frame(xy=rep(unique(landsatAll$xy), each=365),
+                            yday=1:365)
+landsatNormdf$x <- unlist(lapply(strsplit(landsatNormdf$xy, " "), FUN=function(x){x[1]}))
+landsatNormdf$y <- unlist(lapply(strsplit(landsatNormdf$xy, " "), FUN=function(x){x[2]}))
+head(landsatNormdf)
+tail(landsatNormdf)
 
 
-landsatNormdf <- unique(landsatAll[c('x','y')])
-landsatNormdf <- landsatNormdf[rep(seq_len(nrow(landsatNormdf)), each=365),]
-landsatNormdf$yday <- rep_len(1:365,nrow(landsatNormdf))
+# landsatNormdf <- unique(landsatAll[c('x','y')])
+# landsatNormdf <- landsatNormdf[rep(seq_len(nrow(landsatNormdf)), each=365),]
+# landsatNormdf$yday <- rep_len(1:365,nrow(landsatNormdf))
+
 ######################
 #Norms
 ######################
@@ -62,6 +63,9 @@ for (x in unique(landsatAll$x)){
     
   }
 }
+
+landsatNormdf$x <- as.numeric(landsatNormdf$x)
+landsatNormdf$y <- as.numeric(landsatNormdf$y)
 
 write.csv(landsatNormdf, file.path(pathShare2, "pixel_by_pixel_norms.csv"), row.names=F)
 
