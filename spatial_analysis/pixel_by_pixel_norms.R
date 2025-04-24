@@ -21,21 +21,25 @@ landsatAll <- read.csv(file.path(google.drive, "data/spatial_NDVI_monitoring/rep
 summary(landsatAll)
 
 # Shouldn't need to do this with the new one, but just in case...
-landsatAll <- aggregate(cbind(NDVI, MissionPred, MissionResid, ReprojPred, NDVIReprojected) ~ x + y  + xy + mission + date + year + yday, data=landsatAll, FUN=median, na.rm=T)
-summary(landsatAll)
+# landsatAll <- aggregate(cbind(NDVI, MissionPred, MissionResid, ReprojPred, NDVIReprojected) ~ x + y  + xy + mission + date + year + yday, data=landsatAll, FUN=median, na.rm=T)
+# summary(landsatAll)
 
-landsatNormdf <- data.frame(xy=rep(unique(landsatAll$xy), each=365),
-                            yday=1:365)
-landsatNormdf$x <- unlist(lapply(strsplit(landsatNormdf$xy, " "), FUN=function(x){x[1]}))
-landsatNormdf$y <- unlist(lapply(strsplit(landsatNormdf$xy, " "), FUN=function(x){x[2]}))
-head(landsatNormdf)
-tail(landsatNormdf)
+# landsatNormdf <- data.frame(xy=rep(unique(landsatAll$xy), each=365),
+#                             yday=1:365)
+# landsatNormdf$x <- unlist(lapply(strsplit(landsatNormdf$xy, " "), FUN=function(x){x[1]}))
+# landsatNormdf$y <- unlist(lapply(strsplit(landsatNormdf$xy, " "), FUN=function(x){x[2]}))
+# head(landsatNormdf)
+# tail(landsatNormdf)
 
+
+landsatNormdf <- unique(landsatAll[c('x','y')])
+landsatNormdf <- landsatNormdf[rep(seq_len(nrow(landsatNormdf)), each=365),]
+landsatNormdf$yday <- rep_len(1:365,nrow(landsatNormdf))
 ######################
 #Norms
 ######################
 # newDF <- data.frame(yday=seq(1:365)) #create new data frame with column to represent day of year sequence
-pixel_norms <- data.frame()
+#pixel_norms <- data.frame()
 
 for (x in unique(landsatAll$x)){
   datx <- landsatAll[landsatAll$x==x,]
@@ -59,21 +63,24 @@ for (x in unique(landsatAll$x)){
   }
 }
 
-write.csv(pixel_norms, file.path(pathShare2, "pixel_by_pixel_norms.csv"), row.names=F)
+write.csv(landsatNormdf, file.path(pathShare2, "pixel_by_pixel_norms.csv"), row.names=F)
 
+######################
+#Plots
+######################
 
-ggplot(pixel_norms[pixel_norms$yday==180,], aes(x=x,y=y, fill=mean))+ #mean resids plot
-  geom_tile()+ coord_equal()+ scale_fill_gradientn(colors = hcl.colors(20, "RdYlGn"))+
+ggplot(landsatNormdf[landsatNormdf$yday==180,], aes(x=x,y=y, fill=mean))+ 
+  geom_tile()+ coord_equal()+ scale_fill_gradientn(limits=c(0,1),colors = hcl.colors(20, "BrBG"))+
   ggtitle("norms yday=180")
 
-ggplot(pixel_norms[pixel_norms$yday==1,], aes(x=x,y=y, fill=mean))+ #mean resids plot
-  geom_tile()+ coord_equal()+ scale_fill_gradientn(colors = hcl.colors(20, "RdYlGn"))+
+ggplot(landsatNormdf[landsatNormdf$yday==1,], aes(x=x,y=y, fill=mean))+ 
+  geom_tile()+ coord_equal()+ scale_fill_gradientn(limits=c(0,1),colors = hcl.colors(20, "BrBG"))+
   ggtitle("norms yday=1")
 
-p <- ggplot(pixel_norms, aes(x=x,y=y, fill=mean))+ #mean resids plot
-  geom_tile()+ coord_equal()+ scale_fill_gradientn(colors = hcl.colors(20, "RdYlGn"))+
+p <- ggplot(landsatNormdf, aes(x=x,y=y, fill=mean))+ #mean resids plot
+  geom_tile()+ coord_equal()+ scale_fill_gradientn(limits=c(0,1),colors = hcl.colors(20, "BrBG"))+
   transition_time(yday)+
-  ggtitle('{frame_time}')+labs(fill="mean")
+  ggtitle('norms yday = {frame_time}')+labs(fill="mean")
 
 gganimate::animate(p, length = 15, width = 700, height = 400, nframes=365,fps=2)
-anim_save("test.gif2",p)
+anim_save("test.gif",p)
