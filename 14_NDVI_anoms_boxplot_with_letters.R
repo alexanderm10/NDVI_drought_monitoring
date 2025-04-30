@@ -9,9 +9,46 @@ pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/M
 
 ######################
 
-usdmcum <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/cumulative_dm_export_20010101_20241231.csv")) #usdm chicago region cumulative data
+usdmcum <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/USDM_county_data_2001-2024.csv")) #usdm chicago region cumulative data
 grow_norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_growing_season_norms.csv")) #normals
 growyrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_growing_season_yrs.csv")) #individual years
+
+######################
+#weights by county
+######################
+#https://datahub.cmap.illinois.gov/datasets/a5d89f35ccc54018b690683b49be1ac7_0/explore?location=41.838395%2C-88.115001%2C9.16
+
+# will <- 3917450609.094
+# kendall <- 1494102678.262
+# cook <- 4472919440.23
+# dupage <- 1571636669.879
+# kane <- 2454958976.102
+# lake <- 2231222407.188
+# mchenry <- 2897036640.547
+
+coArea <- c(3917450609.094, 1494102678.262, 4472919440.23, 1571636669.879, 2454958976.102, 2231222407.188, 2897036640.547)
+names(coArea) <- c("Will County","Kendall County","Cook County","DuPage County","Kane County","Lake County","McHenry County")
+coWeights <- coArea/sum(coArea)
+
+usdmcum$County <- factor(usdmcum$County, levels = c("Will County","Kendall County","Cook County","DuPage County","Kane County","Lake County","McHenry County"))
+usdm_county <- data.frame()
+for (county in unique(usdmcum$County)){
+  usdmInd <- usdmcum[usdmcum$County==county,]
+  usdmInd$None <- usdmInd$None*coWeights[county]
+  usdmInd$D0 <- usdmInd$D0*coWeights[county]
+  usdmInd$D1 <- usdmInd$D1*coWeights[county]
+  usdmInd$D2 <- usdmInd$D2*coWeights[county]
+  usdmInd$D3 <- usdmInd$D3*coWeights[county]
+  usdmInd$D4 <- usdmInd$D4*coWeights[county]
+  usdm_county <- rbind(usdm_county, usdmInd)
+}
+
+usdmcum <- usdm_county %>% group_by(ValidStart, ValidEnd) %>%
+  summarise_at(vars(None, D0, D1, D2, D3, D4),
+               sum) %>%
+  ungroup()
+
+
 
 ######################
 #loop to add date and deviation column
@@ -66,7 +103,7 @@ anovForest <- aov(deviation~ severity, data=grow_merge[grow_merge$type=="forest"
 tukeyforest <- TukeyHSD(anovForest, conf.level=0.95)
 forestletters <- multcompLetters4(anovForest, tukeyforest)
 forestletters <- as.data.frame.list(forestletters$severity)
-forestletters2 = c("a","b","b","ab","ab")
+#forestletters2 = c("a","b","b","ab","ab")
 
 anovgrass <- aov(deviation~ severity, data=grow_merge[grow_merge$type=="grassland",])
 tukeygrass <- TukeyHSD(anovgrass, conf.level=0.95)
@@ -91,7 +128,7 @@ urbopletters <- as.data.frame.list(urbopletters$severity)
 grow_sum <- group_by(grow_merge, type, severity) %>% 
   summarise(mean_anom=mean(deviation),sd=sd(deviation))
 
-letter_list <- c(cropletters$Letters,forestletters2, grassletters$Letters, urbopletters$Letters, urblowletters$Letters, urbmedletters$Letters, urbhiletters$Letters)
+letter_list <- c(cropletters$Letters,forestletters$Letters, grassletters$Letters, urbopletters$Letters, urblowletters$Letters, urbmedletters$Letters, urbhiletters$Letters)
 grow_sum$Tukey <- letter_list
 
 ######################
@@ -126,10 +163,10 @@ tukeyd3 <- TukeyHSD(anovd3, conf.level = 0.95)
 d3letters <- multcompLetters4(anovd3, tukeyd3)
 d3letters <- as.data.frame.list(d3letters$type)
 
-#grow_merge_sev <- group_by(grow_merge, severity, type) %>%
-  #summarise(meandev=mean(deviation),sd=sd(deviation))
+# grow_merge_sev <- group_by(grow_merge, severity, type) %>%
+#   summarise(meandev=mean(deviation),sd=sd(deviation))
 
-sev_letters <- c("A","AB","A","A","AB","A","AB","A","AB","A","A","B","B","C","C","A","B","B","C","C","A","AB","B","C","C","A","AB","AB","BC","C","A","A","A","AB","B")
+sev_letters <- c("A","AB","A","A","AB","A","AB","A","A","A","A","B","B","C","C","A","B","B","C","C","A","AB","B","C","C","A","AB","AB","BC","C","A","A","A","AB","B")
 grow_sum$tukey2 <- sev_letters
 
 ggplot()+ #boxplots by drought category for each LC type
@@ -142,7 +179,7 @@ ggplot()+ #boxplots by drought category for each LC type
   labs(caption = "lowercase = drought category within land cover class \n uppercase = drought category across classes") +
   ylim(-0.2,0.2) + theme_bw(10) + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),plot.caption.position="plot",
                                         plot.caption = element_text(hjust=0,vjust=0.5),plot.margin = margin(5.5,5.5,20,5.5,"pt"))
-ggsave("NDVI_anoms_boxplot_with_letters.png", path = pathShare, height=6, width=12, units="in", dpi = 320)
+ggsave("NDVI_anoms_boxplot_with_letters_redo.png", path = pathShare, height=6, width=12, units="in", dpi = 320)
 
 
 #grid.arrange(p, bottom = textGrob("lowercase leters = within land cover class ", vjust=-5, hjust=-0.01))
