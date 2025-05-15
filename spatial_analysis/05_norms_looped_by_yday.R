@@ -57,7 +57,7 @@ for (day in 1:365){
   days_section <- unique(c(start_section, end_section))
   dfyday <- landsatAll %>% filter(yday %in% days_section)
   
-  norm_gam <- gam(NDVIReprojected ~ s(y,x, k=12), data=dfyday)
+  norm_gam <- gam(NDVIReprojected ~ s(y,x), data=dfyday)
   
   yday_ind <- which(landsatNormdf$yday==day)
   ydaynorm <- post.distns(model.gam=norm_gam, newdata=landsatNormdf[yday_ind,], vars=c("x","y"))
@@ -77,3 +77,14 @@ p <- ggplot(landsatNormdf, aes(x=x,y=y,fill=mean))+
 
 gganimate::animate(p, length = 15, width = 700, height = 400, nframes=365,fps=2)
 anim_save("yday_loop_norms.gif",p)
+
+ggplot(landsatNormdf[landsatNormdf$yday==206,], aes(x=x,y=y, fill=mean))+
+  geom_tile()+ coord_equal()+ scale_fill_gradientn(limits=c(0,1),colors = hcl.colors(20, "BrBG"))+
+  ylab("y") + xlab("x")+
+  ggtitle('Norms, yday = 206')+labs(fill="mean anomaly")
+
+
+ggplot(landsatNormdf[landsatNormdf$yday==144,], aes(x=x,y=y, fill=mean))+
+  geom_tile()+ coord_equal()+ scale_fill_gradientn(limits=c(0,1),colors = hcl.colors(20, "BrBG"))+
+  ylab("y") + xlab("x")+
+  ggtitle('Norms, yday = 144')+labs(fill="mean anomaly")
