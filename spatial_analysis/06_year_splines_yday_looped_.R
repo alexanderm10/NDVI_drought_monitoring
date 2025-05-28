@@ -53,7 +53,7 @@ for (yr in unique(landsatAll$year)){
     ydays <- seq(yr_dates[day]-16, yr_dates[day], by="day")
     df_subset <- yr_window %>% filter(date %in% ydays)
     
-    if(length(which(!is.na(df_subset$NDVIReprojected)))<25) next
+    #if(length(which(!is.na(df_subset$NDVIReprojected)))<25) next
     
     gam_day <- gam(NDVIReprojected ~ norm + s(x,y), data=df_subset)
     
@@ -61,9 +61,9 @@ for (yr in unique(landsatAll$year)){
     yr_day_post <- post.distns(model.gam=gam_day, newdata=landsatYears[yr_day_Ind,], vars=c("x","y"))
     landsatYears[yr_day_Ind,c("mean", "lwr", "upr")] <- yr_day_post[,c("mean", "lwr", "upr")]
     
-    #saveRDS(gamyr, file.path(pathShare, paste0("yday=",day,"yr=", yr, "_year_spatial_gam")))
+    saveRDS(gam_day, file.path(pathShare, paste0("yday=",day,"yr=", yr, "_year_spatial_gam")))
 
   }
 }
 
-write.csv(landsatNormdf, file.path(pathShare2, "yday_loop_norms.csv"), row.names=F)
+write.csv(landsatYears, file.path(pathShare2, "yday_spatial_loop_years.csv"), row.names=F)
