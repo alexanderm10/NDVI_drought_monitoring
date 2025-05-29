@@ -100,4 +100,40 @@ for (yr in unique(landsatAll$year)){
 } # End year loop
 summary(modelStats)
 
+write.csv(modelStats, file.path(pathShare2, "yday_spatial_loop_model_stats.csv"), row.names=F)
 write.csv(landsatYears, file.path(pathShare2, "yday_spatial_loop_years.csv"), row.names=F)
+
+# plots -------------------------------------------------------------------
+
+landsatYears$anoms <- landsatYears$mean - landsatYears$norms
+
+anoms_mean <- landsatYears %>% group_by(x,y,yday) %>%
+  summarise_at(vars("anoms"), mean, na.rm=TRUE) %>% as.data.frame()
+
+p <- ggplot(anoms_mean, aes(x=x,y=y,fill=anoms))+
+  geom_tile()+coord_equal()+scale_fill_gradientn(limits=c(-0.15,0.15),colors = hcl.colors(20, "BrBG"))+
+  transition_time(yday)+ ggtitle('mean anoms yday = {frame_time}')+labs(fill="mean anoms")
+
+gganimate::animate(p, length = 15, width = 700, height = 400, nframes=365,fps=1)
+anim_save("mean_anoms_yday_loop.gif",p)
+
+ggplot(modelStats, aes(x=yday, y=error))+
+  geom_point(aes(color=factor(year)))
+
+landsatYears2012 <- landsatYears[landsatYears$year==2012,]
+
+p <- ggplot(landsatYears2012, aes(x=x,y=y,fill=mean))+
+  geom_tile()+coord_equal()+scale_fill_gradientn(limits=c(0,1),colors = hcl.colors(20, "BrBG"))+
+  transition_time(yday)+ ggtitle('2012 NDVI yday = {frame_time}')+labs(fill="pred NDVI")
+
+gganimate::animate(p, length = 15, width = 700, height = 400, nframes=365,fps=1)
+anim_save("2012_NDVI_yday_loop.gif",p)
+
+p <- ggplot(landsatYears[landsatYears$year==2005,], aes(x=x,y=y,fill=anoms))+
+  geom_tile()+coord_equal()+scale_fill_gradientn(colors = hcl.colors(20, "BrBG"))+
+  transition_time(yday)+ ggtitle('2005 anoms NDVI yday = {frame_time}')+labs(fill="NDVI anoms")
+
+gganimate::animate(p, length = 15, width = 700, height = 400, nframes=365,fps=1)
+anim_save("2005_NDVI_anoms_yday_loop.gif",p)
+
+
