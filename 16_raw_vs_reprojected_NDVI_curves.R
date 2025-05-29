@@ -42,6 +42,16 @@ ggplot(data=ndvi.raw, aes(x=yday,y=NDVIReprojected))+
   ggtitle("Reprojected NDVI")+ ylab(" Reprojected NDVI")+ theme_bw(11)
 ggsave("reprojected_NDVI_mission_curves.png", path = pathShare, height=6, width=12, units="in", dpi = 320)
 
+
+# mean and sd -------------------------------------------------------------
+ndvi.raw$month <- lubridate::month(ndvi.raw$date)
+
+raw_stats <- group_by(ndvi.raw, mission, month) %>%
+   summarise(mean_NDVI=mean(NDVI, na.rm=T),sd=sd(NDVI, na.rm=T))
+
+reproj_stats <- group_by(ndvi.raw, mission, month) %>%
+  summarise(mean_NDVI_reproj=mean(NDVIReprojected, na.rm=T),sd=sd(NDVIReprojected, na.rm=T))
+
 # raw vs. reprojected data by year ----------------------------------------
 
 #raw
