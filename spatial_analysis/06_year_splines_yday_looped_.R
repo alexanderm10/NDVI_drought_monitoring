@@ -65,7 +65,7 @@ for (yr in unique(landsatAll$year)){
     #   coord_equal() +
     #   facet_wrap(~yday) +
     #   geom_tile(aes(x=x, y=y, fill=norm))
-    # 
+
     # ggplot(data=df_subset[,]) +
     #   coord_equal() +
     #   facet_wrap(~yday) +
@@ -81,10 +81,13 @@ for (yr in unique(landsatAll$year)){
     
     gam_day <- gam(NDVIReprojected ~ norm + s(x,y) -1, data=df_subset)
     gamSummary <- summary(gam_day)
+    # plot(gam_day)
     
     modelStats$R2[statsInd] <- gamSummary$r.sq
     # plot(df_subset$NDVIReprojected[!is.na(df_subset$NDVIReprojected)] ~ predict(gam_day))
-    modelStats[statsInd,c("Intercept", "NormCoef")] <- gamSummary$p.table[,"Estimate"]
+    if(grepl("Intercept", row.names(gamSummary$p.table)))  modelStats[statsInd,c("Intercept")] <- gamSummary$p.table[grep("Intercept", row.names(gamSummary$p.table)),"Estimate"]
+      
+    if(grepl("norm", row.names(gamSummary$p.table)))  modelStats[statsInd,c("NormCoef")] <- gamSummary$p.table[grep("norm", row.names(gamSummary$p.table)),"Estimate"]    
     modelStats$SplineP[statsInd] <- gamSummary$s.table[,"p-value"]
     modelStats$error[statsInd] <- mean(residuals(gam_day))
     # hist(residuals(gam_day))
