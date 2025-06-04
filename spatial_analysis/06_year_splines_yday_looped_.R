@@ -79,7 +79,7 @@ for (yr in unique(landsatAll$year)){
       if(length(unique(df_subset$xy[!is.na(df_subset$NDVIReprojected)]))<nPixels*0.33) next
     #if(length(which(!is.na(df_subset$NDVIReprojected)))<25) next
     
-    gam_day <- gam(NDVIReprojected ~ norm + s(x,y), data=df_subset)
+    gam_day <- gam(NDVIReprojected ~ norm + s(x,y) -1, data=df_subset)
     gamSummary <- summary(gam_day)
     
     modelStats$R2[statsInd] <- gamSummary$r.sq
@@ -94,7 +94,7 @@ for (yr in unique(landsatAll$year)){
     yr_day_post <- post.distns(model.gam=gam_day, newdata=landsatYears[yr_day_Ind,], vars=c("x","y"))
     landsatYears[yr_day_Ind,c("mean", "lwr", "upr")] <- yr_day_post[,c("mean", "lwr", "upr")]
     
-    saveRDS(gam_day, file.path(pathShare, paste0("yday=",DAY,"yr=", yr, "_year_spatial_gam")))
+    #saveRDS(gam_day, file.path(pathShare, paste0("yday=",DAY,"yr=", yr, "_year_spatial_gam")))
 
   }# End day loop
 } # End year loop
@@ -107,15 +107,15 @@ write.csv(landsatYears, file.path(pathShare2, "yday_spatial_loop_years.csv"), ro
 
 landsatYears$anoms <- landsatYears$mean - landsatYears$norms
 
-anoms_mean <- landsatYears %>% group_by(x,y,yday) %>%
-  summarise_at(vars("anoms"), mean, na.rm=TRUE) %>% as.data.frame()
+anoms_median <- landsatYears %>% group_by(x,y,yday) %>%
+  summarise_at(vars("anoms"), median, na.rm=TRUE) %>% as.data.frame()
 
-p <- ggplot(anoms_mean, aes(x=x,y=y,fill=anoms))+
-  geom_tile()+coord_equal()+scale_fill_gradientn(limits=c(-0.15,0.15),colors = hcl.colors(20, "BrBG"))+
-  transition_time(yday)+ ggtitle('mean anoms yday = {frame_time}')+labs(fill="mean anoms")
+p <- ggplot(anoms_median, aes(x=x,y=y,fill=anoms))+
+  geom_tile()+coord_equal()+scale_fill_gradientn(limits=c(-0.1,0.1),colors = hcl.colors(20, "BrBG"))+
+  transition_time(yday)+ ggtitle('median anoms yday = {frame_time}')+labs(fill="median anoms")
 
 gganimate::animate(p, length = 15, width = 700, height = 400, nframes=365,fps=1)
-anim_save("mean_anoms_yday_loop.gif",p)
+anim_save("median_anoms_yday_loop.gif",p)
 
 ggplot(modelStats, aes(x=yday, y=error))+
   geom_point(aes(color=factor(year)))
