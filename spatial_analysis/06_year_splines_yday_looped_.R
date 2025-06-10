@@ -49,7 +49,7 @@ for (yr in unique(landsatAll$year)){
   print(yr)
   yr_dates <- seq(as.Date(paste(yr,1,1,sep="-")), as.Date(paste(yr,12,31,sep="-")), by="day")
   
-  yr_window <- subset(landsatAll, date >= as.Date(paste(yr-1,12,16, sep="-")) & date <= as.Date(paste(yr,12,31,sep="-")))
+  yr_window <- subset(landsatAll, date >= as.Date(paste(yr-1,12,08, sep="-")) & date <= as.Date(paste(yr,12,31,sep="-")))
   yr_window <- merge(yr_window, landsatNorms, by = c("xy", "x", "y", "yday"))
   yr_window <- yr_window %>% rename(norm=mean)
   
@@ -65,7 +65,7 @@ for (yr in unique(landsatAll$year)){
     #   coord_equal() +
     #   facet_wrap(~yday) +
     #   geom_tile(aes(x=x, y=y, fill=norm))
-
+    # 
     # ggplot(data=df_subset[,]) +
     #   coord_equal() +
     #   facet_wrap(~yday) +
@@ -81,13 +81,10 @@ for (yr in unique(landsatAll$year)){
     
     gam_day <- gam(NDVIReprojected ~ norm + s(x,y) -1, data=df_subset)
     gamSummary <- summary(gam_day)
-    # plot(gam_day)
     
     modelStats$R2[statsInd] <- gamSummary$r.sq
     # plot(df_subset$NDVIReprojected[!is.na(df_subset$NDVIReprojected)] ~ predict(gam_day))
-    if(grepl("Intercept", row.names(gamSummary$p.table)))  modelStats[statsInd,c("Intercept")] <- gamSummary$p.table[grep("Intercept", row.names(gamSummary$p.table)),"Estimate"]
-      
-    if(grepl("norm", row.names(gamSummary$p.table)))  modelStats[statsInd,c("NormCoef")] <- gamSummary$p.table[grep("norm", row.names(gamSummary$p.table)),"Estimate"]    
+    modelStats[statsInd,c("Intercept", "NormCoef")] <- gamSummary$p.table[,"Estimate"]
     modelStats$SplineP[statsInd] <- gamSummary$s.table[,"p-value"]
     modelStats$error[statsInd] <- mean(residuals(gam_day))
     # hist(residuals(gam_day))
@@ -103,12 +100,21 @@ for (yr in unique(landsatAll$year)){
 } # End year loop
 summary(modelStats)
 
-write.csv(modelStats, file.path(pathShare2, "yday_spatial_loop_model_stats.csv"), row.names=F)
-write.csv(landsatYears, file.path(pathShare2, "yday_spatial_loop_years.csv"), row.names=F)
+write.csv(modelStats, file.path(pathShare2, "16_day_window_yday_spatial_loop_model_stats.csv"), row.names=F)
+write.csv(landsatYears, file.path(pathShare2, "16_day_window_yday_spatial_loop_years.csv"), row.names=F)
 
 # plots -------------------------------------------------------------------
+modelStats <- modelStats[!modelStats$year==2025,]
+modelStats <- modelStats[modelStats$yday >= 91 & modelStats$yday <= 304,]
 
-landsatYears$anoms <- landsatYears$mean - landsatYears$norms
+summary(modelStats)
+
+ggplot(data=modelStats[is.na(modelStats$R2),], aes(x=year))+
+  geom_histogram(binwidth = 1) + ggtitle("16-day window R2 missing values")
+  
+
+
+landsatYears$anoms <- landsatYears$mean - landsatYears$norm
 
 anoms_median <- landsatYears %>% group_by(x,y,yday) %>%
   summarise_at(vars("anoms"), median, na.rm=TRUE) %>% as.data.frame()
@@ -132,11 +138,20 @@ p <- ggplot(landsatYears2012, aes(x=x,y=y,fill=mean))+
 gganimate::animate(p, length = 15, width = 700, height = 400, nframes=365,fps=1)
 anim_save("2012_NDVI_yday_loop.gif",p)
 
-p <- ggplot(landsatYears[landsatYears$year==2005,], aes(x=x,y=y,fill=anoms))+
-  geom_tile()+coord_equal()+scale_fill_gradientn(colors = hcl.colors(20, "BrBG"))+
-  transition_time(yday)+ ggtitle('2005 anoms NDVI yday = {frame_time}')+labs(fill="NDVI anoms")
+landsatYears2023 <- landsatYears[landsatYears$year==2023,]
+
+p <- ggplot(landsatYears2023, aes(x=x,y=y,fill=mean))+
+  geom_tile()+coord_equal()+scale_fill_gradientn(limits=c(0,1),colors = hcl.colors(20, "BrBG"))+
+  transition_time(yday)+ ggtitle('2023 NDVI yday = {frame_time}')+labs(fill="pred NDVI")
 
 gganimate::animate(p, length = 15, width = 700, height = 400, nframes=365,fps=1)
-anim_save("2005_NDVI_anoms_yday_loop.gif",p)
+anim_save("2023_NDVI_yday_loop.gif",p)
+
+p <- ggplot(landsatYears[landsatYears$year==2023,], aes(x=x,y=y,fill=anoms))+
+  geom_tile()+coord_equal()+scale_fill_gradientn(limits=c(-0.2,0.2),colors = hcl.colors(20, "BrBG"))+
+  transition_time(yday)+ ggtitle('2023 anoms NDVI yday = {frame_time}')+labs(fill="NDVI anoms")
+
+gganimate::animate(p, length = 15, width = 700, height = 400, nframes=365,fps=1)
+anim_save("2023_NDVI_anoms_yday_loop.gif",p)
 
 
