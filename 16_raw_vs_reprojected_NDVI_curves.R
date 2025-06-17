@@ -3,6 +3,7 @@ library(ggplot2)
 library(tibble)
 library(dplyr)
 library(MASS)
+library(cowplot)
 
 Sys.setenv(GOOGLE_DRIVE = "~/Google Drive/Shared drives/Urban Ecological Drought")
 google.drive <- Sys.getenv("GOOGLE_DRIVE")
@@ -22,26 +23,45 @@ yrs$type <- factor(yrs$type, levels = c("crop", "forest", "grassland", "urban-op
 
 # raw vs. reprojected data by satellite -----------------------------------
 
+day.labels <- data.frame(Date=seq.Date(as.Date("2023-01-01"), as.Date("2023-12-01"), by="month"))
+day.labels$yday <- lubridate::yday(day.labels$Date)
+day.labels$Text <- paste(lubridate::month(day.labels$Date, label=T), lubridate::day(day.labels$Date))
+day.labels
+summary(day.labels)
+
 #raw data
-ggplot(data=ndvi.raw, aes(x=yday,y=NDVI))+
+p<- ggplot(data=ndvi.raw, aes(x=yday,y=NDVI))+
   geom_point(data=ndvi.raw, aes(x=yday, y=NDVI, color=mission),size=0.1, alpha=0.5)+
   geom_smooth(method="gam", formula= y ~ s(x, bs="tp", k=12), aes(color=mission, fill=mission))+
   scale_color_manual(name="mission", values=c("landsat 5" = "#D81B60", "landsat 7"="#1E88E5", "landsat 8"="#FFC107", "landsat 9"="#004D40")) +
   scale_fill_manual(name="mission", values=c("landsat 5" = "#D81B60", "landsat 7"="#1E88E5", "landsat 8"="#FFC107", "landsat 9"="#004D40")) +
-  facet_wrap(~type) + ylim(0,1)+ xlim(0,365)+
+  facet_wrap(~type, ncol=1) + ylim(0,1)+ 
+  scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
   ggtitle("Raw NDVI")+ ylab("NDVI")+ theme_bw(11)
-ggsave("raw_NDVI_mission_curves.png", path = pathShare, height=6, width=12, units="in", dpi = 320)
+p <- p + theme(legend.position = "none")
+#ggsave("raw_NDVI_mission_curves.png", path = pathShare, height=6, width=12, units="in", dpi = 320)
 
-#reprojected data
-ggplot(data=ndvi.raw, aes(x=yday,y=NDVIReprojected))+
+#harmonized data
+p_harmonized <- ggplot(data=ndvi.raw, aes(x=yday,y=NDVIReprojected))+
   geom_point(data=ndvi.raw, aes(x=yday, y=NDVIReprojected, color=mission),size=0.1, alpha=0.5)+
   geom_smooth(method="gam", formula= y ~ s(x, bs="tp", k=12), aes(color=mission,fill=mission))+
   scale_color_manual(name="mission", values=c("landsat 5" = "#D81B60", "landsat 7"="#1E88E5", "landsat 8"="#FFC107", "landsat 9"="#004D40")) +
   scale_fill_manual(name="mission", values=c("landsat 5" = "#D81B60", "landsat 7"="#1E88E5", "landsat 8"="#FFC107", "landsat 9"="#004D40")) +
-  facet_wrap(~type) + ylim(0,1)+ xlim(0,365)+
-  ggtitle("Reprojected NDVI")+ ylab(" Reprojected NDVI")+ theme_bw(11)
-ggsave("reprojected_NDVI_mission_curves.png", path = pathShare, height=6, width=12, units="in", dpi = 320)
+  facet_wrap(~type, ncol=1) + ylim(0,1)+
+  scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
+  ggtitle("Harmonized NDVI")+ ylab("Harmonized NDVI")+ theme_bw(11)
+p_harmonized <- p_harmonized + theme(legend.position = "none")
 
+ggpubr::ggarrange(
+  p, p_harmonized, # list of plots
+  labels = "AUTO", # labels
+  common.legend = TRUE, # COMMON LEGEND
+  legend = "bottom", # legend position
+  align = "hv", # Align them both, horizontal and vertical
+  ncol = 2 # number of rows
+)
+
+ggsave("raw_vs_harmonized_NDVI_mission_curves.png", path = pathShare, height=12, width=12, units="in", dpi = 320)
 
 # mean and sd -------------------------------------------------------------
 ndvi.raw$month <- lubridate::month(ndvi.raw$date)
