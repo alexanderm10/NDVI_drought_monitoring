@@ -16,6 +16,7 @@ pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/d
 ######################
 
 ndvi.latest <- read.csv(file.path(google.drive, "data/UrbanEcoDrought_NDVI_LocalExtract/NDVIall_latest.csv"))
+#ndvi.latest <- read.csv(file.path(google.drive, "data/UrbanEcoDrought_NDVI_LocalExtract-RAW/NDVIall_latest_with_forest-wet.csv"))
 ndvi.latest$date <- as.Date(ndvi.latest$date)
 ndvi.latest$type <- as.factor(ndvi.latest$type)
 ndvi.latest$mission <- as.factor(ndvi.latest$mission)
@@ -66,6 +67,27 @@ ndviforestDupe$mission <- "landsat 8"
 ndviforest$ReprojPred <- predict(gamforest, newdata=ndviforestDupe)
 ndviforest$NDVIReprojected <- ndviforest$MissionResid + ndviforest$ReprojPred
 summary(ndviforest)
+
+######################
+#forest-wet
+######################
+
+ndviforestwet=ndvi.latest[ndvi.latest$type=="forest-wet",]
+
+gamforestwet <- gam(NDVI ~ s(yday, k=12, by=mission) + mission-1, data=ndviforestwet) #k=1.5 months in a year
+summary(gamforestwet)
+AIC(gamforestwet)
+
+ndviforestwet$NDVIMissionPred <- predict(gamforestwet, newdata=ndviforestwet)
+ndviforestwet$MissionResid <- ndviforestwet$NDVI - ndviforestwet$NDVIMissionPred
+
+# Going to "reproject" the predicted mean/normal
+ndviforestwetDupe <- ndviforestwet
+ndviforestwetDupe$mission <- "landsat 8"
+
+ndviforestwet$ReprojPred <- predict(gamforestwet, newdata=ndviforestwetDupe)
+ndviforestwet$NDVIReprojected <- ndviforestwet$MissionResid + ndviforestwet$ReprojPred
+summary(ndviforestwet)
 
 ######################
 #grassland
@@ -176,7 +198,10 @@ summary(ndviUrbOpen)
 #combine into one large dataframe & save
 ######################
 
-raw_data <- rbind(ndvicrop, ndviforest, ndvigrass, ndviUrbHigh, ndviUrbMed, ndviUrbLow, ndviUrbOpen)
-write.csv(raw_data, file.path(pathShare, "raw_data_k=12.csv"), row.names=F)
+# raw_data <- rbind(ndvicrop, ndviforest, ndvigrass, ndviUrbHigh, ndviUrbMed, ndviUrbLow, ndviUrbOpen)
+# write.csv(raw_data, file.path(pathShare, "raw_data_k=12.csv"), row.names=F)
+
+raw_data <- rbind(ndvicrop, ndviforest, ndvigrass, ndviUrbHigh, ndviUrbMed, ndviUrbLow, ndviUrbOpen, ndviforestwet)
+write.csv(raw_data, file.path(pathShare, "raw_data_k=12_with_wet-forest.csv"), row.names=F)
 
 ######################

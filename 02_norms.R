@@ -17,7 +17,10 @@ source("~/Documents/GitHub/NDVI_drought_monitoring/0_Calculate_GAMM_Posteriors_U
 #loading in and formatting raw data from 01_raw_data.R
 ######################
 
-raw.data <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data_k=12.csv"))
+#raw.data <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data_k=12.csv"))
+
+raw.data <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data_k=12_with_wet-forest.csv"))
+
 newDF <- data.frame(yday=seq(1:365)) #create new data frame with column to represent day of year sequence
 
 ######################
@@ -38,6 +41,16 @@ gamforest_norm <- gam(NDVIReprojected ~ s(yday, k=12), data=raw.data[raw.data$ty
 NDVIforest_norm <- predict(gamforest_norm, newdata=newDF)
 forest_norm <- post.distns(model.gam = gamforest_norm, newdata = newDF, vars="yday")
 forest_norm$type <- "forest"
+#forest_norm$NDVIpred <- NDVIforest_norm
+
+######################
+#wet-forest
+######################
+
+gamforest_wet_norm <- gam(NDVIReprojected ~ s(yday, k=12), data=raw.data[raw.data$type=="forest-wet",])
+NDVIforest_wet_norm <- predict(gamforest_wet_norm, newdata=newDF)
+forest_wet_norm <- post.distns(model.gam = gamforest_wet_norm, newdata = newDF, vars="yday")
+forest_wet_norm$type <- "forest-wet"
 #forest_norm$NDVIpred <- NDVIforest_norm
 
 ######################
@@ -94,7 +107,10 @@ UrbOpen_norm$type <- "urban-open"
 #combine into one large dataframe & save
 ######################
 
-norms <- rbind(crop_norm, forest_norm, grass_norm, UrbHigh_norm, UrbMed_norm, UrbLow_norm, UrbOpen_norm)
-write.csv(norms, file.path(pathShare, "k=12_norms_all_LC_types.csv"), row.names=F)
+#norms <- rbind(crop_norm, forest_norm, grass_norm, UrbHigh_norm, UrbMed_norm, UrbLow_norm, UrbOpen_norm)
+#write.csv(norms, file.path(pathShare, "k=12_norms_all_LC_types.csv"), row.names=F)
+
+norms <- rbind(crop_norm, forest_norm, forest_wet_norm, grass_norm, UrbHigh_norm, UrbMed_norm, UrbLow_norm, UrbOpen_norm)
+write.csv(norms, file.path(pathShare, "k=12_norms_all_LC_types_with_wet-forest.csv"), row.names=F)
 
 ######################
