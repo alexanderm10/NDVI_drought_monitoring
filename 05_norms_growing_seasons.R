@@ -13,9 +13,12 @@ pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/d
 ######################
 #usdmcat <- read.csv("~/Downloads/dm_export_20000101_20241017.csv") #usdm chicago region categorical data
 #usdmcum <- read.csv("~/Downloads/dm_export_20000101_20241024.csv") #usdm chicago region cumulative data
-yrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_individual_years_post_GAM.csv")) #individual years
-norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_norms_all_LC_types.csv")) #normals
 
+#yrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_individual_years_post_GAM.csv")) #individual years
+#norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_norms_all_LC_types.csv")) #normals
+
+yrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_individual_years_post_GAM_with_forest-wet.csv")) #individual years
+norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_norms_all_LC_types_with_wet-forest.csv")) #normals
 ######################
 #loops to find growing season
 ######################
@@ -76,9 +79,11 @@ for (LC in unique(norms$type)){
 #saving as separate df
 ######################
 
-grow_norms <- rbind(growcrop, growforest, growgrassland, `growurban-low`, `growurban-medium`, `growurban-open`, `growurban-high`)
-write.csv(grow_norms, file.path(pathShare, "k=12_growing_season_norms.csv"), row.names =F)
+#grow_norms <- rbind(growcrop, growforest, growgrassland, `growurban-low`, `growurban-medium`, `growurban-open`, `growurban-high`)
+#write.csv(grow_norms, file.path(pathShare, "k=12_growing_season_norms.csv"), row.names =F)
 
+grow_norms <- rbind(growcrop, growforest, `growforest-wet`, growgrassland, `growurban-low`, `growurban-medium`, `growurban-open`, `growurban-high`)
+write.csv(grow_norms, file.path(pathShare, "k=12_growing_season_norms_with_forest-wet.csv"), row.names =F)
 ######################
 #loop to make a dataset of growing season for the years dataset
 ######################
@@ -91,7 +96,9 @@ for (LC in unique(yrs$type)){
   assign(paste0("growyrs",LC),df)
 }
 
-growyrs <- rbind(growyrscrop, growyrsforest, growyrsgrassland, growyrsurbanlow, growyrsurbanmedium, growyrsurbanopen, growyrsurbanhigh)
-write.csv(growyrs, file.path(pathShare, "k=12_growing_season_yrs.csv"), row.names=F)
+#growyrs <- rbind(growyrscrop, growyrsforest, growyrsgrassland, growyrsurbanlow, growyrsurbanmedium, growyrsurbanopen, growyrsurbanhigh)
+#write.csv(growyrs, file.path(pathShare, "k=12_growing_season_yrs.csv"), row.names=F)
 
+growyrs <- rbind(growyrscrop, growyrsforest, growyrsforestwet, growyrsgrassland, growyrsurbanlow, growyrsurbanmedium, growyrsurbanopen, growyrsurbanhigh)
+write.csv(growyrs, file.path(pathShare, "k=12_growing_season_yrs_with_forest-wet.csv"), row.names=F)
 ######################
