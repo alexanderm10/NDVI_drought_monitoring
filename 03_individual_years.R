@@ -15,8 +15,9 @@ source("~/Documents/GitHub/NDVI_drought_monitoring/0_Calculate_GAMM_Posteriors_U
 ######################
 #loading in raw data from 01_raw_data.R
 ######################
+raw.data <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data_k=12_with_wet-forest.csv"))
 
-raw.data <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data_k=12.csv"))
+#raw.data <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data_k=12.csv"))
 newDF <- data.frame(yday=seq(1:365)) #create new data frame to predict over
 
 dat24 <- raw.data[raw.data$year==2024,] #subset for curent yr
@@ -51,6 +52,7 @@ for (LC in unique(raw.data$type)){
   }
 }
 
-write.csv(df, file.path(pathShare, "k=12_individual_years_post_GAM.csv"), row.names=F) #save file
+#write.csv(df, file.path(pathShare, "k=12_individual_years_post_GAM.csv"), row.names=F) #save file
+write.csv(df, file.path(pathShare, "k=12_individual_years_post_GAM_with_forest-wet.csv"), row.names=F) #save file
 
 ######################
