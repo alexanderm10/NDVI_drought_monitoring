@@ -9,6 +9,7 @@ Sys.setenv(GOOGLE_DRIVE = "~/Google Drive/Shared drives/Urban Ecological Drought
 google.drive <- Sys.getenv("GOOGLE_DRIVE")
 path.google <- ("~/Google Drive/My Drive/")
 pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/data/NDVI_drought_monitoring/")
+pathShare2 <- file.path(path.google, "../Shared drives/Urban Ecological Drought/Manuscript - Urban Drought NDVI Monitoring by Land Cover Class/tables")
 
 ######################
 #usdmcat <- read.csv("~/Downloads/dm_export_20000101_20241017.csv") #usdm chicago region categorical data
@@ -101,4 +102,24 @@ for (LC in unique(yrs$type)){
 
 growyrs <- rbind(growyrscrop, growyrsforest, growyrsforestwet, growyrsgrassland, growyrsurbanlow, growyrsurbanmedium, growyrsurbanopen, growyrsurbanhigh)
 write.csv(growyrs, file.path(pathShare, "k=12_growing_season_yrs_with_forest-wet.csv"), row.names=F)
+######################
+#reformat table for growing season dates
+######################
+grow_norms <- grow_norms[grow_norms$type!="forest",]
+grow_norms$type[grow_norms$type=="forest-wet"] <- "forest"
+grow_norms$date <- as.Date(grow_norms$yday, origin="2022-12-31")
+grow_norms$type <- factor(grow_norms$type, levels = c("crop", "forest", "grassland", "urban-open", "urban-low", "urban-medium", "urban-high"))
+
+grow_dates <- grow_norms[c("type","date")]
+grow_dates <- grow_dates %>% group_by(type) %>%
+  summarise(
+    start = min(date),
+    end = max(date)
+  )
+
+grow_dates$start <- strftime(grow_dates$start, format="%b %d" )
+grow_dates$end <- strftime(grow_dates$end, format="%b %d" )
+
+write.csv(grow_dates, file.path(pathShare2, "growing_season_dates_table.csv"), row.names=F)
+
 ######################
