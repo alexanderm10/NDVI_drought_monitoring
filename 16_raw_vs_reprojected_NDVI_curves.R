@@ -9,12 +9,17 @@ Sys.setenv(GOOGLE_DRIVE = "~/Google Drive/Shared drives/Urban Ecological Drought
 google.drive <- Sys.getenv("GOOGLE_DRIVE")
 path.google <- ("~/Google Drive/My Drive/")
 pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/Manuscript - Urban Drought NDVI Monitoring by Land Cover Class/figures")
+pathShare2 <- file.path(path.google, "../Shared drives/Urban Ecological Drought/Manuscript - Urban Drought NDVI Monitoring by Land Cover Class/tables")
 
 source("~/Documents/GitHub/NDVI_drought_monitoring/0_Calculate_GAMM_Posteriors_Updated_Copy.R")
 
 # load data ---------------------------------------------------------------
 
-ndvi.raw <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data_k=12.csv")) #individual years
+#ndvi.raw <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data_k=12.csv")) #individual years
+
+ndvi.raw <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data_k=12_with_wet-forest.csv")) #individual years
+ndvi.raw <- ndvi.raw[ndvi.raw$type!="forest",]
+ndvi.raw$type[ndvi.raw$type=="forest-wet"] <- "forest"
 ndvi.raw$type <- factor(ndvi.raw$type, levels = c("crop", "forest", "grassland", "urban-open", "urban-low", "urban-medium", "urban-high"))
 ndvi.raw$mission <- factor(ndvi.raw$mission, levels=c("landsat 5", "landsat 7", "landsat 8", "landsat 9"))
 
@@ -29,50 +34,61 @@ day.labels$Text <- paste(lubridate::month(day.labels$Date, label=T), lubridate::
 day.labels
 summary(day.labels)
 
-#raw data
-p<- ggplot(data=ndvi.raw, aes(x=yday,y=NDVI))+
+ndvi.raw <- ndvi.raw %>% rename("Raw" = "NDVI", "Harmonized" = "NDVIReprojected")
+ndvi.raw <- ndvi.raw %>% pivot_longer(cols = c("Raw", "Harmonized"), names_to = "version", values_to = "NDVI")
+ndvi.raw$version <- factor(ndvi.raw$version, levels=c("Raw", "Harmonized"))
+
+ggplot(data=ndvi.raw, aes(x=yday,y=NDVI))+
   geom_point(data=ndvi.raw, aes(x=yday, y=NDVI, color=mission),size=0.1, alpha=0.5)+
   geom_smooth(method="gam", formula= y ~ s(x, bs="tp", k=12), aes(color=mission, fill=mission))+
   scale_color_manual(name="mission", values=c("landsat 5" = "#D81B60", "landsat 7"="#1E88E5", "landsat 8"="#FFC107", "landsat 9"="#004D40")) +
   scale_fill_manual(name="mission", values=c("landsat 5" = "#D81B60", "landsat 7"="#1E88E5", "landsat 8"="#FFC107", "landsat 9"="#004D40")) +
-  facet_wrap(~type, ncol=1) + ylim(0,1)+ 
+  facet_grid(type~version) + ylim(0,1)+ 
   scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
-  ggtitle("Raw NDVI")+ ylab("NDVI")+ theme_bw(11)
-p <- p + theme(legend.position = "none")
-#ggsave("raw_NDVI_mission_curves.png", path = pathShare, height=6, width=12, units="in", dpi = 320)
-
-#harmonized data
-p_harmonized <- ggplot(data=ndvi.raw, aes(x=yday,y=NDVIReprojected))+
-  geom_point(data=ndvi.raw, aes(x=yday, y=NDVIReprojected, color=mission),size=0.1, alpha=0.5)+
-  geom_smooth(method="gam", formula= y ~ s(x, bs="tp", k=12), aes(color=mission,fill=mission))+
-  scale_color_manual(name="mission", values=c("landsat 5" = "#D81B60", "landsat 7"="#1E88E5", "landsat 8"="#FFC107", "landsat 9"="#004D40")) +
-  scale_fill_manual(name="mission", values=c("landsat 5" = "#D81B60", "landsat 7"="#1E88E5", "landsat 8"="#FFC107", "landsat 9"="#004D40")) +
-  facet_wrap(~type, ncol=1) + ylim(0,1)+
-  scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
-  ggtitle("Harmonized NDVI")+ ylab("Harmonized NDVI")+ theme_bw(11)
-p_harmonized <- p_harmonized + theme(legend.position = "none")
-
-ggpubr::ggarrange(
-  p, p_harmonized, # list of plots
-  labels = "AUTO", # labels
-  common.legend = TRUE, # COMMON LEGEND
-  legend = "bottom", # legend position
-  align = "hv", # Align them both, horizontal and vertical
-  ncol = 2 # number of rows
-)
-
+  ylab("NDVI")+ theme_bw(15)
 ggsave("raw_vs_harmonized_NDVI_mission_curves.png", path = pathShare, height=12, width=12, units="in", dpi = 320)
 
 # mean and sd -------------------------------------------------------------
-ndvi.raw$month <- lubridate::month(ndvi.raw$date)
+ndvi.raw <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data_k=12_with_wet-forest.csv")) #individual years
+ndvi.raw <- ndvi.raw[ndvi.raw$type!="forest",]
+ndvi.raw$type[ndvi.raw$type=="forest-wet"] <- "forest"
+ndvi.raw$type <- factor(ndvi.raw$type, levels = c("crop", "forest", "grassland", "urban-open", "urban-low", "urban-medium", "urban-high"))
+ndvi.raw$mission <- factor(ndvi.raw$mission, levels=c("landsat 5", "landsat 7", "landsat 8", "landsat 9"))
+
+ndvi.raw$month <- lubridate::month(ndvi.raw$date, label=T)
 
 raw_stats <- group_by(ndvi.raw, mission, month) %>%
    summarise(mean_NDVI=mean(NDVI, na.rm=T),sd=sd(NDVI, na.rm=T))
 
-reproj_stats <- group_by(ndvi.raw, mission, month) %>%
-  summarise(mean_NDVI_reproj=mean(NDVIReprojected, na.rm=T),sd=sd(NDVIReprojected, na.rm=T))
+harmonized_stats <- group_by(ndvi.raw, mission, month) %>%
+  summarise(mean_NDVI=mean(NDVIReprojected, na.rm=T),sd=sd(NDVIReprojected, na.rm=T))
+
+ndvi_stats <- raw_stats %>% inner_join(harmonized_stats, by=c("mission", "month"), suffix = c("_raw", "_harmonized"))
+ndvi_stats <- ndvi_stats[ndvi_stats$month=="Jan" | ndvi_stats$month=="Jul",]
+
+write.csv(ndvi_stats, file.path(pathShare2, "raw_vs_harmonized_table.csv"), row.names=F)
 
 # raw vs. reprojected data by year ----------------------------------------
+
+# #harmonized data
+# p_harmonized <- ggplot(data=ndvi.raw, aes(x=yday,y=NDVIReprojected))+
+#   geom_point(data=ndvi.raw, aes(x=yday, y=NDVIReprojected, color=mission),size=0.1, alpha=0.5)+
+#   geom_smooth(method="gam", formula= y ~ s(x, bs="tp", k=12), aes(color=mission,fill=mission))+
+#   scale_color_manual(name="mission", values=c("landsat 5" = "#D81B60", "landsat 7"="#1E88E5", "landsat 8"="#FFC107", "landsat 9"="#004D40")) +
+#   scale_fill_manual(name="mission", values=c("landsat 5" = "#D81B60", "landsat 7"="#1E88E5", "landsat 8"="#FFC107", "landsat 9"="#004D40")) +
+#   facet_wrap(~type, ncol=1) + ylim(0,1)+
+#   scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
+#   ggtitle("Harmonized NDVI")+ ylab("Harmonized NDVI")+ theme_bw(11)
+# p_harmonized <- p_harmonized + theme(legend.position = "none")
+# 
+# ggpubr::ggarrange(
+#   p, p_harmonized, # list of plots
+#   labels = "AUTO", # labels
+#   common.legend = TRUE, # COMMON LEGEND
+#   legend = "bottom", # legend position
+#   align = "hv", # Align them both, horizontal and vertical
+#   ncol = 2 # number of rows
+# )
 
 #raw
 # ggplot(data=ndvi.raw, aes(x=yday,y=NDVI))+
