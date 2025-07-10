@@ -30,7 +30,7 @@ df <- data.frame()
 
 for (LC in unique(raw.data$type)){
   datLC <- raw.data[raw.data$type==LC,]
-  gamnorm <- gam(NDVIReprojected ~ s(yday, k=12),data=datLC)
+  gamnorm <- gam(NDVIReprojected ~ s(yday, k=12, bs="cc"),data=datLC)
   derivs <- calc.derivs(model.gam=gamnorm, newdata = newDF, vars="yday")
   derivs$type <- LC
   
