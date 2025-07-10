@@ -15,16 +15,15 @@ source("~/Documents/GitHub/NDVI_drought_monitoring/0_Calculate_GAMM_Posteriors_U
 ######################
 #loading in raw data from 01_raw_data.R
 ######################
-raw.data <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data_k=12_with_wet-forest.csv"))
-
 #raw.data <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data_k=12.csv"))
+
+raw.data <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/raw_data_k=12_with_wet-forest.csv"))
 newDF <- data.frame(yday=seq(1:365)) #create new data frame to predict over
 
-dat24 <- raw.data[raw.data$year==2024,] #subset for curent yr
-nmonths <- length(unique(lubridate::month(dat24$date))) # Number of knots per month for 2024
+#dat24 <- raw.data[raw.data$year==2024,] #subset for curent yr
+#nmonths <- length(unique(lubridate::month(dat24$date))) # Number of knots per month for 2024
 
 df <- data.frame()
-
 ######################
 #loop through LC types and years
 ######################
@@ -35,11 +34,19 @@ for (LC in unique(raw.data$type)){
   for (yr in unique(datLC$year)){
     datyr <- datLC[datLC$year==yr,]
     
-    if(yr==2024){
-      gamyr <- gam(NDVIReprojected ~ s(yday, k=nmonths), data=datyr)
+    prev_dec <- datLC[datLC$yday > (365-31) & datLC$year==yr-1,]
+    prev_dec <- prev_dec %>% mutate(year=yr, yday = yday-365-1)
+    
+    next_jan <- datLC[datLC$yday <= 31 & datLC$year==yr+1,]
+    next_jan <- next_jan %>% mutate(year=yr, yday = yday +365)
+    
+    datyr <- bind_rows(datyr, prev_dec, next_jan)
+    
+    if(yr==2024 | yr==2001){
+      gamyr <- gam(NDVIReprojected ~ s(yday, k=13), data=datyr)
       #gamyr <- gam(NDVIReprojected ~ s(yday, k=nmonths*1.5), data=datyr)
     }else{
-      gamyr <- gam(NDVIReprojected ~ s(yday, k=12), data=datyr)
+      gamyr <- gam(NDVIReprojected ~ s(yday, k=14), data=datyr)
     }
     
     #gampred <- predict(gamyr, newdata=newDF)
