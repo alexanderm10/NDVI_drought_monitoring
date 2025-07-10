@@ -36,10 +36,18 @@ for (LC in unique(raw.data$type)){
   for (yr in unique(datLC$year)){
     datyr <- datLC[datLC$year==yr,]
     
-    if(yr==2024){
-      gamyr <- gam(NDVIReprojected ~ s(yday, k=nmonths), data=datyr)
+    prev_dec <- datLC[datLC$yday > (365-31) & datLC$year==yr-1,]
+    prev_dec <- prev_dec %>% mutate(year=yr, yday = yday-365-1)
+    
+    next_jan <- datLC[datLC$yday <= 31 & datLC$year==yr+1,]
+    next_jan <- next_jan %>% mutate(year=yr, yday = yday +365)
+    
+    datyr <- bind_rows(datyr, prev_dec, next_jan)
+    
+    if(yr==2024 | yr==2001){
+      gamyr <- gam(NDVIReprojected ~ s(yday, k=13), data=datyr)
     }else{
-      gamyr <- gam(NDVIReprojected ~ s(yday, k=12), data=datyr)
+      gamyr <- gam(NDVIReprojected ~ s(yday, k=14), data=datyr)
     }
     
     #gampred <- predict(gamyr, newdata=newDF)
