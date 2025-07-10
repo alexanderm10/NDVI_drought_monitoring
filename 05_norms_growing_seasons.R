@@ -12,9 +12,6 @@ pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/d
 pathShare2 <- file.path(path.google, "../Shared drives/Urban Ecological Drought/Manuscript - Urban Drought NDVI Monitoring by Land Cover Class/tables")
 
 ######################
-#usdmcat <- read.csv("~/Downloads/dm_export_20000101_20241017.csv") #usdm chicago region categorical data
-#usdmcum <- read.csv("~/Downloads/dm_export_20000101_20241024.csv") #usdm chicago region cumulative data
-
 #yrs <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_individual_years_post_GAM.csv")) #individual years
 #norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_norms_all_LC_types.csv")) #normals
 
@@ -24,11 +21,11 @@ norms <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_norm
 #loops to find growing season
 ######################
 
-#find 15% of the way between max and min --> start of growing season
-#find 95% of upper max --> end of growing season
+#find yday 15% of the way between max and min --> start of growing season
+#find yday after max where NDVI <= threshold --> end of growing season
 
 for (LC in unique(norms$type)){
-  #if (LC=="urban-high"){                 #doing urban-high out of loop b/c too wiggly
+  #if (LC=="urban-high"){    #doing urban-high out of loop b/c too wiggly
     #next
   #}
   df <- norms[norms$type==LC,] #subset normal data
@@ -40,46 +37,28 @@ for (LC in unique(norms$type)){
   minday <- df[df$mean==LCmin,"yday"]
   
   lower_thresh <- (LCmax-LCmin)*.15 + LCmin #calculate the threshold for growing season
-  upper_thresh <- .95*LCmax
+  #upper_thresh <- .95*LCmax
   
   subset_end <- df[df$yday > maxday,] #making two chunks of the dataframe to find threshold
   subset_start <- df[df$yday > minday & df$yday<maxday,]
   
-  season_end <- subset_end[which.min(abs(subset_end$mean-upper_thresh)),"yday"] #finding closest data point to threshold
-  season_start <- subset_start[which.min(abs(subset_start$mean-lower_thresh)),"yday"]
+  end_min <- min(subset_end$mean)
+  upper_thresh <- (LCmax - end_min)*.15 + end_min
   
+  #season_end <- subset_end[which.min(abs(subset_end$mean-upper_thresh)),"yday"] #finding closest data point to threshold
+  #season_start <- subset_start[which.min(abs(subset_start$mean-lower_thresh)),"yday"]
+  
+  #season_end <- max(subset_end$yday[subset_end$mean>=lower_thresh])
+  season_end <- max(subset_end$yday[subset_end$mean>=upper_thresh])
+  season_start <- min(subset_start$yday[subset_start$mean>=lower_thresh])
+    
   growing_season <- df[df$yday >= season_start & df$yday <= season_end,] #define range of growing season
   assign(paste0("grow",LC),growing_season)
 }
 
 ######################
-#doing urban-high separately since it's a bit funky
-######################
-
-#urbhigh <- norms[norms$type=="urban-high",]
-
-#maxmin <- local.min.max(urbhigh$mean) #this function finds local max & min
-#localmax <- maxmin$maxima[3] #this is the local maximum we are basing the threshold off of
-
-#maxday <- urbhigh[urbhigh$mean==localmax,"yday"]
-#localminday <- urbhigh[urbhigh$mean==maxmin$minima[3],"yday"]
-
-#urbhigh_min <- min(urbhigh$mean)
-#minday <- urbhigh[urbhigh$mean==urbhigh_min, "yday"]
-
-#lower_thresh <- (localmax-urbhigh_min)*.15 + urbhigh_min
-#upper_thresh <- .95*localmax
-
-#urbstart <- urbhigh[urbhigh$yday>=minday & urbhigh$yday<=maxday,]
-#season_start <- urbstart[which.min(abs(urbstart$mean-lower_thresh)),"yday"]
-#urbend <- urbhigh[urbhigh$yday>=maxday & urbhigh$yday<=localminday,]
-#season_end <- urbend[which.min(abs(urbend$mean-upper_thresh)),"yday"]
-#urban_high_grow <- urbhigh[urbhigh$yday >= season_start & urbhigh$yday <= season_end,]
-
-######################
 #saving as separate df
 ######################
-
 #grow_norms <- rbind(growcrop, growforest, growgrassland, `growurban-low`, `growurban-medium`, `growurban-open`, `growurban-high`)
 #write.csv(grow_norms, file.path(pathShare, "k=12_growing_season_norms.csv"), row.names =F)
 
@@ -123,3 +102,27 @@ grow_dates$end <- strftime(grow_dates$end, format="%b %d" )
 write.csv(grow_dates, file.path(pathShare2, "growing_season_dates_table.csv"), row.names=F)
 
 ######################
+
+######################
+#doing urban-high separately since it's a bit funky
+######################
+
+#urbhigh <- norms[norms$type=="urban-high",]
+
+#maxmin <- local.min.max(urbhigh$mean) #this function finds local max & min
+#localmax <- maxmin$maxima[3] #this is the local maximum we are basing the threshold off of
+
+#maxday <- urbhigh[urbhigh$mean==localmax,"yday"]
+#localminday <- urbhigh[urbhigh$mean==maxmin$minima[3],"yday"]
+
+#urbhigh_min <- min(urbhigh$mean)
+#minday <- urbhigh[urbhigh$mean==urbhigh_min, "yday"]
+
+#lower_thresh <- (localmax-urbhigh_min)*.15 + urbhigh_min
+#upper_thresh <- .95*localmax
+
+#urbstart <- urbhigh[urbhigh$yday>=minday & urbhigh$yday<=maxday,]
+#season_start <- urbstart[which.min(abs(urbstart$mean-lower_thresh)),"yday"]
+#urbend <- urbhigh[urbhigh$yday>=maxday & urbhigh$yday<=localminday,]
+#season_end <- urbend[which.min(abs(urbend$mean-upper_thresh)),"yday"]
+#urban_high_grow <- urbhigh[urbhigh$yday >= season_start & urbhigh$yday <= season_end,]
