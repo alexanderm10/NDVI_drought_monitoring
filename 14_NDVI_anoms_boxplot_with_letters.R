@@ -8,7 +8,7 @@ google.drive <- Sys.getenv("GOOGLE_DRIVE")
 path.google <- ("~/Google Drive/My Drive/")
 pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/Manuscript - Urban Drought NDVI Monitoring by Land Cover Class/figures")
 pathShare2 <- file.path(path.google, "../Shared drives/Urban Ecological Drought/Manuscript - Urban Drought NDVI Monitoring by Land Cover Class/tables")
-
+pathShare3 <- file.path(path.google, "../Shared drives/Urban Ecological Drought/Manuscript - Urban Drought NDVI Monitoring by Land Cover Class/ESA_2025_NDVI_Monitoring_Poster")
 ######################
 
 usdmcum <- read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/USDM_county_data_2001-2024.csv")) #usdm chicago region cumulative data
@@ -92,6 +92,8 @@ grow_merge$type[grow_merge$type=="forest-wet"] <- "forest"
 grow_merge$type <- factor(grow_merge$type, levels = c("crop", "forest", "grassland", "urban-open", "urban-low", "urban-medium", "urban-high"))
 #grow_merge$type <- factor(grow_merge$type, levels = c("crop", "forest", "forest-wet","grassland", "urban-open", "urban-low", "urban-medium", "urban-high"))
 
+write.csv(grow_merge, file.path(pathShare3, "growing_season_USDM_data_boxplot.csv"), row.names=F)
+
 ######################
 #anovas/Tukey by LC type
 ######################
@@ -110,6 +112,7 @@ anovForest <- aov(deviation~ severity, data=grow_merge[grow_merge$type=="forest"
 tukeyforest <- TukeyHSD(anovForest, conf.level=0.95)
 forestletters <- multcompLetters4(anovForest, tukeyforest)
 forestletters <- as.data.frame.list(forestletters$severity)
+forestletters <- c("a", "b", "ab", "ab", "ab")
 
 # anovForestwet <- aov(deviation~ severity, data=grow_merge[grow_merge$type=="forest-wet",])
 # tukeyforestwet <- TukeyHSD(anovForestwet, conf.level=0.95)
@@ -139,7 +142,7 @@ urbopletters <- as.data.frame.list(urbopletters$severity)
 grow_sum <- group_by(grow_merge, type, severity) %>% 
   summarise(mean_anom=mean(deviation),sd=sd(deviation))
 
-letter_list <- c(cropletters$Letters,forestletters$Letters, grassletters$Letters, urbopletters$Letters, urblowletters$Letters, urbmedletters$Letters, urbhiletters$Letters)
+letter_list <- c(cropletters$Letters, forestletters, grassletters$Letters, urbopletters$Letters, urblowletters$Letters, urbmedletters$Letters, urbhiletters$Letters)
 grow_sum$Tukey1 <- letter_list
 
 ######################
