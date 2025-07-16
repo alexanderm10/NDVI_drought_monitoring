@@ -1,6 +1,7 @@
 library(ggplot2)
 library(cowplot)
 library(dplyr)
+library(tidyverse)
 
 Sys.setenv(GOOGLE_DRIVE = "~/Google Drive/Shared drives/Urban Ecological Drought")
 google.drive <- Sys.getenv("GOOGLE_DRIVE")
@@ -59,6 +60,29 @@ df_full <- df_full %>% pivot_longer(cols=-c("yday","type", "year", "mean_normyrs
 df_full$graph_type[df_full$graph_type=="yrs"] <- "NDVI"
 df_full$graph_type[df_full$graph_type=="anomsyrs"] <- "Anoms"
 df_full$graph_type[df_full$graph_type=="anomsderiv"] <- "Deriv anoms"
+
+dfNormDupe <- df_full[df_full$year==2013 & df_full$graph_type=="NDVI", c("yday", "type", "year",  "graph_type", "mean_normyrs", "lwr_normyrs", "upr_normyrs")]
+dfNormDupe$year <- "normal"
+names(dfNormDupe) <- c("yday", "type", "year", "graph_type", "mean", "lwr", "upr")
+
+df_full2 <- rbind(df_full[,names(dfNormDupe)], dfNormDupe)
+df_full2$graph_type <- factor(df_full2$graph_type, levels=c("NDVI", "Anoms", "Deriv anoms"))
+dfHline <- data.frame(graph_type=c("NDVI", "Anoms", "Deriv anoms"), yint = c(NA, 0, 0))
+dfHline$graph_type <- factor(dfHline$graph_type, levels=c("NDVI", "Anoms", "Deriv anoms"))
+
+
+ggplot(data=df_full2[df_full2$year %in% c(2005, 2012, 2023, "normal"),]) +
+  facet_grid(graph_type~type, scales="free_y") +
+  geom_ribbon(aes(x=yday, ymin=lwr, ymax=upr, fill=year), alpha=0.5) +
+  geom_line(aes(x=yday, y=mean, color=year)) +
+  geom_hline(data=dfHline, aes(yintercept=yint), linetype="dashed", color="black")
+
+ggplot(data=df_full2[df_full2$year %in% c(2005, 2012, 2023) & df_full2$graph_type %in% c("Anoms", "Deriv anoms"),]) +
+  facet_grid(graph_type~year, scales="free_y") +
+  geom_ribbon(aes(x=yday, ymin=lwr, ymax=upr, fill=type), alpha=0.5) +
+  geom_line(aes(x=yday, y=mean, color=type)) +
+  geom_hline(data=dfHline[dfHline$graph_type!="NDVI",], aes(yintercept=yint), linetype="dashed", color="black")
+
 
 #df_full <- df_full %>% pivot_longer(cols=c("lwr_yrs_yrs","lwr_anoms_yrs", "lwr_anoms_deriv"), names_to = ("graph_type"), values_to = "lwr")
 
