@@ -40,6 +40,6 @@ ggplot(data=ndvi.raw[ndvi.raw$type=="urban-low",], aes(x=yday,y=NDVI))+
   scale_color_manual(name="mission", values=c("landsat 5" = "#D81B60", "landsat 7"="#1E88E5", "landsat 8"="#FFC107", "landsat 9"="#004D40")) +
   scale_fill_manual(name="mission", values=c("landsat 5" = "#D81B60", "landsat 7"="#1E88E5", "landsat 8"="#FFC107", "landsat 9"="#004D40")) +
   facet_grid(type~version) + ylim(0,1)+ 
-  scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
-  ylab("NDVI")+ theme_bw(15)
+  scale_x_continuous(name="day of year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
+  ylab("NDVI")+ theme_bw(20)
 ggsave("figure_1_raw_vs_harmonized_NDVI_mission_curves.png", path = pathShare3, height=4, width=18, units="in", dpi = 320)
