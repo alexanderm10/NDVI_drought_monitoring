@@ -39,18 +39,30 @@ normsderivs$type[normsderivs$type=="forest-wet"] <- "forest"
 normsderivs$type <- factor(normsderivs$type, levels = c("crop", "forest", "grassland", "urban-open", "urban-low", "urban-medium", "urban-high"))
 
 yrs_merge <- yrs %>% inner_join(norms, by= c("type", "yday"), suffix = c("_yrs", "_norm")) 
-yrs_merge$anoms <- yrs_merge$mean_yrs - yrs_merge$mean_norm
+yrs_merge$mean_anoms <- yrs_merge$mean_yrs - yrs_merge$mean_norm
 yrs_merge$upr_anoms <- yrs_merge$upr_yrs - yrs_merge$mean_norm
 yrs_merge$lwr_anoms <- yrs_merge$lwr_yrs - yrs_merge$mean_norm
+#yrs_merge <- yrs_merge %>% pivot_longer(cols=c("mean_yrs","mean_anoms"), names_to =("graph type"), values_to = "mean")
 
 yrsderivs_merge <- yrsderivs %>% inner_join(normsderivs, by= c("type", "yday"), suffix = c("_yrs", "_norm")) 
-yrsderivs_merge$anoms <- yrsderivs_merge$mean_yrs - yrsderivs_merge$mean_norm
+yrsderivs_merge$mean_anoms <- yrsderivs_merge$mean_yrs - yrsderivs_merge$mean_norm
 yrsderivs_merge$upr_anoms <- yrsderivs_merge$upr_yrs - yrsderivs_merge$mean_norm
 yrsderivs_merge$lwr_anoms <- yrsderivs_merge$lwr_yrs - yrsderivs_merge$mean_norm
+yrsderivs_merge <- yrsderivs_merge[, !names(yrsderivs_merge) %in% c("sig_yrs", "var_yrs", "sig_norm", "var_norm", "mean_yrs", "upr_yrs","lwr_yrs")]
 
 grow_dates <- read.csv(file.path(google.drive, "Manuscript - Urban Drought NDVI Monitoring by Land Cover Class/tables/growing_season_dates_table.csv"))
 grow_dates$yday_start <- lubridate::yday(as.Date(grow_dates$start, format="%b %d"))
 grow_dates$yday_end <- lubridate::yday(as.Date(grow_dates$end, format="%b %d"))
+
+df_full <- yrs_merge %>% inner_join(yrsderivs_merge, by=c("type", "yday", "year"), suffix=c("yrs", "deriv"))
+df_full <- df_full %>% pivot_longer(cols=-c("yday","type", "year", "mean_normyrs", "lwr_normyrs", "upr_normyrs", "mean_normderiv", "lwr_normderiv", "upr_normderiv"), names_to = c("pos","graph_type"), names_sep = "_", values_to = "value")
+df_full$graph_type[df_full$graph_type=="yrs"] <- "NDVI"
+df_full$graph_type[df_full$graph_type=="anomsyrs"] <- "Anoms"
+df_full$graph_type[df_full$graph_type=="anomsderiv"] <- "Deriv anoms"
+
+#df_full <- df_full %>% pivot_longer(cols=c("lwr_yrs_yrs","lwr_anoms_yrs", "lwr_anoms_deriv"), names_to = ("graph_type"), values_to = "lwr")
+
+df_full <- df_full %>% pivot_wider(names_from = pos, values_from = value)
 
 ######################
 day.labels <- data.frame(Date=seq.Date(as.Date("2023-01-01"), as.Date("2023-12-01"), by="month"))
@@ -58,6 +70,21 @@ day.labels$yday <- lubridate::yday(day.labels$Date)
 day.labels$Text <- paste(lubridate::month(day.labels$Date, label=T), lubridate::day(day.labels$Date))
 day.labels
 summary(day.labels)
+
+
+ggplot(data=df_full)+
+  geom_rect(data=grow_dates, aes(xmin=yday_start, xmax=yday_end,ymin=-Inf,ymax=Inf), fill="lightblue", alpha= 0.3)+
+  geom_line(data=df_full[df_full$year %in% c(2005,2012,2023),], aes(x=yday,y=mean,color=as.factor(year)))+
+  geom_ribbon(data=df_full[df_full$year %in% c(2005,2012,2023),], aes(x=yday, ymin=lwr, ymax=upr, fill=as.factor(year)), alpha=0.2) +
+  scale_color_manual(name="year", values=c("2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
+  facet_grid(graph_type~type, scale='free') +
+  scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
+  ylab("NDVI")+ theme_bw(15)
+ggsave("raw_vs_harmonized_NDVI_mission_curves.png", path = pathShare, height=12, width=12, units="in", dpi = 320)
+
+
+
+
 
 p1 <- ggplot()+
   geom_rect(data=grow_dates, aes(xmin=yday_start, xmax=yday_end,ymin=-Inf,ymax=Inf), fill="lightblue", alpha= 0.3)+
@@ -67,7 +94,7 @@ p1 <- ggplot()+
   geom_ribbon(data=yrs_merge[yrs_merge$year %in% c(2005,2012,2023),], aes(x=yday, ymin=lwr_yrs, ymax=upr_yrs, fill=as.factor(year)), alpha=0.2) +
   scale_color_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
   scale_fill_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
-  facet_wrap(~type, ncol=1) + ylim(0,1)+ 
+  facet_wrap(~type, ncol=7) + ylim(0,1)+ 
   scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
   theme_bw(11)+
   ylab("NDVI") #+ggtitle("Drought Years and Normal NDVI")+ 
@@ -77,12 +104,12 @@ p2 <- ggplot()+
   #geom_line(data=yrs_merge, aes(x=yday, y=mean_norm,color="normal"))+
   #geom_ribbon(data=yrs_merge, aes(x=yday, ymin=lwr_norm, ymax=upr_norm,fill="normal"), alpha=0.2) +
   geom_rect(data=grow_dates, aes(xmin=yday_start, xmax=yday_end,ymin=-Inf,ymax=Inf), fill="lightblue", alpha= 0.3)+
-  geom_line(data=yrs_merge[yrs_merge$year %in% c(2005,2012,2023),], aes(x=yday,y=anoms,color=as.factor(year)))+
+  geom_line(data=yrs_merge[yrs_merge$year %in% c(2005,2012,2023),], aes(x=yday,y=mean_anoms,color=as.factor(year)))+
   geom_ribbon(data=yrs_merge[yrs_merge$year %in% c(2005,2012,2023),], aes(x=yday, ymin=lwr_anoms, ymax=upr_anoms, fill=as.factor(year)), alpha=0.2) +
   scale_color_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
   scale_fill_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
   geom_hline(yintercept=0, linetype="dotted")+
-  facet_wrap(~type, ncol=1) + ylim(-0.3,0.3)+ 
+  facet_wrap(~type, ncol=7) + ylim(-0.3,0.3)+ 
   scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
   theme_bw(11)+
   ylab("NDVI Anomaly") #+ggtitle("Drought Years and Normal NDVI")+ 
@@ -92,12 +119,12 @@ p3 <- ggplot()+
   #geom_line(data=yrs_merge, aes(x=yday, y=mean_norm,color="normal"))+
   #geom_ribbon(data=yrs_merge, aes(x=yday, ymin=lwr_norm, ymax=upr_norm,fill="normal"), alpha=0.2) +
   geom_rect(data=grow_dates, aes(xmin=yday_start, xmax=yday_end,ymin=-Inf,ymax=Inf), fill="lightblue", alpha= 0.3)+
-  geom_line(data=yrsderivs_merge[yrsderivs_merge$year %in% c(2005,2012,2023),], aes(x=yday,y=anoms,color=as.factor(year)))+
+  geom_line(data=yrsderivs_merge[yrsderivs_merge$year %in% c(2005,2012,2023),], aes(x=yday,y=mean_anoms,color=as.factor(year)))+
   geom_ribbon(data=yrsderivs_merge[yrsderivs_merge$year %in% c(2005,2012,2023),], aes(x=yday, ymin=lwr_anoms, ymax=upr_anoms, fill=as.factor(year)), alpha=0.2) +
   scale_color_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
   scale_fill_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
   geom_hline(yintercept=0, linetype="dotted")+
-  facet_wrap(~type, ncol=1) + ylim(-0.02,0.02)+ 
+  facet_wrap(~type, ncol=7) + ylim(-0.02,0.02)+ 
   scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
   theme_bw(11)+
   ylab("NDVI Derivative Anomaly") #+ggtitle("Drought Years and Normal NDVI")+ 
@@ -109,7 +136,7 @@ ggpubr::ggarrange(
   common.legend = TRUE, # COMMON LEGEND
   legend = "bottom", # legend position
   align = "hv", # Align them both, horizontal and vertical
-  ncol = 3 # number of rows
+  nrow = 3 # number of rows
 )
 ggsave("NDVI_norms_and_years_three_columns.png", path = pathShare, height=15, width=12, units="in", dpi = 320)
 
@@ -291,15 +318,16 @@ ggsave("NDVI_anoms_and_derivs_panels_forest-wet.png", path = pathShare, height=1
 # yrs2023$type <- factor(yrs2023$type, levels = c("crop", "forest", "forest-wet", "grassland", "urban-open", "urban-low", "urban-medium", "urban-high"))
 
 
-# ggplot()+
-#   geom_line(data=norms, aes(x=yday, y=mean,color="normal"))+
-#   geom_ribbon(data=norms, aes(x=yday, ymin=lwr, ymax=upr,fill="normal"), alpha=0.2) +
-#   geom_line(data=yrs[yrs$year %in% c(2005,2012,2023),], aes(x=yday,y=mean,color=as.factor(year)))+
-#   geom_ribbon(data=yrs[yrs$year %in% c(2005,2012,2023),], aes(x=yday, ymin=lwr, ymax=upr, fill=as.factor(year)), alpha=0.2) +
-#   scale_color_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
-#   scale_fill_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
-#   facet_wrap(~type) + ylim(0,1)+ 
-#   scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
-#   theme_bw(11)+
-#   ylab("NDVI") #+ggtitle("Drought Years and Normal NDVI")+ 
-# ggsave("NDVI_norms_and_years.png", path = pathShare, height=6, width=12, units="in", dpi = 320)
+ggplot()+
+  geom_line(data=norms, aes(x=yday, y=mean,color="normal"))+
+  geom_ribbon(data=norms, aes(x=yday, ymin=lwr, ymax=upr,fill="normal"), alpha=0.2) +
+  #geom_line(data=yrs[yrs$year %in% c(2005,2012,2023),], aes(x=yday,y=mean,color=as.factor(year)))+
+  #geom_ribbon(data=yrs[yrs$year %in% c(2005,2012,2023),], aes(x=yday, ymin=lwr, ymax=upr, fill=as.factor(year)), alpha=0.2) +
+  scale_color_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
+  scale_fill_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
+  facet_wrap(~type) + ylim(0,1)+
+  scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
+  theme_bw(11)+
+  ggtitle("Original Norms")+
+  ylab("NDVI") #+ggtitle("Drought Years and Normal NDVI")+
+ggsave("NDVI_norms_and_years.png", path = pathShare, height=6, width=12, units="in", dpi = 320)
