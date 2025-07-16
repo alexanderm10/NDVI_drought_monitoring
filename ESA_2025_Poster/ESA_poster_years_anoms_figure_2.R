@@ -65,10 +65,10 @@ p1 <- ggplot()+
   scale_color_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
   scale_fill_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
   ylim(0,1)+ 
-  scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
-  theme_bw(15)+
-  ylab("NDVI") #+ggtitle("Drought Years and Normal NDVI")+ 
-p1 <- p1 + theme(legend.position = "none")
+  scale_x_continuous(name="day of year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
+  theme_bw(20)+
+  ylab("NDVI") +ggtitle("NDVI") 
+p1 <- p1 + theme(legend.position = "none", plot.title = element_text(vjust=-1))
 
 p2 <- ggplot()+
   geom_rect(data=grow_dates, aes(xmin=yday_start, xmax=yday_end,ymin=-Inf,ymax=Inf), fill="lightblue", alpha= 0.3)+
@@ -78,10 +78,10 @@ p2 <- ggplot()+
   scale_fill_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
   geom_hline(yintercept=0, linetype="dotted")+
   ylim(-0.3,0.3)+ 
-  scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
-  theme_bw(15)+
-  ylab("NDVI Anomaly") #+ggtitle("Drought Years and Normal NDVI")+ 
-p2 <- p2 + theme(legend.position = "none")
+  scale_x_continuous(name="day of year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
+  theme_bw(20)+
+  ylab("NDVI anomaly") + ggtitle("Anomalies")
+p2 <- p2 + theme(legend.position = "none", plot.title = element_text(vjust=-1))
 
 p3 <- ggplot()+
   geom_rect(data=grow_dates, aes(xmin=yday_start, xmax=yday_end,ymin=-Inf,ymax=Inf), fill="lightblue", alpha= 0.3)+
@@ -91,18 +91,20 @@ p3 <- ggplot()+
   scale_fill_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
   geom_hline(yintercept=0, linetype="dotted")+
   ylim(-0.02,0.02)+ 
-  scale_x_continuous(name="Day of Year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
-  theme_bw(15)+
-  ylab("NDVI Derivative Anomaly") #+ggtitle("Drought Years and Normal NDVI")+ 
+  scale_x_continuous(name="day of year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
+  theme_bw(20)+
+  ylab("NDVI derivative anomaly") +ggtitle("Derivative Anomalies")
+p3 <- p3 + theme(plot.title = element_text(vjust=-1))
+
 
 ggpubr::ggarrange(
   p1, p2, p3, # list of plots
-  labels = c("Years", "Anomalies", "Derivative Anomalies"), # labels
+  #labels = c("Years", "Anomalies", "Derivative Anomalies"), # labels
   vjust=0.4,
   common.legend = TRUE, # COMMON LEGEND
   legend = "bottom", # legend position
   align = "hv", # Align them both, horizontal and vertical
   nrow = 1 # number of rows
-) + theme(plot.margin = margin(0.2,0.1,0.1,0.1, "in")) 
+) #+ theme(plot.margin = margin(0.2,0.05,0.05,0.05, "in")) 
 
 ggsave("NDVI_anoms_panels_poster_figure_2.png", path = pathShare3, height=6, width=18, units="in", dpi = 320)
