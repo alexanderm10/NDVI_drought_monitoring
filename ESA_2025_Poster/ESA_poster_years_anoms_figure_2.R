@@ -90,7 +90,7 @@ p3 <- ggplot()+
   scale_color_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
   scale_fill_manual(name="year", values=c("normal" = "black", "2005"="#D55E00", "2012"="#E69F00", "2023"="#CC79A7")) +
   geom_hline(yintercept=0, linetype="dotted")+
-  ylim(-0.02,0.02)+ 
+  ylim(-0.01,0.01)+ 
   scale_x_continuous(name="day of year", expand=c(0,0), breaks=day.labels$yday[seq(2, 12, by=3)], labels=day.labels$Text[seq(2, 12, by=3)])+
   theme_bw(20)+
   ylab("NDVI derivative anomaly") +ggtitle("Derivative Anomalies")
