@@ -112,7 +112,9 @@ anovForest <- aov(deviation~ severity, data=grow_merge[grow_merge$type=="forest"
 tukeyforest <- TukeyHSD(anovForest, conf.level=0.95)
 forestletters <- multcompLetters4(anovForest, tukeyforest)
 forestletters <- as.data.frame.list(forestletters$severity)
-forestletters <- c("a", "b", "ab", "ab", "ab")
+forestletters <- rownames_to_column(forestletters, "type")
+forestletters$type <- factor(forestletters$type, levels = c("None", "D0", "D1", "D2", "D3"))
+forestletters <- arrange(forestletters, type)
 
 # anovForestwet <- aov(deviation~ severity, data=grow_merge[grow_merge$type=="forest-wet",])
 # tukeyforestwet <- TukeyHSD(anovForestwet, conf.level=0.95)
@@ -142,7 +144,7 @@ urbopletters <- as.data.frame.list(urbopletters$severity)
 grow_sum <- group_by(grow_merge, type, severity) %>% 
   summarise(mean_anom=mean(deviation),sd=sd(deviation))
 
-letter_list <- c(cropletters$Letters, forestletters, grassletters$Letters, urbopletters$Letters, urblowletters$Letters, urbmedletters$Letters, urbhiletters$Letters)
+letter_list <- c(cropletters$Letters, forestletters$Letters, grassletters$Letters, urbopletters$Letters, urblowletters$Letters, urbmedletters$Letters, urbhiletters$Letters)
 grow_sum$Tukey1 <- letter_list
 
 ######################
@@ -209,13 +211,13 @@ write.csv(grow_sum, file.path(pathShare2, "boxplot_anomalies_tukey_table.csv"), 
 ######################
 
 ggplot()+ #boxplots by drought category for each LC type
-  geom_boxplot(data=grow_merge,aes(x=severity, y=deviation, fill=severity)) + ylab("NDVI Anomaly") + xlab("> 50% Coverage") +
+  geom_boxplot(data=grow_merge,aes(x=severity, y=deviation, fill=severity)) + ylab("NDVI Anomaly") + xlab(NULL) +
   scale_fill_manual(name="Category", values=c("None"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
   geom_text(data=grow_sum, aes(label=Tukey1, x=severity,y=mean_anom+sd),size = 3, vjust=-2, hjust =-1)+
   geom_text(data=grow_sum, aes(label=Tukey2, x=severity,y=mean_anom-sd),size = 3, vjust=2, hjust =-1)+
   facet_wrap(~type)+
   geom_hline(yintercept=0, linetype="dashed")+
-  labs(caption = "lowercase = drought category within land cover class \n uppercase = drought category across classes") +
+  labs(caption = "lowercase = effect of drought severity on NDVI anomalies within a given land cover class \nuppercase = effect of land cover type on NDVI anomalies within a given drought category") +
   ylim(-0.2,0.2) + theme_bw(15) + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),plot.caption.position="plot",
                                         plot.caption = element_text(hjust=0,vjust=0.5),plot.margin = margin(5.5,5.5,20,5.5,"pt"))
 
