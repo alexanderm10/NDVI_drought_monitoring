@@ -7,6 +7,7 @@ Sys.setenv(GOOGLE_DRIVE = "~/Google Drive/Shared drives/Urban Ecological Drought
 google.drive <- Sys.getenv("GOOGLE_DRIVE")
 path.google <- ("~/Google Drive/My Drive/")
 pathShare <- file.path(path.google, "../Shared drives/Urban Ecological Drought/Manuscript - Urban Drought NDVI Monitoring by Land Cover Class/figures")
+pathShare2 <- file.path(path.google, "../Shared drives/Urban Ecological Drought/Manuscript - Urban Drought NDVI Monitoring by Land Cover Class/tables")
 
 # load data ---------------------------------------------------------------
 
@@ -42,17 +43,13 @@ yrsderivs_merge$upr_anoms <- yrsderivs_merge$upr_yrs - yrsderivs_merge$mean_norm
 yrsderivs_merge$lwr_anoms <- yrsderivs_merge$lwr_yrs - yrsderivs_merge$mean_norm
 yrsderivs_merge <- yrsderivs_merge[, !names(yrsderivs_merge) %in% c("sig_yrs", "var_yrs", "sig_norm", "var_norm", "mean_yrs", "upr_yrs","lwr_yrs")]
 
-grow_dates <- read.csv(file.path(google.drive, "Manuscript - Urban Drought NDVI Monitoring by Land Cover Class/tables/growing_season_dates_table.csv"))
-grow_dates$yday_start <- lubridate::yday(as.Date(grow_dates$start, format="%b %d"))
-grow_dates$yday_end <- lubridate::yday(as.Date(grow_dates$end, format="%b %d"))
-grow_dates$type <- factor(grow_dates$type, levels = c("crop", "forest", "grassland", "urban-open", "urban-low", "urban-medium", "urban-high"))
+growing_szn <-read.csv(file.path(google.drive, "data/NDVI_drought_monitoring/k=12_growing_season_norms_with_forest-wet.csv"))
 
 # cut to case study years and add date ------------------------------------
 
 yrs_merge <- yrs_merge[yrs_merge$year %in% c(2005,2012,2023),]
 yrs_merge$date <- as.Date(yrs_merge$yday, origin = paste0(yrs_merge$year - 1, "-12-31"))
 yrs_merge <- yrs_merge %>% arrange(type,year,date)
-
 
 yrsderivs_merge <- yrsderivs_merge[yrsderivs_merge$year %in% c(2005,2012,2023),]
 yrsderivs_merge$date <- as.Date(yrsderivs_merge$yday, origin = paste0(yrsderivs_merge$year - 1, "-12-31"))
@@ -63,9 +60,11 @@ anoms_dates <- data.frame(type = character(),
                           year = numeric(),
                           start_date = as.Date(character()),
                           recovery_date = character())
+
 for (LC in unique(yrs_merge$type)){
   for (yr in unique(yrs_merge$year)){
-    df_sub <- yrs_merge[yrs_merge$type==LC & yrs_merge$year==yr,]
+    growLC <- growing_szn[growing_szn$type==LC,]
+    df_sub <- yrs_merge[yrs_merge$type==LC & yrs_merge$year==yr & yrs_merge$yday %in% growLC$yday,]
     
     df_sub <- df_sub %>% mutate(upper_negative = upr_anoms <0,
                                 start_flag = upper_negative & !lag(upper_negative, default=FALSE))
@@ -73,7 +72,7 @@ for (LC in unique(yrs_merge$type)){
     last_recovery <- as.Date("2000-01-01")
     for (event in event_dates){
       if (event <= last_recovery | is.na(last_recovery)) next
-      rebound <- df_sub[df_sub$date > event & df_sub$lwr_anoms >0,]
+      rebound <- df_sub[df_sub$date > event & df_sub$upr_anoms >0,]
       if (nrow(rebound) >0) {
         recovery_date <- rebound$date[1]
         last_recovery <- recovery_date
@@ -89,6 +88,8 @@ for (LC in unique(yrs_merge$type)){
   }
 }
 
+write.csv(anoms_dates, file.path(pathShare2, "significant_negative_anoms_dates.csv"), row.names=F)
+
 
 deriv_anoms_dates <- data.frame(type = character(),
                           year = numeric(),
@@ -97,7 +98,8 @@ deriv_anoms_dates <- data.frame(type = character(),
 
 for (LC in unique(yrsderivs_merge$type)){
   for (yr in unique(yrsderivs_merge$year)){
-    df_sub <- yrsderivs_merge[yrsderivs_merge$type==LC & yrsderivs_merge$year==yr,]
+    growLC <- growing_szn[growing_szn$type==LC,]
+    df_sub <- yrsderivs_merge[yrsderivs_merge$type==LC & yrsderivs_merge$year==yr & yrsderivs_merge$yday %in% growLC$yday,]
     
     df_sub <- df_sub %>% mutate(upper_negative = upr_anoms <0,
                                 start_flag = upper_negative & !lag(upper_negative, default=FALSE))
@@ -105,7 +107,7 @@ for (LC in unique(yrsderivs_merge$type)){
     last_recovery <- as.Date("2000-01-01")
     for (event in event_dates){
       if (event <= last_recovery | is.na(last_recovery)) next
-      rebound <- df_sub[df_sub$date > event & df_sub$lwr_anoms >0,]
+      rebound <- df_sub[df_sub$date > event & df_sub$upr_anoms >0,]
       if (nrow(rebound) >0) {
         recovery_date <- rebound$date[1]
         last_recovery <- recovery_date
@@ -120,3 +122,4 @@ for (LC in unique(yrsderivs_merge$type)){
     }
   }
 }
+write.csv(deriv_anoms_dates, file.path(pathShare2, "significant_negative_deriv_anoms_dates.csv"), row.names=F)
