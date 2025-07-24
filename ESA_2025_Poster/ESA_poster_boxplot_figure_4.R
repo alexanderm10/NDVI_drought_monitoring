@@ -21,7 +21,7 @@ grow_sum$type <- factor(grow_sum$type, levels = c("crop", "forest", "grassland",
 
 ggplot()+ #boxplots by drought category for each LC type
   geom_boxplot(data=grow_merge[grow_merge$type!="grassland",],aes(x=severity, y=deviation, fill=severity)) + ylab("NDVI Anomaly") + xlab(NULL) +
-  scale_fill_manual(name="Category", values=c("None"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
+  scale_fill_manual(name="USDM Drought Severity", values=c("None"="gray50", "D0"="yellow", "D1"="burlywood","D2"="darkorange", "D3"="red"))+
   geom_text(data=grow_sum[grow_sum$type!="grassland",], aes(label=Tukey1, x=severity,y=mean_anom+sd),size = 3, vjust=-2, hjust =-1)+
   geom_text(data=grow_sum[grow_sum$type!="grassland",], aes(label=Tukey2, x=severity,y=mean_anom-sd),size = 3, vjust=2, hjust =-1)+
   facet_wrap(~type)+
