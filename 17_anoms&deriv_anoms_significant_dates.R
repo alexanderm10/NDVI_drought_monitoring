@@ -56,6 +56,11 @@ yrsderivs_merge$date <- as.Date(yrsderivs_merge$yday, origin = paste0(yrsderivs_
 yrsderivs_merge <- yrsderivs_merge %>% arrange(type,year,date)
 
 # find significant event dates --------------------------------------------
+USDM_dates <- data.frame(USDM_start = as.Date(c("2005-04-26","2012-06-12","2023-05-23")),
+                         USDM_end = as.Date(c("2005-12-31", "2012-12-31", "2023-09-26")),
+                         year = c(2005,2012,2023))
+                              
+
 anoms_dates <- data.frame(type = character(),
                           year = numeric(),
                           start_date = as.Date(character()),
@@ -88,8 +93,11 @@ for (LC in unique(yrs_merge$type)){
   }
 }
 
-write.csv(anoms_dates, file.path(pathShare2, "significant_negative_anoms_dates.csv"), row.names=F)
+anoms_dates <- anoms_dates %>% mutate(year = year(start_date))
+anoms_dates <- anoms_dates %>% left_join(USDM_dates, by="year")
+anoms_dates$onset_difference <- anoms_dates$start_date - anoms_dates$USDM_start 
 
+write.csv(anoms_dates, file.path(pathShare2, "significant_negative_anoms_dates.csv"), row.names=F)
 
 deriv_anoms_dates <- data.frame(type = character(),
                           year = numeric(),
@@ -122,4 +130,9 @@ for (LC in unique(yrsderivs_merge$type)){
     }
   }
 }
+
+deriv_anoms_dates <- deriv_anoms_dates %>% mutate(year = year(start_date))
+deriv_anoms_dates <- deriv_anoms_dates %>% left_join(USDM_dates, by="year")
+deriv_anoms_dates$onset_difference <- deriv_anoms_dates$start_date - deriv_anoms_dates$USDM_start
+
 write.csv(deriv_anoms_dates, file.path(pathShare2, "significant_negative_deriv_anoms_dates.csv"), row.names=F)
