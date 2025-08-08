@@ -97,7 +97,12 @@ anoms_dates <- anoms_dates %>% mutate(year = year(start_date))
 anoms_dates <- anoms_dates %>% left_join(USDM_dates, by="year")
 anoms_dates$onset_difference <- anoms_dates$start_date - anoms_dates$USDM_start 
 
+anoms_dates <- subset(anoms_dates, select = -c(start_date, recovery_date, USDM_end))
+anoms_dates <- anoms_dates %>% pivot_wider(names_from = type, values_from = onset_difference, values_fn = list(onset_difference = list))
+anoms_dates <- lapply(anoms_dates, as.character)
 write.csv(anoms_dates, file.path(pathShare2, "significant_negative_anoms_dates.csv"), row.names=F)
+
+###
 
 deriv_anoms_dates <- data.frame(type = character(),
                           year = numeric(),
@@ -135,4 +140,7 @@ deriv_anoms_dates <- deriv_anoms_dates %>% mutate(year = year(start_date))
 deriv_anoms_dates <- deriv_anoms_dates %>% left_join(USDM_dates, by="year")
 deriv_anoms_dates$onset_difference <- deriv_anoms_dates$start_date - deriv_anoms_dates$USDM_start
 
+deriv_anoms_dates <- subset(deriv_anoms_dates, select = -c(start_date, recovery_date, USDM_end))
+deriv_anoms_dates <- deriv_anoms_dates %>% pivot_wider(names_from = type, values_from = onset_difference, values_fn = list(onset_difference = list))
+deriv_anoms_dates <- lapply(deriv_anoms_dates, as.character)
 write.csv(deriv_anoms_dates, file.path(pathShare2, "significant_negative_deriv_anoms_dates.csv"), row.names=F)
