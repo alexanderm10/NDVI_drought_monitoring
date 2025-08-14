@@ -104,6 +104,9 @@ write.csv(modelStats, file.path(pathShare2, "16_day_window_yday_spatial_loop_mod
 write.csv(landsatYears, file.path(pathShare2, "16_day_window_yday_spatial_loop_years.csv"), row.names=F)
 
 # plots -------------------------------------------------------------------
+landsatYears <- read.csv(file.path(google.drive, "data/spatial_NDVI_monitoring/24_day_window_yday_spatial_loop_years.csv"))
+
+
 modelStats <- modelStats[!modelStats$year==2025,]
 modelStats <- modelStats[modelStats$yday >= 91 & modelStats$yday <= 304,]
 
@@ -131,6 +134,13 @@ ggplot(modelStats, aes(x=yday, y=error))+
 
 landsatYears2012 <- landsatYears[landsatYears$year==2012,]
 
+p <- ggplot(landsatYears2012, aes(x=x,y=y,fill=anoms))+
+  geom_tile()+coord_equal()+scale_fill_gradientn(limits=c(-0.45,0.45),colors = hcl.colors(20, "BrBG"))+
+  transition_time(yday)+ ggtitle('2012 NDVI anoms yday = {frame_time}')+labs(fill="NDVI anomaly")
+gganimate::animate(p, length = 15, width = 700, height = 400, nframes=365,fps=1)
+anim_save("2012_anoms_16day_window_yday_loop.gif",p)
+
+
 p <- ggplot(landsatYears2012, aes(x=x,y=y,fill=mean))+
   geom_tile()+coord_equal()+scale_fill_gradientn(limits=c(0,1),colors = hcl.colors(20, "BrBG"))+
   transition_time(yday)+ ggtitle('2012 NDVI yday = {frame_time}')+labs(fill="pred NDVI")
@@ -142,16 +152,34 @@ landsatYears2023 <- landsatYears[landsatYears$year==2023,]
 
 p <- ggplot(landsatYears2023, aes(x=x,y=y,fill=mean))+
   geom_tile()+coord_equal()+scale_fill_gradientn(limits=c(0,1),colors = hcl.colors(20, "BrBG"))+
-  transition_time(yday)+ ggtitle('2023 NDVI yday = {frame_time}')+labs(fill="pred NDVI")
+  transition_time(yday)+ ggtitle('2023 NDVI yday = {frame_time}, 24-day window')+labs(fill="pred NDVI")
 
 gganimate::animate(p, length = 15, width = 700, height = 400, nframes=365,fps=1)
-anim_save("2023_NDVI_yday_loop.gif",p)
+anim_save("2023_NDVI_yday_loop_24_day_window.gif",p)
 
-p <- ggplot(landsatYears[landsatYears$year==2023,], aes(x=x,y=y,fill=anoms))+
-  geom_tile()+coord_equal()+scale_fill_gradientn(limits=c(-0.2,0.2),colors = hcl.colors(20, "BrBG"))+
-  transition_time(yday)+ ggtitle('2023 anoms NDVI yday = {frame_time}')+labs(fill="NDVI anoms")
+###
+landsatYears <- read.csv(file.path(google.drive, "data/spatial_NDVI_monitoring/16_day_window_yday_spatial_loop_years.csv"))
 
+landsatYears2005 <- landsatYears[landsatYears$year==2005,]
+
+p <- ggplot(landsatYears2005, aes(x=x,y=y,fill=anoms))+
+  geom_tile()+coord_equal()+scale_fill_gradientn(limits=c(-0.5,0.5),colors = hcl.colors(20, "BrBG"))+
+  transition_time(yday)+ ggtitle('2005 24-day NDVI anoms yday = {frame_time}')+labs(fill="NDVI anomaly")
 gganimate::animate(p, length = 15, width = 700, height = 400, nframes=365,fps=1)
-anim_save("2023_NDVI_anoms_yday_loop.gif",p)
+anim_save("2005_anoms_24day_window_yday_loop.gif",p)
 
+landsatYears2012 <- landsatYears[landsatYears$year==2012,]
 
+p <- ggplot(landsatYears2012, aes(x=x,y=y,fill=anoms))+
+  geom_tile()+coord_equal()+scale_fill_gradientn(limits=c(-0.45,0.45),colors = hcl.colors(20, "BrBG"))+
+  transition_time(yday)+ ggtitle('2012 24-day NDVI anoms yday = {frame_time}')+labs(fill="NDVI anomaly")
+gganimate::animate(p, length = 15, width = 700, height = 400, nframes=365,fps=1)
+anim_save("2012_anoms_24day_window_yday_loop.gif",p)
+
+landsatYears2023 <- landsatYears[landsatYears$year==2023,]
+
+p <- ggplot(landsatYears2023, aes(x=x,y=y,fill=anoms))+
+  geom_tile()+coord_equal()+scale_fill_gradientn(limits=c(-0.25,0.25),colors = hcl.colors(20, "BrBG"))+
+  transition_time(yday)+ ggtitle('2023 24-day NDVI anoms yday = {frame_time}')+labs(fill="NDVI anomaly")
+gganimate::animate(p, length = 15, width = 700, height = 400, nframes=365,fps=1)
+anim_save("2023_anoms_24day_window_yday_loop.gif",p)
