@@ -19,7 +19,7 @@ DATA_PULL_CONFIG <- list(
   domain = "NIDIS_Midwest_DEWS",
   
   # Time range settings
-  start_year = 2020,          # Start with recent years first
+  start_year = 2013,          # Full HLS data availability (2013-present)
   end_year = 2024,            # Up to current year
   current_year_cutoff = "2024-10-31",  # Don't process incomplete current year data
   
@@ -42,7 +42,7 @@ DATA_PULL_CONFIG <- list(
 # Initialize or load execution status
 initialize_execution_status <- function(config = DATA_PULL_CONFIG) {
   
-  status_file <- file.path(hls_paths$logs, "execution_status.json")
+  status_file <- file.path(hls_paths$processing_logs, "execution_status.json")
   
   if (file.exists(status_file)) {
     cat("Loading existing execution status...\n")
@@ -71,7 +71,7 @@ initialize_execution_status <- function(config = DATA_PULL_CONFIG) {
 
 # Save execution status
 save_execution_status <- function(status) {
-  status_file <- file.path(hls_paths$logs, "execution_status.json")
+  status_file <- file.path(hls_paths$processing_logs, "execution_status.json")
   dir.create(dirname(status_file), recursive = TRUE, showWarnings = FALSE)
   
   status$last_update <- Sys.time()
@@ -295,7 +295,7 @@ execute_midwest_data_pull <- function(config = DATA_PULL_CONFIG,
 
 # Quick status check
 check_execution_status <- function() {
-  status_file <- file.path(hls_paths$logs, "execution_status.json")
+  status_file <- file.path(hls_paths$processing_logs, "execution_status.json")
   if (file.exists(status_file)) {
     status <- jsonlite::fromJSON(status_file)
     display_status(status)
@@ -314,7 +314,7 @@ resume_execution <- function() {
 
 # Reset execution (start fresh)
 reset_execution <- function() {
-  status_file <- file.path(hls_paths$logs, "execution_status.json")
+  status_file <- file.path(hls_paths$processing_logs, "execution_status.json")
   if (file.exists(status_file)) {
     backup_file <- paste0(status_file, ".backup_", format(Sys.time(), "%Y%m%d_%H%M%S"))
     file.copy(status_file, backup_file)
