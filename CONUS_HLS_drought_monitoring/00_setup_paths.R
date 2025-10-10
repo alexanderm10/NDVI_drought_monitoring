@@ -31,13 +31,11 @@ setup_hls_paths <- function() {
     }
   } else if (os_type == "Linux") {
     # Linux: Check Docker environment first, then mounted drive path
-    if (dir.exists("/data/ndvi_monitor")) {
-      base_path <- "/data/ndvi_monitor"
-      cat("✓ Using Docker container data path\n")
-    } else if (dir.exists("/data")) {
-      base_path <- "/data/ndvi_monitor"
-      ensure_directory(base_path)
-      cat("✓ Created ndvi_monitor directory in Docker container\n")
+    # Docker mount: /mnt/malexander/datasets/ndvi_monitor -> /data
+    if (dir.exists("/data/processed_ndvi")) {
+      # Data is directly mounted at /data (Docker environment)
+      base_path <- "/data"
+      cat("✓ Using Docker container data mount at /data\n")
     } else if (dir.exists("/mnt/malexander/datasets/ndvi_monitor")) {
       base_path <- "/mnt/malexander/datasets/ndvi_monitor"
       cat("✓ Using Linux mounted path\n")

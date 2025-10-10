@@ -4,7 +4,11 @@
       "Read(//u/datasets/ndvi_monitor/raw_hls_data/year_2013/**)",
       "Read(//c/**)",
       "Read(//u/datasets/ndvi_monitor/processed_ndvi/**)",
-      "Read(//u/datasets/ndvi_monitor/processed_ndvi/daily/**)"
+      "Read(//u/datasets/ndvi_monitor/processed_ndvi/daily/**)",
+      "Bash(docker compose:*)",
+      "Bash(docker exec:*)",
+      "Read(//mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/2020/**)",
+      "Bash(xargs:*)"
     ],
     "defaultMode": "acceptEdits"
   }

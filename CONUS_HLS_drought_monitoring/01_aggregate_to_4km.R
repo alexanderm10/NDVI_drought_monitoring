@@ -19,6 +19,13 @@ cat("=== PHASE 1: SPATIAL AGGREGATION TO 4KM ===\n\n")
 # ==============================================================================
 # CONFIGURATION
 # ==============================================================================
+#
+# CRS STRATEGY:
+# - Midwest DEWS domain spans 5 UTM zones (13N-17N)
+# - 4km reference grid created in Albers Equal Area (EPSG:5070)
+# - During aggregation, grid is reprojected to match each scene's native UTM
+# - Final coordinates (x, y) are in Albers for spatial consistency
+# - This ensures pixel IDs remain consistent across all UTM zones
 
 config <- list(
   target_resolution = 4000,  # 4km in meters
@@ -43,25 +50,36 @@ cat("  Output:", config$output_file, "\n\n")
 # HELPER FUNCTIONS
 # ==============================================================================
 
-#' Create 4km reference grid covering CONUS extent
+#' Create 4km reference grid covering domain extent in common CRS
 #'
-#' @param template_raster A sample 30m HLS raster for CRS reference
 #' @param resolution Target resolution in meters (4000)
-#' @return SpatRaster with 4km grid
-create_4km_grid <- function(template_raster, resolution = 4000) {
+#' @param bbox_latlon Bounding box in lat/lon: c(xmin, ymin, xmax, ymax)
+#' @return SpatRaster with 4km grid in Albers Equal Area projection
+#'
+#' NOTE: Uses Albers Equal Area (EPSG:5070) to ensure consistent coordinates
+#'       across multiple UTM zones (Midwest spans UTM 13N - 17N)
+create_4km_grid <- function(resolution = 4000, bbox_latlon = c(-104.5, 37.0, -82.0, 47.5)) {
 
-  cat("Creating 4km reference grid...\n")
+  cat("Creating 4km reference grid in Albers Equal Area projection...\n")
+  cat("  Domain spans multiple UTM zones (13N-17N) - using common CRS\n")
 
-  # Get CRS from template
-  target_crs <- crs(template_raster)
+  # Albers Equal Area Conic for CONUS (EPSG:5070)
+  # Standard projection for CONUS-scale analysis - avoids UTM zone issues
+  target_crs <- "EPSG:5070"
 
-  # CONUS extent in UTM (approximate - will refine based on actual data)
-  # This will be updated dynamically as we process scenes
-  conus_extent <- ext(template_raster)
+  # Convert bbox from lat/lon to Albers
+  bbox_latlon_vect <- vect(
+    data.frame(x = bbox_latlon[c(1,3,3,1,1)],
+               y = bbox_latlon[c(2,2,4,4,2)]),
+    geom = c("x", "y"),
+    crs = "EPSG:4326"
+  )
+  bbox_albers <- project(bbox_latlon_vect, target_crs)
+  albers_extent <- ext(bbox_albers)
 
   # Create empty raster at 4km resolution
   grid_4km <- rast(
-    extent = conus_extent,
+    extent = albers_extent,
     resolution = resolution,
     crs = target_crs
   )
@@ -69,8 +87,10 @@ create_4km_grid <- function(template_raster, resolution = 4000) {
   # Assign pixel IDs
   values(grid_4km) <- 1:ncell(grid_4km)
 
+  cat("  CRS: Albers Equal Area (EPSG:5070)\n")
   cat("  Grid dimensions:", paste(dim(grid_4km), collapse = " x "), "\n")
-  cat("  Total 4km cells:", ncell(grid_4km), "\n\n")
+  cat("  Total 4km cells:", ncell(grid_4km), "\n")
+  cat("  Extent (Albers meters):", paste(round(as.vector(albers_extent)), collapse = ", "), "\n\n")
 
   return(grid_4km)
 }
@@ -84,17 +104,20 @@ create_4km_grid <- function(template_raster, resolution = 4000) {
 #' @return Data frame with pixel_id, NDVI_agg, n_pixels
 aggregate_scene_to_4km <- function(ndvi_path, grid_4km, method = "median", min_pixels = 10) {
 
-  # Load 30m NDVI
+  # Load 30m NDVI (in native UTM projection)
   ndvi_30m <- rast(ndvi_path)
 
-  # Check if rasters overlap
+  # Reproject 4km grid from Albers to match scene's UTM projection
+  # This ensures spatial alignment for aggregation
   if (!same.crs(ndvi_30m, grid_4km)) {
-    warning("CRS mismatch - reprojecting 4km grid to match scene")
-    grid_4km <- project(grid_4km, crs(ndvi_30m))
+    grid_4km_reproj <- project(grid_4km, crs(ndvi_30m), method = "near")
+  } else {
+    grid_4km_reproj <- grid_4km
   }
 
   # Resample 4km grid to 30m resolution to get pixel assignments
-  grid_30m <- resample(grid_4km, ndvi_30m, method = "near")
+  # Each 30m pixel gets assigned to its parent 4km cell ID
+  grid_30m <- resample(grid_4km_reproj, ndvi_30m, method = "near")
 
   # Extract pixel IDs and NDVI values
   pixel_ids <- values(grid_30m, mat = FALSE)
@@ -220,10 +243,12 @@ process_ndvi_to_4km <- function(config) {
     timeseries_df <- data.frame()
   }
 
-  # Create 4km reference grid from first scene
+  # Create 4km reference grid in Albers Equal Area
+  # This grid will be reprojected to match each scene's CRS during aggregation
   cat("Initializing 4km reference grid...\n")
-  template_raster <- rast(ndvi_files[1])
-  grid_4km <- create_4km_grid(template_raster, config$target_resolution)
+  # Midwest DEWS bbox: c(xmin, ymin, xmax, ymax) in lat/lon
+  midwest_bbox <- c(-104.5, 37.0, -82.0, 47.5)
+  grid_4km <- create_4km_grid(config$target_resolution, midwest_bbox)
 
   # Get grid coordinates for pixel IDs
   grid_coords <- as.data.frame(grid_4km, xy = TRUE, cells = TRUE)
@@ -273,14 +298,14 @@ process_ndvi_to_4km <- function(config) {
     # Rename NDVI column
     names(agg_result)[names(agg_result) == "ndvi_agg"] <- "NDVI"
 
-    # Add coordinates
-    agg_result <- agg_result %>%
-      left_join(grid_coords, by = "pixel_id")
+    # Add coordinates using merge (more robust than left_join for this case)
+    agg_result <- merge(agg_result, grid_coords, by = "pixel_id", all.x = TRUE)
+
+    # Select and reorder columns
+    agg_result <- agg_result[, c("pixel_id", "x", "y", "sensor", "date", "year", "yday", "NDVI")]
 
     # Append to timeseries
-    timeseries_df <- bind_rows(timeseries_df,
-                               agg_result[, c("pixel_id", "x", "y", "sensor",
-                                             "date", "year", "yday", "NDVI")])
+    timeseries_df <- bind_rows(timeseries_df, agg_result)
 
     n_processed <- n_processed + 1
 

@@ -1,5 +1,24 @@
 # Docker Setup for CONUS HLS Drought Monitor
 
+## Quick Start (Remote Session)
+
+```bash
+# Start container with nohup (survives SSH disconnection)
+nohup docker compose up -d > docker-startup.log 2>&1 &
+
+# Verify container is running
+docker compose ps
+
+# Enter container and start R session
+docker exec -it conus-hls-drought-monitor bash
+R
+
+# Inside R, run the workflow
+source("00_setup_paths.R")
+source("01_aggregate_to_4km.R")
+timeseries_4km <- process_ndvi_to_4km(config)
+```
+
 ## Overview
 
 This Docker environment provides a reproducible R environment with all necessary spatial packages and system dependencies for HLS NDVI processing and GAM analysis.
@@ -38,11 +57,15 @@ docker-compose run --rm drought-monitor-r R
 3. Click "Reopen in Container" when prompted
 4. VS Code will build and attach to the container
 
-### Method 3: Long-running Background Container
+### Method 3: Long-running Background Container (RECOMMENDED for remote sessions)
 
 ```bash
-# Start container in background
-docker-compose up -d
+# IMPORTANT: Use nohup to survive SSH disconnections
+# This ensures processing continues even if you get disconnected
+nohup docker compose up -d > docker-startup.log 2>&1 &
+
+# Check that container started successfully
+docker compose ps
 
 # Attach to running container
 docker exec -it conus-hls-drought-monitor bash
@@ -51,8 +74,13 @@ docker exec -it conus-hls-drought-monitor bash
 R
 
 # Stop container when done
-docker-compose down
+docker compose down
 ```
+
+**Why use nohup?**
+- Prevents container shutdown if SSH session disconnects
+- Critical for long-running GAM processing tasks
+- Logs startup output to `docker-startup.log` for debugging
 
 ## Data Access Inside Container
 

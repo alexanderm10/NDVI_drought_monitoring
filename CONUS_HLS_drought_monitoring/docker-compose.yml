@@ -24,8 +24,8 @@ services:
       # - NASA_USERNAME=your_username
       # - NASA_PASSWORD=your_password
     ports:
-      # Optional: expose RStudio Server port
-      - "8787:8787"
+      # Optional: expose RStudio Server port (changed from 8787 to avoid conflict)
+      - "8788:8787"
     working_dir: /workspace
     # Keep container running for VS Code attachment
     command: tail -f /dev/null
