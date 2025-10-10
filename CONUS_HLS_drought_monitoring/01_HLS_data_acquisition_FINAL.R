@@ -111,7 +111,8 @@ search_hls_data <- function(bbox, start_date, end_date, cloud_cover = 50, max_it
     # Extract download URLs
     red_url <- assets$B04$href
     nir_url <- assets[[nir_band]]$href
-    
+    fmask_url <- assets$Fmask$href
+
     # Store processed scene
     processed_scenes[[length(processed_scenes) + 1]] <- list(
       scene_id = scene_id,
@@ -123,6 +124,7 @@ search_hls_data <- function(bbox, start_date, end_date, cloud_cover = 50, max_it
       red_url = red_url,
       nir_url = nir_url,
       nir_band = nir_band,
+      fmask_url = fmask_url,
       year = as.numeric(format(scene_date, "%Y")),
       yday = as.numeric(format(scene_date, "%j"))
     )
@@ -256,30 +258,58 @@ download_hls_band <- function(download_url, output_file, nasa_session, max_attem
 # NDVI Processing from HLS Data
 ######################
 
-calculate_ndvi_from_hls <- function(red_file, nir_file, output_file) {
-  
+calculate_ndvi_from_hls <- function(red_file, nir_file, output_file, fmask_file = NULL) {
+
   cat("    Calculating NDVI from HLS bands...\n")
-  
+
   # Load HLS bands (already surface reflectance corrected)
   red_raster <- rast(red_file)
   nir_raster <- rast(nir_file)
-  
+
   # Ensure bands align spatially
   if (!compareGeom(red_raster, nir_raster)) {
     cat("    Resampling NIR to match Red band geometry...\n")
     nir_raster <- resample(nir_raster, red_raster)
   }
-  
+
   # Calculate NDVI: (NIR - Red) / (NIR + Red)
   ndvi <- (nir_raster - red_raster) / (nir_raster + red_raster)
-  
+
   # Quality control: mask invalid NDVI values
   ndvi[ndvi < -1 | ndvi > 1] <- NA
-  
+
+  # Apply Fmask quality filtering if provided
+  if (!is.null(fmask_file) && file.exists(fmask_file)) {
+    cat("    Applying Fmask quality filtering...\n")
+    fmask <- rast(fmask_file)
+
+    # Ensure Fmask aligns with NDVI
+    if (!compareGeom(ndvi, fmask)) {
+      fmask <- resample(fmask, ndvi, method = "near")
+    }
+
+    # Build quality mask using bit flags
+    # Use modulo arithmetic instead of bitwAnd to avoid type mismatch with terra rasters
+    # Bit 1 (2): cloud, Bit 2 (4): adjacent, Bit 3 (8): shadow, Bit 4 (16): snow/ice, Bit 5 (32): water
+    quality_mask <- (
+      (fmask %% 4) < 2 &    # Bit 1 not set (cloud)
+      (fmask %% 8) < 4 &    # Bit 2 not set (adjacent)
+      (fmask %% 16) < 8 &   # Bit 3 not set (shadow)
+      (fmask %% 32) < 16 &  # Bit 4 not set (snow/ice)
+      (fmask %% 64) < 32    # Bit 5 not set (water)
+    )
+
+    # Apply mask (keep only quality_mask = TRUE pixels)
+    ndvi <- mask(ndvi, quality_mask, maskvalue = 0, updatevalue = NA)
+    cat("    ✓ Quality filtering applied\n")
+  } else {
+    cat("    ⚠ No Fmask provided - NDVI calculated without quality filtering\n")
+  }
+
   # Save result
   dir.create(dirname(output_file), recursive = TRUE, showWarnings = FALSE)
   writeRaster(ndvi, output_file, overwrite = TRUE)
-  
+
   cat("    ✓ NDVI calculated and saved\n")
   return(ndvi)
 }

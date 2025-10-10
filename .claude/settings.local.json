@@ -1,5 +1,11 @@
 {
   "permissions": {
+    "allow": [
+      "Read(//u/datasets/ndvi_monitor/raw_hls_data/year_2013/**)",
+      "Read(//c/**)",
+      "Read(//u/datasets/ndvi_monitor/processed_ndvi/**)",
+      "Read(//u/datasets/ndvi_monitor/processed_ndvi/daily/**)"
+    ],
     "defaultMode": "acceptEdits"
   }
 }

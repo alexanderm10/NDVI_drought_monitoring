@@ -1,0 +1,27 @@
+# Ignore archive and temp files
+.archive/
+*.Rhistory
+.Rproj.user/
+.RData
+
+# Ignore large data directories (mounted as volumes)
+processed_ndvi/
+raw_hls_data/
+gam_models/
+anomaly_products/
+
+# Ignore git
+.git/
+.gitignore
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore logs
+*.log
+logs/
+
+# Ignore cached files
+scene_list_cache.csv
+*_checkpoint.csv

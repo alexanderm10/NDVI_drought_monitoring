@@ -148,26 +148,34 @@ acquire_midwest_pilot_data <- function(start_year = 2014,  # First full year of 
         # Set up file paths
         red_file <- file.path(tile_dir, paste0(scene$scene_id, "_B04.tif"))
         nir_file <- file.path(tile_dir, paste0(scene$scene_id, "_", scene$nir_band, ".tif"))
+        fmask_file <- file.path(tile_dir, paste0(scene$scene_id, "_Fmask.tif"))
         ndvi_file <- file.path(hls_paths$processed_ndvi, "daily", year, paste0(scene$scene_id, "_NDVI.tif"))
-        
+
         # Skip if NDVI already exists
         if (file.exists(ndvi_file)) {
           year_stats$ndvi_processed <- year_stats$ndvi_processed + 1
           next
         }
-        
-        # Download bands
+
+        # Download bands (Red, NIR, and Fmask)
         red_success <- download_hls_band(scene$red_url, red_file, nasa_session)
         if (red_success) {
           nir_success <- download_hls_band(scene$nir_url, nir_file, nasa_session)
           if (nir_success) {
+            # Download Fmask (quality layer) - IMPORTANT for quality control
+            fmask_success <- download_hls_band(scene$fmask_url, fmask_file, nasa_session)
+
+            if (!fmask_success) {
+              cat("    ⚠ WARNING: Fmask download failed for", scene$scene_id, "\n")
+            }
+
             year_stats$scenes_downloaded <- year_stats$scenes_downloaded + 1
-            
-            # Calculate NDVI
+
+            # Calculate NDVI with quality filtering
             ndvi_result <- try({
-              calculate_ndvi_from_hls(red_file, nir_file, ndvi_file)
+              calculate_ndvi_from_hls(red_file, nir_file, ndvi_file, fmask_file = if(fmask_success) fmask_file else NULL)
             }, silent = TRUE)
-            
+
             if (!inherits(ndvi_result, "try-error")) {
               year_stats$ndvi_processed <- year_stats$ndvi_processed + 1
             }
