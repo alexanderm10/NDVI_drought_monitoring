@@ -90,11 +90,9 @@ acquire_midwest_pilot_data <- function(start_year = 2014,  # First full year of 
   
   # Process each year
   for (year in start_year:end_year) {
-    
+
     cat("=== PROCESSING YEAR", year, "===\n")
-    year_start <- paste0(year, "-01-01")
-    year_end <- paste0(year, "-12-31")
-    
+
     year_stats <- list(
       scenes_found = 0,
       scenes_downloaded = 0,
@@ -102,21 +100,38 @@ acquire_midwest_pilot_data <- function(start_year = 2014,  # First full year of 
       landsat_count = 0,
       sentinel_count = 0
     )
-    
-    # Process each tile for this year
-    for (tile_idx in seq_along(midwest_tiles)) {
-      tile <- midwest_tiles[[tile_idx]]
-      
-      cat("--- Tile", tile_idx, "of", length(midwest_tiles), ":", tile$id, "---\n")
-      
-      # Search for HLS data
-      scenes <- search_hls_data(
-        bbox = tile$bbox,
-        start_date = year_start,
-        end_date = year_end,
-        cloud_cover = cloud_cover_max,
-        max_items = 500  # Allow more scenes per tile/year
-      )
+
+    # Process each MONTH to avoid API 100-item limit
+    for (month in 1:12) {
+
+      # Define month date range
+      month_start <- sprintf("%04d-%02d-01", year, month)
+      # Get last day of month
+      if (month == 12) {
+        month_end <- sprintf("%04d-12-31", year)
+      } else {
+        next_month <- as.Date(sprintf("%04d-%02d-01", year, month + 1))
+        month_end <- as.character(next_month - 1)
+      }
+
+      cat("\n--- Processing", format(as.Date(month_start), "%B %Y"), "---\n")
+
+      # Process each tile for this month
+      for (tile_idx in seq_along(midwest_tiles)) {
+        tile <- midwest_tiles[[tile_idx]]
+
+        if (tile_idx == 1) {
+          cat("Searching tiles for", format(as.Date(month_start), "%B"), "...\n")
+        }
+
+        # Search for HLS data (monthly chunks stay under 100-item API limit)
+        scenes <- search_hls_data(
+          bbox = tile$bbox,
+          start_date = month_start,
+          end_date = month_end,
+          cloud_cover = cloud_cover_max,
+          max_items = 100  # API limit
+        )
       
       if (length(scenes) == 0) {
         cat("No scenes found for this tile/year\n")
@@ -182,8 +197,9 @@ acquire_midwest_pilot_data <- function(start_year = 2014,  # First full year of 
           }
         }
       }
-      
-      cat("Tile", tile$id, "complete:", year_stats$scenes_downloaded, "downloaded\n")
+      }
+
+      cat("Month complete - Total downloaded so far:", year_stats$scenes_downloaded, "\n")
     }
     
     # Year summary

@@ -8,7 +8,9 @@
       "Bash(docker compose:*)",
       "Bash(docker exec:*)",
       "Read(//mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/2020/**)",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "Read(//mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/2024/**)",
+      "Read(//home/malexander/r_projects/gitlab/gdo-wildfire-risk-monitor/**)"
     ],
     "defaultMode": "acceptEdits"
   }

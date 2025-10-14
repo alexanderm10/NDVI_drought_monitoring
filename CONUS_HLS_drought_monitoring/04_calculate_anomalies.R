@@ -281,8 +281,28 @@ process_anomalies <- function(config) {
 # ==============================================================================
 
 cat("=== READY TO CALCULATE ANOMALIES ===\n")
-cat("This will join climatology and year splines to calculate deviations\n")
-cat("Estimated time: ~5 minutes\n")
-cat("Output will be saved to:", config$output_file, "\n\n")
-cat("To run:\n")
-cat("  anomaly_df <- process_anomalies(config)\n\n")
+
+# Check if running as main script (not being sourced)
+if (!interactive() || exists("run_phase4")) {
+
+  cat("\n=== EXECUTING PHASE 4: CALCULATE ANOMALIES ===\n")
+  cat("Started at:", as.character(Sys.time()), "\n\n")
+
+  # Run anomaly calculation
+  start_time <- Sys.time()
+  anomaly_df <- process_anomalies(config)
+  elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
+
+  # Final summary
+  cat("\n=== PHASE 4 COMPLETE ===\n")
+  cat("Total time:", round(elapsed, 1), "minutes\n")
+  cat("Output saved to:", config$output_file, "\n")
+
+} else {
+  cat("\n=== PHASE 4 FUNCTIONS LOADED ===\n")
+  cat("Ready to calculate anomalies by joining baseline and year splines\n")
+  cat("Estimated time: ~5 minutes\n")
+  cat("Output will be saved to:", config$output_file, "\n\n")
+  cat("To run manually:\n")
+  cat("  anomaly_df <- process_anomalies(config)\n\n")
+}

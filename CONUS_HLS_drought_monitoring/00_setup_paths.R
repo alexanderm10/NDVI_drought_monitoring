@@ -206,6 +206,31 @@ check_storage_space <- function(path) {
   cat("\n⚠ HLS CONUS data can be 100+ GB per year. Ensure adequate storage space.\n")
 }
 
+#' Get NASA Earthdata netrc file path (cross-platform)
+#'
+#' @return Path to netrc file
+get_netrc_path <- function() {
+  os_type <- Sys.info()["sysname"]
+
+  if (os_type == "Windows") {
+    netrc_path <- file.path(Sys.getenv("USERPROFILE"), "_netrc")
+  } else {
+    # Linux/Mac use .netrc (with dot)
+    # Try multiple locations in order of preference
+    home_dir <- Sys.getenv("HOME")
+
+    # If HOME is not set or is just "/", use workspace
+    if (home_dir == "" || home_dir == "/") {
+      # Docker environment - use workspace
+      netrc_path <- "/workspace/.netrc"
+    } else {
+      netrc_path <- file.path(home_dir, ".netrc")
+    }
+  }
+
+  return(netrc_path)
+}
+
 # Convenience function to source this in scripts
 get_hls_paths <- function() {
   paths <- setup_hls_paths()

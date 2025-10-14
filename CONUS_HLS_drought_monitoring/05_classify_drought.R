@@ -288,8 +288,30 @@ process_drought_classification <- function(config) {
 
 cat("=== READY TO CLASSIFY DROUGHT (PLACEHOLDER) ===\n")
 cat("This will apply placeholder thresholds to anomalies\n")
-cat("⚠ Results are for exploratory analysis only - not operational\n")
-cat("Estimated time: ~5 minutes\n")
-cat("Output will be saved to:", config$output_file, "\n\n")
-cat("To run:\n")
-cat("  classified_df <- process_drought_classification(config)\n\n")
+
+# Check if running as main script (not being sourced)
+if (!interactive() || exists("run_phase5")) {
+
+  cat("\n=== EXECUTING PHASE 5: CLASSIFY DROUGHT (PLACEHOLDER) ===\n")
+  cat("⚠ This uses placeholder thresholds for exploratory analysis\n")
+  cat("Started at:", as.character(Sys.time()), "\n\n")
+
+  # Run drought classification
+  start_time <- Sys.time()
+  classified_df <- process_drought_classification(config)
+  elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
+
+  # Final summary
+  cat("\n=== PHASE 5 COMPLETE ===\n")
+  cat("Total time:", round(elapsed, 1), "minutes\n")
+  cat("Output saved to:", config$output_file, "\n")
+
+} else {
+  cat("\n=== PHASE 5 FUNCTIONS LOADED ===\n")
+  cat("Ready to classify drought (placeholder thresholds)\n")
+  cat("⚠ Results are for exploratory analysis only - not operational\n")
+  cat("Estimated time: ~5 minutes\n")
+  cat("Output will be saved to:", config$output_file, "\n\n")
+  cat("To run manually:\n")
+  cat("  classified_df <- process_drought_classification(config)\n\n")
+}

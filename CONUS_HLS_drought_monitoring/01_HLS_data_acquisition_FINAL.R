@@ -147,11 +147,14 @@ search_hls_data <- function(bbox, start_date, end_date, cloud_cover = 50, max_it
 ######################
 
 create_nasa_session <- function() {
-  
-  # Read netrc for credentials
-  netrc_path <- file.path(Sys.getenv("USERPROFILE"), "_netrc")
+
+  # Get netrc path (cross-platform)
+  netrc_path <- get_netrc_path()
+
   if (!file.exists(netrc_path)) {
-    stop("NASA Earthdata netrc file not found at: ", netrc_path)
+    stop("NASA Earthdata netrc file not found at: ", netrc_path,
+         "\nCreate this file with your NASA Earthdata credentials:\n",
+         "  machine urs.earthdata.nasa.gov login YOUR_USERNAME password YOUR_PASSWORD")
   }
   
   netrc_content <- readLines(netrc_path, warn = FALSE)

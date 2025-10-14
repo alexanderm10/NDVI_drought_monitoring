@@ -329,16 +329,33 @@ process_ndvi_to_4km <- function(config) {
     }
   }
 
-  # Final summary
+  # Final summary (before deduplication)
   cat("\n=== AGGREGATION COMPLETE ===\n")
   cat("Scenes processed:", n_processed, "\n")
   cat("Scenes failed:", n_failed, "\n")
-  cat("Total observations:", nrow(timeseries_df), "\n")
+  cat("Total observations (before deduplication):", nrow(timeseries_df), "\n")
   cat("Unique 4km pixels:", length(unique(timeseries_df$pixel_id)), "\n")
-  cat("Date range:", paste(range(timeseries_df$date), collapse = " to "), "\n")
+  cat("Date range:", paste(range(timeseries_df$date), collapse = " to "), "\n\n")
+
+  # DEDUPLICATION: Handle overlapping tiles
+  # Following Juliana's approach: when same pixel_id + sensor + date appears
+  # multiple times (from tile overlaps), take median NDVI
+  cat("Applying deduplication for tile overlaps...\n")
+  n_before <- nrow(timeseries_df)
+
+  timeseries_df <- timeseries_df %>%
+    group_by(pixel_id, x, y, sensor, date, year, yday) %>%
+    summarise(NDVI = median(NDVI, na.rm = TRUE), .groups = "drop")
+
+  n_after <- nrow(timeseries_df)
+  n_removed <- n_before - n_after
+
+  cat("  Removed", n_removed, "duplicate observations (",
+      round(100 * n_removed / n_before, 1), "%)\n", sep = "")
+  cat("  Final observations:", n_after, "\n\n")
 
   # Save final output
-  cat("\nSaving final timeseries to:", config$output_file, "\n")
+  cat("Saving deduplicated timeseries to:", config$output_file, "\n")
   write.csv(timeseries_df, config$output_file, row.names = FALSE)
 
   # Remove checkpoint
@@ -355,9 +372,27 @@ process_ndvi_to_4km <- function(config) {
 # EXECUTION
 # ==============================================================================
 
-cat("=== READY TO AGGREGATE TO 4KM ===\n")
-cat("This will process all NDVI scenes from", paste(range(config$years), collapse = "-"), "\n")
-cat("Estimated time: 2-4 hours depending on scene count\n")
-cat("Output will be saved to:", config$output_file, "\n\n")
-cat("To run:\n")
-cat("  timeseries_4km <- process_ndvi_to_4km(config)\n\n")
+# Check if running as main script (not being sourced)
+if (!interactive() || exists("run_phase1")) {
+
+  cat("\n=== EXECUTING PHASE 1: 4KM AGGREGATION ===\n")
+  cat("Started at:", as.character(Sys.time()), "\n\n")
+
+  # Run aggregation
+  start_time <- Sys.time()
+  timeseries_4km <- process_ndvi_to_4km(config)
+  elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "hours"))
+
+  # Final summary
+  cat("\n=== PHASE 1 COMPLETE ===\n")
+  cat("Total time:", round(elapsed, 2), "hours\n")
+  cat("Output saved to:", config$output_file, "\n")
+
+} else {
+  cat("\n=== PHASE 1 FUNCTIONS LOADED ===\n")
+  cat("Ready to aggregate NDVI scenes from", paste(range(config$years), collapse = "-"), "\n")
+  cat("Estimated time: 2-4 hours depending on scene count\n")
+  cat("Output will be saved to:", config$output_file, "\n\n")
+  cat("To run manually:\n")
+  cat("  timeseries_4km <- process_ndvi_to_4km(config)\n\n")
+}

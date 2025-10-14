@@ -342,22 +342,41 @@ summarize_year_splines <- function(year_splines_df) {
   cat("  Median SE:", round(median(year_splines_df$year_se), 4), "\n")
   cat("  95th percentile SE:", round(quantile(year_splines_df$year_se, 0.95), 4), "\n\n")
 
-  return(year_summary)
+# Check if running as main script (not being sourced)
+if (!interactive() || exists("run_phase3")) {
+
+  cat("\n=== EXECUTING PHASE 3: YEAR-SPECIFIC GAM FITTING ===\n")
+  cat("Started at:", as.character(Sys.time()), "\n\n")
+
+  # Load timeseries from Phase 1
+  cat("Loading Phase 1 timeseries data...\n")
+  timeseries_4km <- read.csv(config$input_file, stringsAsFactors = FALSE)
+  timeseries_4km$date <- as.Date(timeseries_4km$date)
+  
+  cat("  Total observations:", nrow(timeseries_4km), "\n")
+  cat("  Years:", paste(sort(unique(timeseries_4km$year)), collapse = ", "), "\n\n")
+
+  # Fit year-specific GAMs
+  start_time <- Sys.time()
+  year_splines <- fit_all_year_gams(timeseries_4km, config)
+  elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "hours"))
+
+  # Summarize results
+  cat("\nGenerating summary statistics...\n")
+  year_summary <- summarize_year_splines(year_splines)
+
+  # Final summary
+  cat("\n=== PHASE 3 COMPLETE ===\n")
+  cat("Total time:", round(elapsed, 2), "hours\n")
+  cat("Output saved to:", config$output_file, "\n")
+
+} else {
+  cat("\n=== PHASE 3 FUNCTIONS LOADED ===\n")
+  cat("Ready to fit year-specific GAMs with 31-day edge padding\n")
+  cat("Estimated time: ~6 hours with", config$n_cores, "cores\n")
+  cat("Output will be saved to:", config$output_file, "\n\n")
+  cat("To run manually:\n")
+  cat("  timeseries_4km <- read.csv(config$input_file, stringsAsFactors = FALSE)\n")
+  cat("  timeseries_4km$date <- as.Date(timeseries_4km$date)\n")
+  cat("  year_splines <- fit_all_year_gams(timeseries_4km, config)\n\n")
 }
-
-# ==============================================================================
-# EXECUTION
-# ==============================================================================
-
-cat("=== READY TO FIT YEAR-SPECIFIC GAMS ===\n")
-cat("This will fit GAMs for all pixel-year combinations with 31-day edge padding\n")
-cat("Estimated time: ~6 hours with", config$n_cores, "cores\n")
-cat("Output will be saved to:", config$output_file, "\n\n")
-cat("To run:\n")
-cat("  # Load timeseries from Phase 1\n")
-cat("  timeseries_4km <- read.csv(config$input_file, stringsAsFactors = FALSE)\n")
-cat("  timeseries_4km$date <- as.Date(timeseries_4km$date)\n\n")
-cat("  # Fit year-specific GAMs\n")
-cat("  year_splines <- fit_all_year_gams(timeseries_4km, config)\n\n")
-cat("  # Summarize results\n")
-cat("  year_summary <- summarize_year_splines(year_splines)\n\n")
