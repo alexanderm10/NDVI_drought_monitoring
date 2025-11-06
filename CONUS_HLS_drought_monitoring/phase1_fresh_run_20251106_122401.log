@@ -1,0 +1,91 @@
+terra 1.8.70
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:terra’:
+
+    intersect, union
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+
+Attaching package: ‘lubridate’
+
+The following objects are masked from ‘package:terra’:
+
+    intersect, union
+
+The following objects are masked from ‘package:base’:
+
+    date, intersect, setdiff, union
+
+✓ Using Docker container data mount at /data
+✓ All required paths verified successfully
+
+=== HLS DATA PATHS CONFIGURED ===
+Operating System: Linux 
+Base Path: /data 
+Storage space check: Run 'check_storage_space(paths$base)' to verify capacity
+Platform-specific paths ready for HLS processing
+=== PHASE 1: SPATIAL AGGREGATION TO 4KM ===
+
+Configuration:
+  Target resolution: 4000 m
+  Aggregation method: median 
+  Years: 2013-2024 
+  Output: /data/gam_models/conus_4km_ndvi_timeseries.csv 
+
+
+=== EXECUTING PHASE 1: 4KM AGGREGATION ===
+Started at: 2025-11-06 12:24:06.991324 
+
+=== STARTING 4KM AGGREGATION ===
+
+Scanning for NDVI files...
+   2013 : 3601 scenes
+   2014 : 4740 scenes
+   2015 : 4679 scenes
+   2016 : 5955 scenes
+   2017 : 5582 scenes
+   2018 : 5114 scenes
+   2019 : 5323 scenes
+   2020 : 6291 scenes
+   2021 : 6301 scenes
+   2022 : 5919 scenes
+   2023 : 5793 scenes
+   2024 : 5962 scenes
+
+Total scenes found: 65260 
+
+Initializing 4km reference grid...
+Creating 4km reference grid in Albers Equal Area projection...
+  Domain spans multiple UTM zones (13N-17N) - using common CRS
+  CRS: Albers Equal Area (EPSG:5070)
+  Grid dimensions: 304 x 495 x 1 
+  Total 4km cells: 150480 
+  Extent (Albers meters): -748366, 1229788, 1584247, 2801026 
+
+  Progress: 50/65260 scenes (0.1%) | 18.3 scenes/min | ETA: 3556 min
+  Progress: 100/65260 scenes (0.2%) | 15.6 scenes/min | ETA: 4184 min
+  Saving checkpoint...
+  Progress: 150/65260 scenes (0.2%) | 15.2 scenes/min | ETA: 4280 min
+  Progress: 200/65260 scenes (0.3%) | 15.8 scenes/min | ETA: 4129 min
+  Saving checkpoint...
+  Progress: 250/65260 scenes (0.4%) | 16.0 scenes/min | ETA: 4065 min
+  Progress: 300/65260 scenes (0.5%) | 16.2 scenes/min | ETA: 4017 min
+  Saving checkpoint...
+  Progress: 350/65260 scenes (0.5%) | 16.2 scenes/min | ETA: 4004 min
+  Progress: 400/65260 scenes (0.6%) | 16.5 scenes/min | ETA: 3922 min
+  Saving checkpoint...
+  Progress: 450/65260 scenes (0.7%) | 16.5 scenes/min | ETA: 3935 min
+  Progress: 500/65260 scenes (0.8%) | 16.6 scenes/min | ETA: 3905 min
+  Saving checkpoint...
+  Progress: 550/65260 scenes (0.8%) | 16.4 scenes/min | ETA: 3934 min
+  Progress: 600/65260 scenes (0.9%) | 16.4 scenes/min | ETA: 3951 min
+  Saving checkpoint...
