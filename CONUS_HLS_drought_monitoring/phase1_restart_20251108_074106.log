@@ -1,0 +1,78 @@
+terra 1.8.70
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:terra’:
+
+    intersect, union
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+
+Attaching package: ‘lubridate’
+
+The following objects are masked from ‘package:terra’:
+
+    intersect, union
+
+The following objects are masked from ‘package:base’:
+
+    date, intersect, setdiff, union
+
+✓ Using Docker container data mount at /data
+✓ All required paths verified successfully
+
+=== HLS DATA PATHS CONFIGURED ===
+Operating System: Linux 
+Base Path: /data 
+Storage space check: Run 'check_storage_space(paths$base)' to verify capacity
+Platform-specific paths ready for HLS processing
+=== PHASE 1: SPATIAL AGGREGATION TO 4KM ===
+
+Configuration:
+  Target resolution: 4000 m
+  Aggregation method: median 
+  Years: 2013-2024 
+  Output: /data/gam_models/conus_4km_ndvi_timeseries.csv 
+
+
+=== EXECUTING PHASE 1: 4KM AGGREGATION ===
+Started at: 2025-11-08 06:41:16.282848 
+
+=== STARTING 4KM AGGREGATION ===
+
+Scanning for NDVI files...
+   2013 : 3601 scenes
+   2014 : 4740 scenes
+   2015 : 4679 scenes
+   2016 : 5955 scenes
+   2017 : 5582 scenes
+   2018 : 5114 scenes
+   2019 : 5323 scenes
+   2020 : 6291 scenes
+   2021 : 6301 scenes
+   2022 : 5919 scenes
+   2023 : 5793 scenes
+   2024 : 5962 scenes
+
+Total scenes found: 65260 
+
+Found checkpoint file - loading previous progress...
+  Resuming from 1139272 existing observations
+   61767 scenes remaining
+
+Initializing 4km reference grid...
+Creating 4km reference grid in Albers Equal Area projection...
+  Domain spans multiple UTM zones (13N-17N) - using common CRS
+  CRS: Albers Equal Area (EPSG:5070)
+  Grid dimensions: 304 x 495 x 1 
+  Total 4km cells: 150480 
+  Extent (Albers meters): -748366, 1229788, 1584247, 2801026 
+
+  Progress: 50/61767 scenes (0.1%) | 14.8 scenes/min | ETA: 4167 min

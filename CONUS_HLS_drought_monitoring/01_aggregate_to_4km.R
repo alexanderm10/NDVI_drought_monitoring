@@ -33,7 +33,7 @@ config <- list(
   years = 2013:2024,
   min_pixels_per_cell = 10,  # Minimum 30m pixels required for valid 4km median
   output_file = file.path(hls_paths$gam_models, "conus_4km_ndvi_timeseries.csv"),
-  checkpoint_interval = 100,  # Save progress every N scenes
+  checkpoint_interval = 300,  # Save progress every N scenes (reduced frequency for mount stability)
   resume_from_checkpoint = TRUE
 )
 
@@ -220,13 +220,13 @@ process_ndvi_to_4km <- function(config) {
     stop("No NDVI files found. Check processed_ndvi directory structure.")
   }
 
-  # Check for existing checkpoint
-  checkpoint_file <- sub("\\.csv$", "_checkpoint.csv", config$output_file)
+  # Check for existing checkpoint (now using RDS format for faster I/O)
+  checkpoint_file <- sub("\\.csv$", "_checkpoint.rds", config$output_file)
 
   if (config$resume_from_checkpoint && file.exists(checkpoint_file)) {
     cat("Found checkpoint file - loading previous progress...\n")
-    timeseries_df <- read.csv(checkpoint_file, stringsAsFactors = FALSE)
-    timeseries_df$date <- as.Date(timeseries_df$date)
+    timeseries_df <- readRDS(checkpoint_file)
+    # Date column already in correct format from RDS
 
     # Determine which files already processed
     processed_files <- unique(paste0(timeseries_df$sensor, ".",
@@ -322,10 +322,10 @@ process_ndvi_to_4km <- function(config) {
                   scenes_per_min, eta_mins))
     }
 
-    # Save checkpoint
+    # Save checkpoint (RDS format: faster, smaller, preserves types)
     if (n_processed %% config$checkpoint_interval == 0) {
       cat("  Saving checkpoint...\n")
-      write.csv(timeseries_df, checkpoint_file, row.names = FALSE)
+      saveRDS(timeseries_df, checkpoint_file, compress = "gzip")
     }
   }
 
