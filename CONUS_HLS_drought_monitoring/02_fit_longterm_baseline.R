@@ -37,11 +37,10 @@ config <- list(
   min_observations = 20,  # Minimum obs per pixel for reliable fit
 
   # Parallel processing (capped for shared server - max 10 cores)
-  # SET TO 1 FOR SEQUENTIAL PROCESSING
-  n_cores = 1,  # min(10, parallel::detectCores() - 1),
+  n_cores = 8,  # Use 8 cores for good balance (set to 1 for sequential)
 
-  # Checkpointing
-  checkpoint_interval = 100,
+  # Checkpointing (RDS format for faster I/O and smaller files)
+  checkpoint_interval = 100,  # Save progress every N pixels
   resume_from_checkpoint = TRUE
 )
 
@@ -163,12 +162,12 @@ fit_all_baselines <- function(timeseries_df, config) {
 
   cat("  Unique 4km pixels:", n_pixels, "\n\n")
 
-  # Check for checkpoint
-  checkpoint_file <- sub("\\.csv$", "_checkpoint.csv", config$output_file)
+  # Check for checkpoint (RDS format for faster I/O)
+  checkpoint_file <- sub("\\.csv$", "_checkpoint.rds", config$output_file)
 
   if (config$resume_from_checkpoint && file.exists(checkpoint_file)) {
     cat("Found checkpoint - loading previous progress...\n")
-    baseline_df <- read.csv(checkpoint_file, stringsAsFactors = FALSE)
+    baseline_df <- readRDS(checkpoint_file)
 
     processed_pixels <- unique(baseline_df$pixel_id)
     pixel_ids <- setdiff(pixel_ids, processed_pixels)
@@ -184,59 +183,146 @@ fit_all_baselines <- function(timeseries_df, config) {
     return(baseline_df)
   }
 
-  # Split pixels into batches for parallel processing
-  batch_size <- ceiling(length(pixel_ids) / config$n_cores)
-  pixel_batches <- split(pixel_ids, ceiling(seq_along(pixel_ids) / batch_size))
-
-  cat("Processing", length(pixel_batches), "batches in parallel...\n")
-  cat("Batch size:", batch_size, "pixels\n\n")
+  # Process pixels with incremental checkpointing
+  cat("Processing pixels with incremental checkpointing...\n")
+  cat("Checkpoint interval:", config$checkpoint_interval, "pixels\n")
+  cat("Parallel cores:", config$n_cores, "\n\n")
 
   start_time <- Sys.time()
+  n_processed <- 0
+  n_failed <- 0
 
-  # Set up cluster
-  cl <- makeCluster(config$n_cores)
-  clusterEvalQ(cl, {
-    library(mgcv)
-  })
-  # Export all required objects and functions to workers
-  clusterExport(cl, c("timeseries_baseline", "config", "fit_pixel_baseline", "process_pixel_batch"),
-                envir = environment())
+  # Split pixels into small batches for better checkpointing
+  # Each batch = config$n_cores pixels (one per core)
+  batch_size <- config$n_cores
+  pixel_batches <- split(pixel_ids, ceiling(seq_along(pixel_ids) / batch_size))
 
-  # Process batches - pass timeseries_baseline and config as arguments
-  batch_results <- parLapply(cl, pixel_batches, function(batch) {
-    process_pixel_batch(batch, timeseries_baseline, config)
-  })
+  cat("Split into", length(pixel_batches), "batches of ~", batch_size, "pixels each\n\n")
 
-  stopCluster(cl)
+  # Set up cluster if using parallel processing
+  if (config$n_cores > 1) {
+    cl <- makeCluster(config$n_cores)
+    clusterEvalQ(cl, {
+      library(mgcv)
+    })
+    # Export required objects: timeseries_baseline, config, and functions
+    # timeseries_baseline IS exported but accessed per-pixel (not duplicated per worker)
+    clusterExport(cl, c("timeseries_baseline", "config", "fit_pixel_baseline"),
+                  envir = environment())
+  }
 
-  # Combine results (filter out NULL results from failed batches)
-  batch_results <- batch_results[!sapply(batch_results, is.null)]
+  # Process batches with incremental checkpointing
+  for (i in seq_along(pixel_batches)) {
+    batch_pixels <- pixel_batches[[i]]
 
-  if (length(batch_results) > 0) {
-    new_baseline <- do.call(rbind, batch_results)
+    # Process batch (parallel or sequential)
+    if (config$n_cores > 1) {
+      # For parallel: split data per pixel and send only relevant data to each worker
+      batch_results <- parLapply(cl, batch_pixels, function(pixel_id) {
+        # Each worker gets ONLY data for its assigned pixel
+        pixel_data <- timeseries_baseline[timeseries_baseline$pixel_id == pixel_id, ]
 
-    if (nrow(baseline_df) > 0) {
-      baseline_df <- rbind(baseline_df, new_baseline)
+        # Skip if insufficient data
+        if (nrow(pixel_data) < config$min_observations) {
+          return(NULL)
+        }
+
+        # Fit baseline
+        pixel_result <- fit_pixel_baseline(
+          pixel_data,
+          k = config$gam_knots,
+          bs = config$gam_basis
+        )
+
+        if (!is.null(pixel_result)) {
+          pixel_result$pixel_id <- pixel_id
+          return(pixel_result)
+        } else {
+          return(NULL)
+        }
+      })
     } else {
-      baseline_df <- new_baseline
+      # Sequential processing
+      batch_results <- lapply(batch_pixels, function(pixel_id) {
+        pixel_data <- timeseries_baseline[timeseries_baseline$pixel_id == pixel_id, ]
+
+        if (nrow(pixel_data) < config$min_observations) {
+          return(NULL)
+        }
+
+        pixel_result <- fit_pixel_baseline(
+          pixel_data,
+          k = config$gam_knots,
+          bs = config$gam_basis
+        )
+
+        if (!is.null(pixel_result)) {
+          pixel_result$pixel_id <- pixel_id
+          return(pixel_result)
+        } else {
+          return(NULL)
+        }
+      })
     }
+
+    # Combine successful results from this batch
+    batch_results <- batch_results[!sapply(batch_results, is.null)]
+
+    if (length(batch_results) > 0) {
+      batch_df <- do.call(rbind, batch_results)
+
+      if (nrow(baseline_df) > 0) {
+        baseline_df <- rbind(baseline_df, batch_df)
+      } else {
+        baseline_df <- batch_df
+      }
+      n_processed <- n_processed + length(batch_results)
+    }
+
+    n_failed <- n_failed + (length(batch_pixels) - length(batch_results))
+
+    # Progress reporting
+    if (n_processed %% 50 == 0 || i == length(pixel_batches)) {
+      elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
+      pixels_per_min <- n_processed / elapsed
+      remaining <- length(pixel_ids) - n_processed - n_failed
+      eta_mins <- remaining / pixels_per_min
+
+      cat(sprintf("  Progress: %d/%d pixels (%.1f%%) | %.1f pixels/min | ETA: %.0f min\n",
+                  n_processed, length(pixel_ids),
+                  100 * n_processed / length(pixel_ids),
+                  pixels_per_min, eta_mins))
+    }
+
+    # Save checkpoint (RDS format: faster, smaller, preserves types)
+    if (n_processed %% config$checkpoint_interval == 0) {
+      cat("  Saving checkpoint...\n")
+      saveRDS(baseline_df, checkpoint_file, compress = "gzip")
+    }
+  }
+
+  # Clean up cluster
+  if (config$n_cores > 1) {
+    stopCluster(cl)
   }
 
   elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
 
   cat("\n=== BASELINE FITTING COMPLETE ===\n")
   cat("Time elapsed:", round(elapsed, 1), "minutes\n")
-  cat("Pixels processed:", length(unique(baseline_df$pixel_id)), "\n")
+  cat("Pixels processed:", n_processed, "\n")
+  cat("Pixels failed:", n_failed, "\n")
   cat("Total baseline records:", nrow(baseline_df), "\n")
-  cat("Expected records (pixels × 365 days):", length(unique(baseline_df$pixel_id)) * 365, "\n\n")
+  cat("Expected records (pixels × 365 days):", n_processed * 365, "\n\n")
 
-  # Save final output
+  # Save final output (CSV for compatibility)
   cat("Saving baseline to:", config$output_file, "\n")
   write.csv(baseline_df, config$output_file, row.names = FALSE)
 
   # Remove checkpoint
   if (file.exists(checkpoint_file)) {
     file.remove(checkpoint_file)
+    cat("Checkpoint file removed\n")
   }
 
   cat("✓ Phase 2 complete\n\n")

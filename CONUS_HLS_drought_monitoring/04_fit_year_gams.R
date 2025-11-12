@@ -1,5 +1,5 @@
 # ==============================================================================
-# PHASE 3: YEAR-SPECIFIC SPLINES WITH EDGE PADDING
+# PHASE 4: YEAR-SPECIFIC SPLINES WITH EDGE PADDING
 # ==============================================================================
 # Purpose: Fit pixel-by-pixel GAMs for each year with 31-day edge padding
 # Input: conus_4km_ndvi_timeseries.csv from Phase 1
@@ -14,7 +14,7 @@ library(parallel)
 source("00_setup_paths.R")
 hls_paths <- get_hls_paths()
 
-cat("=== PHASE 3: YEAR-SPECIFIC SPLINES ===\n\n")
+cat("=== PHASE 4: YEAR-SPECIFIC SPLINES ===\n\n")
 
 # ==============================================================================
 # CONFIGURATION
@@ -39,11 +39,11 @@ config <- list(
   # Quality control
   min_observations = 15,  # Minimum obs per pixel-year for reliable fit
 
-  # Parallel processing
-  n_cores = parallel::detectCores() - 1,
+  # Parallel processing (capped for shared server - max 10 cores)
+  n_cores = 8,  # Use 8 cores for good balance (set to 1 for sequential)
 
-  # Checkpointing
-  checkpoint_interval = 50,
+  # Checkpointing (RDS format for faster I/O and smaller files)
+  checkpoint_interval = 100,  # Save progress every N pixels
   resume_from_checkpoint = TRUE
 )
 
@@ -65,21 +65,28 @@ cat("  Output:", config$output_file, "\n\n")
 
 #' Apply 31-day edge padding to year-specific data
 #'
-#' @param timeseries_df Full timeseries dataframe
-#' @param pixel_id Pixel ID to process
+#' @param pixel_data Full timeseries for ONE pixel (all years)
 #' @param target_year Year to fit
 #' @param padding_days Number of days to pad (31)
 #' @return Data frame with target year + padded edges
-apply_edge_padding <- function(timeseries_df, pixel_id, target_year, padding_days = 31) {
+#'
+#' @details
+#' Edge padding helps reduce end effects in GAM fitting by borrowing data from
+#' adjacent years. For edge years (first/last in timeseries), padding will be
+#' incomplete or absent:
+#' - First year (2013): No previous December data available
+#' - Last year (2024): No next January data available
+#' These years will fit with reduced/no padding but will still converge.
+apply_edge_padding <- function(pixel_data, target_year, padding_days = 31) {
 
   # Get data for target year
-  year_data <- timeseries_df %>%
-    filter(pixel_id == !!pixel_id, year == target_year)
+  year_data <- pixel_data %>%
+    filter(year == target_year)
 
   # Get previous December (last 31 days)
-  prev_dec <- timeseries_df %>%
+  # For first year in timeseries, this will return empty dataframe (no padding)
+  prev_dec <- pixel_data %>%
     filter(
-      pixel_id == !!pixel_id,
       year == target_year - 1,
       yday > (365 - padding_days)
     ) %>%
@@ -89,9 +96,9 @@ apply_edge_padding <- function(timeseries_df, pixel_id, target_year, padding_day
     )
 
   # Get next January (first 31 days)
-  next_jan <- timeseries_df %>%
+  # For last year in timeseries, this will return empty dataframe (no padding)
+  next_jan <- pixel_data %>%
     filter(
-      pixel_id == !!pixel_id,
       year == target_year + 1,
       yday <= padding_days
     ) %>%
@@ -100,7 +107,7 @@ apply_edge_padding <- function(timeseries_df, pixel_id, target_year, padding_day
       yday = yday + 365  # Extended DOY: 366-396
     )
 
-  # Combine
+  # Combine (empty dataframes from missing years will be silently dropped)
   padded_data <- bind_rows(year_data, prev_dec, next_jan)
 
   return(padded_data)
@@ -150,6 +157,63 @@ fit_pixel_year_gam <- function(pixel_year_data, k = 12, bs = "tp") {
   return(result)
 }
 
+#' Process all years for a single pixel
+#'
+#' @param pixel_data Full timeseries for one pixel (all years)
+#' @param pixel_id Pixel identifier
+#' @param config Configuration list
+#' @return Data frame with year splines for all target years
+process_pixel_all_years <- function(pixel_data, pixel_id, config) {
+
+  pixel_results <- list()
+
+  # Determine edge years (first and last in config$target_years)
+  edge_years <- c(min(config$target_years), max(config$target_years))
+
+  # Loop through each target year
+  for (target_year in config$target_years) {
+
+    # Apply edge padding
+    padded_data <- apply_edge_padding(
+      pixel_data,
+      target_year,
+      config$edge_padding_days
+    )
+
+    # Skip if insufficient data
+    if (nrow(padded_data) < config$min_observations) {
+      next
+    }
+
+    # Reduce knots for edge years (incomplete padding)
+    # Following Juliana's approach: use k-1 for first/last years
+    k_year <- if (target_year %in% edge_years) {
+      config$gam_knots - 1
+    } else {
+      config$gam_knots
+    }
+
+    # Fit year-specific GAM
+    year_spline <- fit_pixel_year_gam(
+      padded_data,
+      k = k_year,
+      bs = config$gam_basis
+    )
+
+    if (!is.null(year_spline)) {
+      year_spline$pixel_id <- pixel_id
+      year_spline$year <- target_year
+      pixel_results[[length(pixel_results) + 1]] <- year_spline
+    }
+  }
+
+  if (length(pixel_results) > 0) {
+    return(bind_rows(pixel_results))
+  } else {
+    return(NULL)
+  }
+}
+
 #' Process all pixel-year combinations
 #'
 #' @param timeseries_df Full timeseries dataframe
@@ -159,154 +223,174 @@ fit_all_year_gams <- function(timeseries_df, config) {
 
   cat("=== FITTING YEAR-SPECIFIC GAMS ===\n\n")
 
-  # Get all pixel-year combinations
-  pixel_years <- timeseries_df %>%
-    filter(year %in% config$target_years) %>%
-    distinct(pixel_id, year)
+  # Get unique pixels
+  pixel_ids <- unique(timeseries_df$pixel_id)
+  n_pixels <- length(pixel_ids)
 
-  n_combinations <- nrow(pixel_years)
+  cat("Unique pixels:", n_pixels, "\n")
+  cat("Target years:", paste(range(config$target_years), collapse = "-"),
+      "(", length(config$target_years), "years)\n")
+  cat("Total pixel-year combinations:", n_pixels * length(config$target_years), "\n\n")
 
-  cat("Total pixel-year combinations:", n_combinations, "\n")
-  cat("  Pixels:", length(unique(pixel_years$pixel_id)), "\n")
-  cat("  Years:", paste(range(config$target_years), collapse = "-"), "\n\n")
-
-  # Check for checkpoint
-  checkpoint_file <- sub("\\.csv$", "_checkpoint.csv", config$output_file)
+  # Check for checkpoint (RDS format for faster I/O)
+  checkpoint_file <- sub("\\.csv$", "_checkpoint.rds", config$output_file)
 
   if (config$resume_from_checkpoint && file.exists(checkpoint_file)) {
     cat("Found checkpoint - loading previous progress...\n")
-    year_splines_df <- read.csv(checkpoint_file, stringsAsFactors = FALSE)
+    year_splines_df <- readRDS(checkpoint_file)
 
-    processed_combinations <- year_splines_df %>%
-      distinct(pixel_id, year)
+    processed_pixels <- unique(year_splines_df$pixel_id)
+    pixel_ids <- setdiff(pixel_ids, processed_pixels)
 
-    pixel_years <- pixel_years %>%
-      anti_join(processed_combinations, by = c("pixel_id", "year"))
-
-    cat("  Resuming from", nrow(processed_combinations), "completed pixel-years\n")
-    cat("  ", nrow(pixel_years), "pixel-years remaining\n\n")
+    cat("  Resuming from", length(processed_pixels), "completed pixels\n")
+    cat("  ", length(pixel_ids), "pixels remaining\n\n")
   } else {
     year_splines_df <- data.frame()
   }
 
-  if (nrow(pixel_years) == 0) {
-    cat("All pixel-years already processed!\n")
+  if (length(pixel_ids) == 0) {
+    cat("All pixels already processed!\n")
     return(year_splines_df)
   }
 
-  # Parallel processing function
-  process_pixel_year_batch <- function(batch_indices) {
-
-    batch_results <- list()
-
-    for (idx in batch_indices) {
-
-      pixel_id <- pixel_years$pixel_id[idx]
-      target_year <- pixel_years$year[idx]
-
-      # Apply edge padding
-      padded_data <- apply_edge_padding(
-        timeseries_df,
-        pixel_id,
-        target_year,
-        config$edge_padding_days
-      )
-
-      # Skip if insufficient data
-      if (nrow(padded_data) < config$min_observations) {
-        next
-      }
-
-      # Fit year-specific GAM
-      year_spline <- fit_pixel_year_gam(
-        padded_data,
-        k = config$gam_knots,
-        bs = config$gam_basis
-      )
-
-      if (!is.null(year_spline)) {
-        year_spline$pixel_id <- pixel_id
-        year_spline$year <- target_year
-        batch_results[[length(batch_results) + 1]] <- year_spline
-      }
-    }
-
-    if (length(batch_results) > 0) {
-      return(bind_rows(batch_results))
-    } else {
-      return(NULL)
-    }
-  }
-
-  # Split into batches for parallel processing
-  batch_size <- ceiling(nrow(pixel_years) / config$n_cores)
-  batch_indices <- split(1:nrow(pixel_years),
-                        ceiling(seq_len(nrow(pixel_years)) / batch_size))
-
-  cat("Processing", length(batch_indices), "batches in parallel...\n")
-  cat("Batch size:", batch_size, "pixel-years per batch\n\n")
+  # Process pixels with incremental checkpointing
+  cat("Processing pixels with incremental checkpointing...\n")
+  cat("Checkpoint interval:", config$checkpoint_interval, "pixels\n")
+  cat("Parallel cores:", config$n_cores, "\n\n")
 
   start_time <- Sys.time()
+  n_processed <- 0
+  n_failed <- 0
 
-  # Set up cluster
-  cl <- makeCluster(config$n_cores)
-  clusterEvalQ(cl, {
-    library(mgcv)
-    library(dplyr)
-  })
-  clusterExport(cl, c("timeseries_df", "pixel_years", "config",
-                     "apply_edge_padding", "fit_pixel_year_gam"),
-                envir = environment())
+  # Split pixels into small batches for better checkpointing
+  # Each batch = config$n_cores pixels (one per core)
+  batch_size <- config$n_cores
+  pixel_batches <- split(pixel_ids, ceiling(seq_along(pixel_ids) / batch_size))
 
-  # Process batches with progress tracking
-  n_batches <- length(batch_indices)
-  batch_counter <- 0
+  cat("Split into", length(pixel_batches), "batches of ~", batch_size, "pixels each\n\n")
 
-  for (batch in batch_indices) {
-    batch_result <- parLapply(cl, list(batch), process_pixel_year_batch)[[1]]
+  # Set up cluster if using parallel processing
+  if (config$n_cores > 1) {
+    cl <- makeCluster(config$n_cores)
+    clusterEvalQ(cl, {
+      library(mgcv)
+      library(dplyr)
+    })
+    # Export required objects: timeseries_df, config, and functions
+    # timeseries_df IS exported but accessed per-pixel (not duplicated per worker)
+    clusterExport(cl, c("timeseries_df", "config",
+                       "process_pixel_all_years", "apply_edge_padding",
+                       "fit_pixel_year_gam"),
+                  envir = environment())
+  }
 
-    if (!is.null(batch_result) && nrow(batch_result) > 0) {
-      year_splines_df <- bind_rows(year_splines_df, batch_result)
+  # Process batches with incremental checkpointing
+  for (i in seq_along(pixel_batches)) {
+    batch_pixels <- pixel_batches[[i]]
+
+    # Process batch (parallel or sequential)
+    if (config$n_cores > 1) {
+      # For parallel: each worker gets ONLY data for its assigned pixel
+      batch_results <- parLapply(cl, batch_pixels, function(pixel_id) {
+        # Each worker gets ONLY data for its assigned pixel (all years)
+        pixel_data <- timeseries_df[timeseries_df$pixel_id == pixel_id, ]
+
+        # Skip if insufficient data
+        if (nrow(pixel_data) < config$min_observations) {
+          return(NULL)
+        }
+
+        # Process all years for this pixel
+        pixel_result <- process_pixel_all_years(pixel_data, pixel_id, config)
+
+        if (!is.null(pixel_result)) {
+          return(pixel_result)
+        } else {
+          return(NULL)
+        }
+      })
+    } else {
+      # Sequential processing
+      batch_results <- lapply(batch_pixels, function(pixel_id) {
+        pixel_data <- timeseries_df[timeseries_df$pixel_id == pixel_id, ]
+
+        if (nrow(pixel_data) < config$min_observations) {
+          return(NULL)
+        }
+
+        pixel_result <- process_pixel_all_years(pixel_data, pixel_id, config)
+
+        if (!is.null(pixel_result)) {
+          return(pixel_result)
+        } else {
+          return(NULL)
+        }
+      })
     }
 
-    batch_counter <- batch_counter + 1
+    # Combine successful results from this batch
+    batch_results <- batch_results[!sapply(batch_results, is.null)]
 
-    # Progress update
-    if (batch_counter %% 10 == 0 || batch_counter == n_batches) {
-      elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
-      pct_complete <- 100 * batch_counter / n_batches
-      eta <- elapsed / batch_counter * (n_batches - batch_counter)
+    if (length(batch_results) > 0) {
+      batch_df <- do.call(rbind, batch_results)
 
-      cat(sprintf("  Progress: %d/%d batches (%.1f%%) | Elapsed: %.1f min | ETA: %.1f min\n",
-                  batch_counter, n_batches, pct_complete, elapsed, eta))
-
-      # Checkpoint save
-      if (batch_counter %% config$checkpoint_interval == 0) {
-        cat("  Saving checkpoint...\n")
-        write.csv(year_splines_df, checkpoint_file, row.names = FALSE)
+      if (nrow(year_splines_df) > 0) {
+        year_splines_df <- rbind(year_splines_df, batch_df)
+      } else {
+        year_splines_df <- batch_df
       }
+      n_processed <- n_processed + length(batch_results)
+    }
+
+    n_failed <- n_failed + (length(batch_pixels) - length(batch_results))
+
+    # Progress reporting
+    if (n_processed %% 50 == 0 || i == length(pixel_batches)) {
+      elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
+      pixels_per_min <- n_processed / elapsed
+      remaining <- length(pixel_ids) - n_processed - n_failed
+      eta_mins <- remaining / pixels_per_min
+
+      cat(sprintf("  Progress: %d/%d pixels (%.1f%%) | %.1f pixels/min | ETA: %.0f min\n",
+                  n_processed, length(pixel_ids),
+                  100 * n_processed / length(pixel_ids),
+                  pixels_per_min, eta_mins))
+    }
+
+    # Save checkpoint (RDS format: faster, smaller, preserves types)
+    if (n_processed %% config$checkpoint_interval == 0) {
+      cat("  Saving checkpoint...\n")
+      saveRDS(year_splines_df, checkpoint_file, compress = "gzip")
     }
   }
 
-  stopCluster(cl)
+  # Clean up cluster
+  if (config$n_cores > 1) {
+    stopCluster(cl)
+  }
 
   elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
 
   cat("\n=== YEAR-SPECIFIC GAMS COMPLETE ===\n")
   cat("Time elapsed:", round(elapsed, 1), "minutes\n")
-  cat("Pixel-years processed:", length(unique(paste(year_splines_df$pixel_id, year_splines_df$year))), "\n")
-  cat("Total spline records:", nrow(year_splines_df), "\n\n")
+  cat("Pixels processed:", n_processed, "\n")
+  cat("Pixels failed:", n_failed, "\n")
+  cat("Pixel-year combinations:", length(unique(paste(year_splines_df$pixel_id, year_splines_df$year))), "\n")
+  cat("Expected combinations (pixels × years):", n_processed * length(config$target_years), "\n")
+  cat("Total spline records:", nrow(year_splines_df), "\n")
+  cat("Expected records (pixels × years × 365 days):", n_processed * length(config$target_years) * 365, "\n\n")
 
-  # Save final output
+  # Save final output (CSV for compatibility)
   cat("Saving year splines to:", config$output_file, "\n")
   write.csv(year_splines_df, config$output_file, row.names = FALSE)
 
   # Remove checkpoint
   if (file.exists(checkpoint_file)) {
     file.remove(checkpoint_file)
+    cat("Checkpoint file removed\n")
   }
 
-  cat("✓ Phase 3 complete\n\n")
+  cat("✓ Phase 4 complete\n\n")
 
   return(year_splines_df)
 }
@@ -342,10 +426,17 @@ summarize_year_splines <- function(year_splines_df) {
   cat("  Median SE:", round(median(year_splines_df$year_se), 4), "\n")
   cat("  95th percentile SE:", round(quantile(year_splines_df$year_se, 0.95), 4), "\n\n")
 
-# Check if running as main script (not being sourced)
-if (!interactive() || exists("run_phase3")) {
+  return(year_summary)
+}
 
-  cat("\n=== EXECUTING PHASE 3: YEAR-SPECIFIC GAM FITTING ===\n")
+# ==============================================================================
+# EXECUTION
+# ==============================================================================
+
+# Check if running as main script (not being sourced)
+if (!interactive() || exists("run_phase4")) {
+
+  cat("\n=== EXECUTING PHASE 4: YEAR-SPECIFIC GAM FITTING ===\n")
   cat("Started at:", as.character(Sys.time()), "\n\n")
 
   # Load timeseries from Phase 1
@@ -366,14 +457,14 @@ if (!interactive() || exists("run_phase3")) {
   year_summary <- summarize_year_splines(year_splines)
 
   # Final summary
-  cat("\n=== PHASE 3 COMPLETE ===\n")
+  cat("\n=== PHASE 4 COMPLETE ===\n")
   cat("Total time:", round(elapsed, 2), "hours\n")
-  cat("Output saved to:", config$output_file, "\n")
+  cat("Output saved to:", config$output_file, "\n\n")
 
 } else {
-  cat("\n=== PHASE 3 FUNCTIONS LOADED ===\n")
+  cat("\n=== PHASE 4 FUNCTIONS LOADED ===\n")
   cat("Ready to fit year-specific GAMs with 31-day edge padding\n")
-  cat("Estimated time: ~6 hours with", config$n_cores, "cores\n")
+  cat("Estimated time: ~10-15 hours with", config$n_cores, "cores\n")
   cat("Output will be saved to:", config$output_file, "\n\n")
   cat("To run manually:\n")
   cat("  timeseries_4km <- read.csv(config$input_file, stringsAsFactors = FALSE)\n")

@@ -275,7 +275,7 @@ process_anomalies <- function(config) {
   # Export by year
   export_anomalies_by_year(anomaly_df, config$anomaly_archive)
 
-  cat("\n=== PHASE 4 COMPLETE ===\n\n")
+  cat("\n=== PHASE 6 COMPLETE ===\n\n")
 
   return(anomaly_df)
 }
