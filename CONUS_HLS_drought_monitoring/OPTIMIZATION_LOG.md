@@ -1,6 +1,6 @@
 # CONUS HLS Drought Monitoring - Optimization Log
 
-**Date:** 2025-11-12
+**Date:** 2025-11-12 (initial), 2025-11-13 (rbind fix)
 **Objective:** Optimize CONUS-scale processing pipeline for stability and performance
 
 ---
@@ -13,6 +13,7 @@ The original pipeline (scripts 01-07) was designed for small-scale analysis and 
 2. **Sequential processing**: No parallelization, making computationally intensive phases extremely slow
 3. **Flat architecture**: Scripts 04-05 processed pixel-year combinations as independent entities, creating massive overhead
 4. **No edge year handling**: First/last years (2013, 2024) had incomplete padding data with no graceful degradation
+5. **Repeated rbind() bottleneck** (discovered 2025-11-13): Scripts 02-05 used repeated `rbind()` operations that caused exponential slowdown as results accumulated
 
 ---
 
@@ -25,28 +26,36 @@ The original pipeline (scripts 01-07) was designed for small-scale analysis and 
 
 ### Phase 2: Long-term Baseline Fitting (02_fit_longterm_baseline.R)
 - **Parallelization enabled**: 8 cores (was sequential)
-- **RDS checkpoints**: Lines 167-171 (loading), 298-301 (saving)
-- **Incremental checkpointing**: Save every 100 pixels (lines 186-303)
+- **Threading constraints** (2025-11-13): Each worker limited to 1 thread (lines 207-211) to prevent core explosion
+- **RDS checkpoints**: Switched from CSV to RDS format
+- **List accumulation fix** (2025-11-13): Results accumulate in a list instead of repeated `rbind()` (lines 219-313)
+  - **Critical fix**: Eliminates O(n²) performance degradation that caused process to hang
+  - Only converts list to dataframe every 100 pixels (checkpoint) and at final combination
+- **Incremental checkpointing**: Save every 100 pixels
 - **Batch processing**: Process in batches of 8 pixels (one per core) with per-pixel data subsetting to minimize memory duplication
-- **Progress tracking**: Real-time updates with pixels/min and ETA (lines 285-296)
+- **Progress tracking**: Real-time updates with pixels/min and ETA
 
 ### Phase 3: Baseline Derivatives (03_derivatives_baseline.R)
 - **Same optimizations as Phase 2**
 - **Parallelization**: 8 cores (line 47)
-- **RDS checkpoints**: Lines 187-192 (loading), 311-314 (saving)
+- **Threading constraints** (2025-11-13): Each worker limited to 1 thread (lines 195-199)
+- **List accumulation fix** (2025-11-13): Results accumulate in a list (lines 208-292)
+- **RDS checkpoints**: Switched from CSV to RDS format
 - **Incremental checkpointing**: Every 100 pixels
-- **Memory efficient**: Each worker gets only its assigned pixel's data (lines 245-247)
+- **Memory efficient**: Each worker gets only its assigned pixel's data
 
 ### Phase 4: Year-specific GAM Fitting (04_fit_year_gams.R)
 - **Architectural improvement**: Refactored from flat pixel-year combinations to pixel-first processing
   - Old approach: Process each pixel-year combination independently
   - New approach: Each worker processes all 12 years for one pixel sequentially
   - **Benefits**: Natural access to full pixel timeseries for edge padding, 12× less checkpoint overhead
-- **Edge year handling**: Reduce knots (k-1) for years 2013 and 2024 due to incomplete padding (lines 181-187)
+- **Edge year handling**: Reduce knots (k-1) for years 2013 and 2024 due to incomplete padding
 - **Edge padding function**: Lines 66-114, properly handles missing adjacent years
 - **New processing function**: `process_pixel_all_years()` lines 159-208
 - **Parallelization**: 8 cores (line 43)
-- **RDS checkpoints**: Lines 228-233 (loading), 353-356 (saving)
+- **Threading constraints** (2025-11-13): Each worker limited to 1 thread (lines 278-282)
+- **List accumulation fix** (2025-11-13): Results accumulate in a list (lines 292-376)
+- **RDS checkpoints**: Switched from CSV to RDS format
 - **Estimated time**: ~10-15 hours (down from potentially weeks sequential)
 
 ### Phase 5: Year-specific Derivatives (05_derivatives_individual_years.R)
@@ -55,7 +64,9 @@ The original pipeline (scripts 01-07) was designed for small-scale analysis and 
 - **Edge year handling**: Lines 206-212 (reduce knots for 2013/2024)
 - **Edge padding**: Lines 73-121 (handles missing adjacent years gracefully)
 - **Parallelization**: 8 cores (line 52)
-- **RDS checkpoints**: Lines 257-262 (loading), 385-388 (saving)
+- **Threading constraints** (2025-11-13): Each worker limited to 1 thread (lines 309-313)
+- **List accumulation fix** (2025-11-13): Results accumulate in a list (lines 325-409)
+- **RDS checkpoints**: Switched from CSV to RDS format
 - **Estimated time**: ~90-120 minutes (down from 8-12 hours)
 
 ### Phase 6: Calculate Anomalies (06_calculate_anomalies.R)
@@ -93,13 +104,18 @@ if (n_processed %% config$checkpoint_interval == 0) {
 }
 ```
 
-### 2. Parallel Processing Architecture
+### 2. Threading Constraints (2025-11-13)
 ```r
-# Set up cluster
+# Set up cluster with thread constraints to prevent core explosion
 cl <- makeCluster(config$n_cores)
 clusterEvalQ(cl, {
   library(mgcv)
   library(dplyr)
+  # CRITICAL: Prevent nested parallelism - constrain each worker to 1 thread
+  # This prevents 8 workers × N threads = core explosion
+  Sys.setenv(OMP_NUM_THREADS = 1)
+  Sys.setenv(MKL_NUM_THREADS = 1)
+  Sys.setenv(OPENBLAS_NUM_THREADS = 1)
 })
 
 # Export required objects - full dataset shared but accessed per-pixel
@@ -116,7 +132,50 @@ batch_results <- parLapply(cl, batch_pixels, function(pixel_id) {
 stopCluster(cl)
 ```
 
-### 3. Pixel-First Architecture (Scripts 04-05)
+**Why this matters:** Without thread constraints, each R worker can spawn multiple threads for linear algebra operations (via OpenBLAS/MKL), causing 8 workers × 6 threads = 48 cores, exceeding Docker limits and causing thrashing.
+
+### 3. List Accumulation Pattern (2025-11-13 - CRITICAL FIX)
+```r
+# OLD APPROACH (caused exponential slowdown):
+# baseline_df <- data.frame()  # Start with empty dataframe
+# for (i in seq_along(pixel_batches)) {
+#   batch_df <- do.call(rbind, batch_results)
+#   baseline_df <- rbind(baseline_df, batch_df)  # O(n²) performance!
+# }
+
+# NEW APPROACH (constant time per batch):
+all_results <- list()
+result_counter <- 0
+
+for (i in seq_along(pixel_batches)) {
+  batch_results <- parLapply(cl, batch_pixels, process_function)
+  batch_results <- batch_results[!sapply(batch_results, is.null)]
+
+  # Store in list (O(1) per item)
+  if (length(batch_results) > 0) {
+    for (result in batch_results) {
+      result_counter <- result_counter + 1
+      all_results[[result_counter]] <- result
+    }
+  }
+
+  # Only convert to dataframe every N pixels (checkpoint) or at end
+  if (n_processed %% config$checkpoint_interval == 0) {
+    baseline_df <- do.call(rbind, all_results)
+    saveRDS(baseline_df, checkpoint_file, compress = "gzip")
+  }
+}
+
+# Final conversion
+baseline_df <- do.call(rbind, all_results)
+```
+
+**Why this matters:**
+- **Old approach**: Each `rbind(baseline_df, batch_df)` copies the entire `baseline_df` to a new memory location. With 141K pixels × 365 days, this becomes catastrophically slow after ~100 batches.
+- **New approach**: List append is O(1). Single `rbind()` at checkpoints and end is much faster.
+- **Real-world impact**: Phase 2 was stuck after 2 hours with this bug. With the fix, it processes steadily.
+
+### 4. Pixel-First Architecture (Scripts 04-05)
 ```r
 # Old approach (inefficient):
 # pixel_year_combos <- expand.grid(pixels, years)  # Creates huge list
@@ -288,6 +347,37 @@ Before running the optimized pipeline:
 
 ---
 
+## Summary of Performance Gains
+
+### Before Optimizations (Original Scripts)
+- **Phase 1**: Days to weeks (CSV checkpoints, sequential)
+- **Phase 2**: Would hang/crash (rbind bottleneck + no parallelization)
+- **Phase 3**: Would hang/crash (same issues)
+- **Phase 4**: Weeks (flat architecture, sequential, rbind bottleneck)
+- **Phase 5**: Days (same issues)
+- **Total**: Not viable for CONUS-scale analysis
+
+### After Optimizations (November 2025)
+- **Phase 1**: ~71 hours (completed successfully)
+- **Phase 2**: ~30-60 minutes (estimated, with all fixes)
+- **Phase 3**: ~60-90 minutes
+- **Phase 4**: ~10-15 hours
+- **Phase 5**: ~90-120 minutes
+- **Phases 6-7**: ~10 minutes combined
+- **Total**: ~15-21 hours for complete CONUS analysis
+
+### Key Fixes Applied (2025-11-13)
+1. ✅ **Threading constraints**: Prevents 8 workers from spawning nested threads (48+ cores)
+2. ✅ **List accumulation**: Eliminates O(n²) rbind bottleneck that caused hanging
+3. ✅ **RDS checkpoints**: 90%+ size reduction, faster I/O, network mount stability
+4. ✅ **Parallelization**: 8-core processing for pixel-by-pixel phases
+5. ✅ **Pixel-first architecture**: Scripts 04-05 process years within pixels, not flattened combinations
+6. ✅ **Edge year handling**: Graceful degradation for 2013/2024 (incomplete padding)
+
+**Bottom line**: Pipeline went from "not feasible" to "~1 day runtime" for full CONUS drought monitoring.
+
+---
+
 ## Future Considerations
 
 1. **Phase 4 optimization potential**: Consider caching baseline GAMs if refitting repeatedly
@@ -302,6 +392,6 @@ Before running the optimized pipeline:
 ## Contact
 
 For questions about these optimizations, refer to:
-- Session date: 2025-11-12
-- Optimization focus: Network mount stability, parallelization, pixel-first architecture
+- Session dates: 2025-11-12 (initial), 2025-11-13 (rbind fix + threading)
+- Optimization focus: Network mount stability, parallelization, pixel-first architecture, rbind performance
 - Reference: This optimization log and inline code comments
