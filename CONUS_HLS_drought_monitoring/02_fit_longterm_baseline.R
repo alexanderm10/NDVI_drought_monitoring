@@ -10,6 +10,49 @@ library(mgcv)
 library(dplyr)
 library(parallel)
 
+# ==============================================================================
+# PLATFORM CHECK: This script uses mclapply for parallel processing
+# ==============================================================================
+# ⚠️  WARNING: This script requires Linux or macOS for parallel processing!
+#
+# - Linux/Mac: Uses fork-based parallelization (mclapply) for optimal performance
+# - Windows: mclapply falls back to sequential processing (1 core only)
+#
+# If running on Windows, expect significantly longer runtimes:
+#   - Linux/Mac: ~13 hours for CONUS-scale analysis
+#   - Windows:   ~3 days (sequential fallback)
+#
+# For Windows users: Consider running on a Linux server or in WSL2
+# ==============================================================================
+
+if (Sys.info()["sysname"] == "Windows") {
+  cat("\n")
+  cat("╔════════════════════════════════════════════════════════════════╗\n")
+  cat("║  ⚠️  WARNING: Running on Windows                              ║\n")
+  cat("║                                                                ║\n")
+  cat("║  This script uses mclapply which does NOT support parallel    ║\n")
+  cat("║  processing on Windows. It will fall back to sequential       ║\n")
+  cat("║  processing (1 core), resulting in significantly longer       ║\n")
+  cat("║  runtimes:                                                     ║\n")
+  cat("║                                                                ║\n")
+  cat("║    • Linux/Mac: ~13 hours (8 cores)                           ║\n")
+  cat("║    • Windows:   ~3 days (1 core, sequential)                  ║\n")
+  cat("║                                                                ║\n")
+  cat("║  Recommendation: Run on Linux/Mac or in WSL2 for best         ║\n")
+  cat("║  performance.                                                  ║\n")
+  cat("╚════════════════════════════════════════════════════════════════╝\n")
+  cat("\n")
+
+  # Require explicit confirmation to proceed
+  response <- readline(prompt = "Do you want to continue anyway? (Y/N): ")
+
+  if (!toupper(response) %in% c("Y", "YES")) {
+    stop("Execution cancelled by user. Please run this script on Linux/Mac or WSL2 for optimal performance.")
+  }
+
+  cat("\nProceeding with sequential processing on Windows...\n\n")
+}
+
 # Source path configuration
 source("00_setup_paths.R")
 hls_paths <- get_hls_paths()
@@ -162,6 +205,15 @@ fit_all_baselines <- function(timeseries_df, config) {
 
   cat("  Unique 4km pixels:", n_pixels, "\n\n")
 
+  # CRITICAL OPTIMIZATION: Pre-split data by pixel_id for O(1) access in workers
+  # This avoids repeated scanning of 18.7M rows during pixel processing
+  # split() preserves row order within each group
+  # On Linux: mclapply forks share this via copy-on-write (no serialization overhead!)
+  cat("Pre-splitting data by pixel for fast worker access...\n")
+  pixel_list <- split(timeseries_baseline, timeseries_baseline$pixel_id)
+  cat("  Created indexed list of", length(pixel_list), "pixels\n")
+  cat("  (Workers will access via copy-on-write shared memory)\n\n")
+
   # Check for checkpoint (RDS format for faster I/O)
   checkpoint_file <- sub("\\.csv$", "_checkpoint.rds", config$output_file)
 
@@ -199,22 +251,11 @@ fit_all_baselines <- function(timeseries_df, config) {
 
   cat("Split into", length(pixel_batches), "batches of ~", batch_size, "pixels each\n\n")
 
-  # Set up cluster if using parallel processing
-  if (config$n_cores > 1) {
-    cl <- makeCluster(config$n_cores)
-    clusterEvalQ(cl, {
-      library(mgcv)
-      # CRITICAL: Prevent nested parallelism - constrain each worker to 1 thread
-      # This prevents 8 workers × N threads = core explosion
-      Sys.setenv(OMP_NUM_THREADS = 1)
-      Sys.setenv(MKL_NUM_THREADS = 1)
-      Sys.setenv(OPENBLAS_NUM_THREADS = 1)
-    })
-    # Export required objects: timeseries_baseline, config, and functions
-    # timeseries_baseline IS exported but accessed per-pixel (not duplicated per worker)
-    clusterExport(cl, c("timeseries_baseline", "config", "fit_pixel_baseline"),
-                  envir = environment())
-  }
+  # Set threading constraints for parallel workers
+  # CRITICAL: Prevent nested parallelism - constrain each worker to 1 thread
+  Sys.setenv(OMP_NUM_THREADS = 1)
+  Sys.setenv(MKL_NUM_THREADS = 1)
+  Sys.setenv(OPENBLAS_NUM_THREADS = 1)
 
   # Accumulate results in a list to avoid repeated rbind (MUCH faster)
   all_results <- list()
@@ -224,12 +265,16 @@ fit_all_baselines <- function(timeseries_df, config) {
   for (i in seq_along(pixel_batches)) {
     batch_pixels <- pixel_batches[[i]]
 
-    # Process batch (parallel or sequential)
+    # Process batch using mclapply (forking on Linux - shares memory with parent!)
+    # This avoids the serialization overhead of SOCK clusters
+    # pixel_list is accessible via copy-on-write shared memory
     if (config$n_cores > 1) {
-      # For parallel: split data per pixel and send only relevant data to each worker
-      batch_results <- parLapply(cl, batch_pixels, function(pixel_id) {
-        # Each worker gets ONLY data for its assigned pixel
-        pixel_data <- timeseries_baseline[timeseries_baseline$pixel_id == pixel_id, ]
+      batch_results <- mclapply(batch_pixels, function(pixel_id) {
+        # Load mgcv in each fork
+        library(mgcv)
+
+        # O(1) access from pre-split list (shared via copy-on-write!)
+        pixel_data <- pixel_list[[as.character(pixel_id)]]
 
         # Skip if insufficient data
         if (nrow(pixel_data) < config$min_observations) {
@@ -249,11 +294,11 @@ fit_all_baselines <- function(timeseries_df, config) {
         } else {
           return(NULL)
         }
-      })
+      }, mc.cores = config$n_cores)
     } else {
       # Sequential processing
       batch_results <- lapply(batch_pixels, function(pixel_id) {
-        pixel_data <- timeseries_baseline[timeseries_baseline$pixel_id == pixel_id, ]
+        pixel_data <- pixel_list[[as.character(pixel_id)]]
 
         if (nrow(pixel_data) < config$min_observations) {
           return(NULL)
@@ -312,10 +357,7 @@ fit_all_baselines <- function(timeseries_df, config) {
   cat("\nCombining all results...\n")
   baseline_df <- do.call(rbind, all_results)
 
-  # Clean up cluster
-  if (config$n_cores > 1) {
-    stopCluster(cl)
-  }
+  # No cluster cleanup needed with mclapply (uses forking, not SOCK cluster)
 
   elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
 
