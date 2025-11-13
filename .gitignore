@@ -1,0 +1,42 @@
+# Log files
+*.log
+
+# R history and session data
+.Rhistory
+.RData
+.Rproj.user/
+
+# Checkpoint files (RDS and CSV formats)
+*_checkpoint.rds
+*_checkpoint.csv
+
+# Large data files (output products)
+*.tif
+*.nc
+*.hdf
+
+# Temporary files
+*.tmp
+*~
+.DS_Store
+
+# RStudio project files
+*.Rproj
+
+# Python cache (if any Python scripts added later)
+__pycache__/
+*.pyc
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# Large output CSVs (keep structure, not data)
+# Uncomment these if you don't want to track large CSV outputs
+# *_timeseries.csv
+# *_baseline.csv
+# *_anomalies.csv
+# *_derivatives.csv
+# *_year_*.csv
+
+# nohup output
+nohup.out

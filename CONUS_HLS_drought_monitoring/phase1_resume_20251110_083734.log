@@ -1816,3 +1816,942 @@ Creating 4km reference grid in Albers Equal Area projection...
   Progress: 42150/57154 scenes (73.7%) | 13.6 scenes/min | ETA: 1101 min
   Progress: 42200/57154 scenes (73.8%) | 13.6 scenes/min | ETA: 1097 min
   Progress: 42250/57154 scenes (73.9%) | 13.6 scenes/min | ETA: 1093 min
+  Progress: 42300/57154 scenes (74.0%) | 13.6 scenes/min | ETA: 1090 min
+  Saving checkpoint...
+  Progress: 42350/57154 scenes (74.1%) | 13.6 scenes/min | ETA: 1086 min
+  Progress: 42400/57154 scenes (74.2%) | 13.6 scenes/min | ETA: 1083 min
+  Progress: 42450/57154 scenes (74.3%) | 13.6 scenes/min | ETA: 1079 min
+  Progress: 42500/57154 scenes (74.4%) | 13.6 scenes/min | ETA: 1076 min
+  Progress: 42550/57154 scenes (74.4%) | 13.6 scenes/min | ETA: 1072 min
+  ⚠ Aggregation failed: HLS.L30.T14SLG.2023060T171948.v2.0_NDVI.tif 
+    Error: [readStart] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLG.2023060T171948.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLG.2023091T172530.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLG.2023091T172530.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLG.2023092T171930.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLG.2023092T171930.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLG.2023093T171306.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLG.2023093T171306.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLG.2023156T171900.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLG.2023156T171900.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLG.2023213T171304.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLG.2023213T171304.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLG.2023244T171932.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLG.2023244T171932.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLG.2023245T171319.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLG.2023245T171319.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLG.2023276T171940.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLG.2023276T171940.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLG.2023307T172551.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLG.2023307T172551.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLG.2023308T171945.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLG.2023308T171945.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLG.2023339T172558.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLG.2023339T172558.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLH.2023060T171924.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLH.2023060T171924.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLH.2023091T172506.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLH.2023091T172506.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLH.2023092T171906.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLH.2023092T171906.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLH.2023156T171836.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLH.2023156T171836.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLH.2023244T171908.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLH.2023244T171908.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLH.2023275T172524.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLH.2023275T172524.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLH.2023307T172527.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLH.2023307T172527.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLH.2023308T171921.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLH.2023308T171921.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLH.2023339T172535.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLH.2023339T172535.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLJ.2023060T171900.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLJ.2023060T171900.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLJ.2023091T172442.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLJ.2023091T172442.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLJ.2023156T171812.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLJ.2023156T171812.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLJ.2023244T171845.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLJ.2023244T171845.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLJ.2023275T172501.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLJ.2023275T172501.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLJ.2023276T171852.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLJ.2023276T171852.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLJ.2023308T171857.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLJ.2023308T171857.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SLJ.2023339T172511.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SLJ.2023339T172511.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMF.2023004T171958.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMF.2023004T171958.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMF.2023005T171349.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMF.2023005T171349.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMF.2023092T171930.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMF.2023092T171930.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMF.2023093T171306.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMF.2023093T171306.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMF.2023156T171900.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMF.2023156T171900.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMF.2023188T171906.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMF.2023188T171906.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMF.2023213T171304.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMF.2023213T171304.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMF.2023244T171932.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMF.2023244T171932.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMF.2023245T171319.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMF.2023245T171319.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMF.2023308T171945.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMF.2023308T171945.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMF.2023309T171331.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMF.2023309T171331.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMG.2023004T171958.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMG.2023004T171958.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMG.2023005T171349.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMG.2023005T171349.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMG.2023060T171948.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMG.2023060T171948.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMG.2023092T171930.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMG.2023092T171930.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMG.2023093T171306.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMG.2023093T171306.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMG.2023156T171900.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMG.2023156T171900.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMG.2023213T171304.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMG.2023213T171304.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMG.2023244T171932.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMG.2023244T171932.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMG.2023245T171319.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMG.2023245T171319.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMG.2023308T171945.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMG.2023308T171945.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMH.2023005T171325.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMH.2023005T171325.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMH.2023060T171924.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMH.2023060T171924.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMH.2023092T171906.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMH.2023092T171906.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMH.2023093T171242.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMH.2023093T171242.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMH.2023156T171836.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMH.2023156T171836.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMH.2023213T171241.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMH.2023213T171241.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMH.2023244T171908.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMH.2023244T171908.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMH.2023245T171255.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMH.2023245T171255.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMJ.2023005T171302.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMJ.2023005T171302.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMJ.2023060T171900.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMJ.2023060T171900.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMJ.2023156T171812.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMJ.2023156T171812.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMJ.2023157T171157.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMJ.2023157T171157.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMJ.2023213T171217.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMJ.2023213T171217.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMJ.2023244T171845.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMJ.2023244T171845.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMJ.2023245T171231.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMJ.2023245T171231.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SMJ.2023308T171857.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SMJ.2023308T171857.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNF.2023005T171349.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNF.2023005T171349.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNF.2023062T170725.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNF.2023062T170725.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNF.2023093T171306.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNF.2023093T171306.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNF.2023126T170650.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNF.2023126T170650.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNF.2023157T171245.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNF.2023157T171245.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNF.2023182T170648.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNF.2023182T170648.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNF.2023213T171304.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNF.2023213T171304.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNF.2023214T170702.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNF.2023214T170702.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNF.2023245T171319.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNF.2023245T171319.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNF.2023246T170710.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNF.2023246T170710.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNF.2023278T170718.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNF.2023278T170718.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNF.2023309T171331.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNF.2023309T171331.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNF.2023341T171335.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNF.2023341T171335.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNG.2023005T171349.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNG.2023005T171349.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNG.2023062T170725.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNG.2023062T170725.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNG.2023093T171306.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNG.2023093T171306.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNG.2023126T170650.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNG.2023126T170650.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNG.2023157T171245.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNG.2023157T171245.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNG.2023182T170648.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNG.2023182T170648.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNG.2023213T171304.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNG.2023213T171304.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNG.2023214T170702.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNG.2023214T170702.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNG.2023245T171319.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNG.2023245T171319.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNG.2023246T170710.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNG.2023246T170710.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNG.2023278T170718.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNG.2023278T170718.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNG.2023309T171331.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNG.2023309T171331.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNG.2023341T171335.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNG.2023341T171335.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNH.2023005T171325.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNH.2023005T171325.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNH.2023037T171329.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNH.2023037T171329.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNH.2023062T170702.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNH.2023062T170702.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNH.2023093T171242.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNH.2023093T171242.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNH.2023094T170644.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNH.2023094T170644.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNH.2023126T170626.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNH.2023126T170626.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNH.2023157T171221.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNH.2023157T171221.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNH.2023213T171241.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNH.2023213T171241.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNH.2023245T171255.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNH.2023245T171255.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNH.2023246T170646.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNH.2023246T170646.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNH.2023277T171304.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNH.2023277T171304.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNH.2023278T170654.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNH.2023278T170654.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNH.2023341T171311.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNH.2023341T171311.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNH.2023342T170654.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNH.2023342T170654.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023005T171302.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023005T171302.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023037T171305.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023037T171305.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023038T170645.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023038T170645.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023060T171900.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023060T171900.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023062T170638.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023062T170638.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023092T171843.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023092T171843.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023094T170621.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023094T170621.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023125T171159.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023125T171159.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023126T170603.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023126T170603.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023156T171812.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023156T171812.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023157T171157.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023157T171157.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023213T171217.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023213T171217.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023214T170614.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023214T170614.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023244T171845.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023244T171845.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023245T171231.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023245T171231.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023246T170622.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023246T170622.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023278T170630.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023278T170630.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023308T171857.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023308T171857.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023340T171850.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023340T171850.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SNJ.2023341T171247.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SNJ.2023341T171247.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPF.2023062T170725.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPF.2023062T170725.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPF.2023063T170102.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPF.2023063T170102.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPF.2023095T170042.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPF.2023095T170042.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPF.2023126T170650.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPF.2023126T170650.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPF.2023182T170648.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPF.2023182T170648.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPF.2023183T170030.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPF.2023183T170030.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPF.2023214T170702.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPF.2023214T170702.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPF.2023215T170044.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPF.2023215T170044.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPF.2023246T170710.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPF.2023246T170710.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPF.2023278T170718.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPF.2023278T170718.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPF.2023311T170111.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPF.2023311T170111.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023005T171349.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023005T171349.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023062T170725.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023062T170725.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023063T170102.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023063T170102.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023093T171306.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023093T171306.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023095T170042.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023095T170042.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023126T170650.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023126T170650.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023157T171245.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023157T171245.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023183T170030.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023183T170030.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023213T171304.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023213T171304.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023245T171319.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023245T171319.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023246T170710.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023246T170710.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023277T171328.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023277T171328.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023278T170718.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023278T170718.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023309T171331.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023309T171331.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPG.2023341T171335.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPG.2023341T171335.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPH.2023005T171325.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPH.2023005T171325.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPH.2023037T171329.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPH.2023037T171329.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPH.2023062T170702.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPH.2023062T170702.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPH.2023093T171242.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPH.2023093T171242.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPH.2023095T170018.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPH.2023095T170018.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPH.2023126T170626.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPH.2023126T170626.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPH.2023157T171221.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPH.2023157T171221.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPH.2023183T170006.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPH.2023183T170006.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPH.2023245T171255.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPH.2023245T171255.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPH.2023246T170646.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPH.2023246T170646.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPH.2023277T171304.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPH.2023277T171304.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPH.2023278T170654.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPH.2023278T170654.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPH.2023341T171311.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPH.2023341T171311.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPH.2023342T170654.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPH.2023342T170654.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPJ.2023005T171302.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPJ.2023005T171302.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPJ.2023037T171305.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPJ.2023037T171305.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPJ.2023062T170638.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPJ.2023062T170638.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPJ.2023094T170621.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPJ.2023094T170621.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPJ.2023126T170603.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPJ.2023126T170603.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPJ.2023157T171157.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPJ.2023157T171157.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPJ.2023213T171217.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPJ.2023213T171217.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPJ.2023245T171231.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPJ.2023245T171231.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPJ.2023246T170622.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPJ.2023246T170622.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPJ.2023277T171240.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPJ.2023277T171240.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPJ.2023278T170630.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPJ.2023278T170630.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SPJ.2023341T171247.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SPJ.2023341T171247.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SQF.2023007T170127.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SQF.2023007T170127.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SQF.2023062T170725.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SQF.2023062T170725.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SQF.2023095T170042.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SQF.2023095T170042.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SQF.2023126T170650.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SQF.2023126T170650.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SQF.2023183T170030.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SQF.2023183T170030.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T14SQF.2023214T170702.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2023/HLS.L30.T14SQF.2023214T170702.v2.0_NDVI.tif 
+  Progress: 42600/57154 scenes (74.5%) | 13.6 scenes/min | ETA: 1069 min
+  Saving checkpoint...
+  Progress: 42650/57154 scenes (74.6%) | 13.6 scenes/min | ETA: 1066 min
+  Progress: 42700/57154 scenes (74.7%) | 13.6 scenes/min | ETA: 1062 min
+  Progress: 42750/57154 scenes (74.8%) | 13.6 scenes/min | ETA: 1059 min
+  Progress: 42800/57154 scenes (74.9%) | 13.6 scenes/min | ETA: 1055 min
+  Progress: 42850/57154 scenes (75.0%) | 13.6 scenes/min | ETA: 1052 min
+  Progress: 42900/57154 scenes (75.1%) | 13.6 scenes/min | ETA: 1048 min
+  Saving checkpoint...
+  Progress: 42950/57154 scenes (75.1%) | 13.6 scenes/min | ETA: 1045 min
+  Progress: 43000/57154 scenes (75.2%) | 13.6 scenes/min | ETA: 1041 min
+  Progress: 43050/57154 scenes (75.3%) | 13.6 scenes/min | ETA: 1038 min
+  Progress: 43100/57154 scenes (75.4%) | 13.6 scenes/min | ETA: 1034 min
+  Progress: 43150/57154 scenes (75.5%) | 13.6 scenes/min | ETA: 1031 min
+  Progress: 43200/57154 scenes (75.6%) | 13.6 scenes/min | ETA: 1028 min
+  Saving checkpoint...
+  Progress: 43250/57154 scenes (75.7%) | 13.6 scenes/min | ETA: 1025 min
+  Progress: 43300/57154 scenes (75.8%) | 13.6 scenes/min | ETA: 1021 min
+  Progress: 43350/57154 scenes (75.8%) | 13.6 scenes/min | ETA: 1018 min
+  Progress: 43400/57154 scenes (75.9%) | 13.6 scenes/min | ETA: 1014 min
+  Progress: 43450/57154 scenes (76.0%) | 13.6 scenes/min | ETA: 1010 min
+  Progress: 43500/57154 scenes (76.1%) | 13.6 scenes/min | ETA: 1007 min
+  Saving checkpoint...
+  Progress: 43550/57154 scenes (76.2%) | 13.6 scenes/min | ETA: 1004 min
+  Progress: 43600/57154 scenes (76.3%) | 13.6 scenes/min | ETA: 1000 min
+  Progress: 43650/57154 scenes (76.4%) | 13.5 scenes/min | ETA: 997 min
+  Progress: 43700/57154 scenes (76.5%) | 13.5 scenes/min | ETA: 993 min
+  Progress: 43750/57154 scenes (76.5%) | 13.5 scenes/min | ETA: 990 min
+  Progress: 43800/57154 scenes (76.6%) | 13.5 scenes/min | ETA: 988 min
+  Saving checkpoint...
+  Progress: 43850/57154 scenes (76.7%) | 13.5 scenes/min | ETA: 987 min
+  Progress: 43900/57154 scenes (76.8%) | 13.5 scenes/min | ETA: 985 min
+  Progress: 43950/57154 scenes (76.9%) | 13.4 scenes/min | ETA: 982 min
+  Progress: 44000/57154 scenes (77.0%) | 13.4 scenes/min | ETA: 979 min
+  Progress: 44050/57154 scenes (77.1%) | 13.4 scenes/min | ETA: 976 min
+  Progress: 44100/57154 scenes (77.2%) | 13.4 scenes/min | ETA: 973 min
+  Saving checkpoint...
+  Progress: 44150/57154 scenes (77.2%) | 13.4 scenes/min | ETA: 971 min
+  Progress: 44200/57154 scenes (77.3%) | 13.4 scenes/min | ETA: 969 min
+  Progress: 44250/57154 scenes (77.4%) | 13.4 scenes/min | ETA: 966 min
+  Progress: 44300/57154 scenes (77.5%) | 13.4 scenes/min | ETA: 963 min
+  Progress: 44350/57154 scenes (77.6%) | 13.3 scenes/min | ETA: 959 min
+  Progress: 44400/57154 scenes (77.7%) | 13.3 scenes/min | ETA: 957 min
+  Saving checkpoint...
+  Progress: 44450/57154 scenes (77.8%) | 13.3 scenes/min | ETA: 955 min
+  Progress: 44500/57154 scenes (77.9%) | 13.3 scenes/min | ETA: 951 min
+  Progress: 44550/57154 scenes (77.9%) | 13.3 scenes/min | ETA: 948 min
+  Progress: 44600/57154 scenes (78.0%) | 13.3 scenes/min | ETA: 946 min
+  Progress: 44650/57154 scenes (78.1%) | 13.3 scenes/min | ETA: 943 min
+  Progress: 44700/57154 scenes (78.2%) | 13.2 scenes/min | ETA: 941 min
+  Saving checkpoint...
+  Progress: 44750/57154 scenes (78.3%) | 13.2 scenes/min | ETA: 939 min
+  Progress: 44800/57154 scenes (78.4%) | 13.2 scenes/min | ETA: 936 min
+  Progress: 44850/57154 scenes (78.5%) | 13.2 scenes/min | ETA: 933 min
+  Progress: 44900/57154 scenes (78.6%) | 13.2 scenes/min | ETA: 930 min
+  Progress: 44950/57154 scenes (78.6%) | 13.2 scenes/min | ETA: 928 min
+  Progress: 45000/57154 scenes (78.7%) | 13.1 scenes/min | ETA: 925 min
+  Saving checkpoint...
+  Progress: 45050/57154 scenes (78.8%) | 13.1 scenes/min | ETA: 924 min
+  Progress: 45100/57154 scenes (78.9%) | 13.1 scenes/min | ETA: 922 min
+  Progress: 45150/57154 scenes (79.0%) | 13.1 scenes/min | ETA: 919 min
+  Progress: 45200/57154 scenes (79.1%) | 13.0 scenes/min | ETA: 916 min
+  Progress: 45250/57154 scenes (79.2%) | 13.0 scenes/min | ETA: 913 min
+  Progress: 45300/57154 scenes (79.3%) | 13.0 scenes/min | ETA: 910 min
+  Saving checkpoint...
+  Progress: 45350/57154 scenes (79.3%) | 13.0 scenes/min | ETA: 907 min
+  Progress: 45400/57154 scenes (79.4%) | 13.0 scenes/min | ETA: 904 min
+  Progress: 45450/57154 scenes (79.5%) | 13.0 scenes/min | ETA: 901 min
+  Progress: 45500/57154 scenes (79.6%) | 13.0 scenes/min | ETA: 898 min
+  Progress: 45550/57154 scenes (79.7%) | 13.0 scenes/min | ETA: 895 min
+  Progress: 45600/57154 scenes (79.8%) | 13.0 scenes/min | ETA: 892 min
+  Saving checkpoint...
+  Progress: 45650/57154 scenes (79.9%) | 12.9 scenes/min | ETA: 890 min
+  Progress: 45700/57154 scenes (80.0%) | 12.9 scenes/min | ETA: 887 min
+  Progress: 45750/57154 scenes (80.0%) | 12.9 scenes/min | ETA: 885 min
+  Progress: 45800/57154 scenes (80.1%) | 12.9 scenes/min | ETA: 882 min
+  Progress: 45850/57154 scenes (80.2%) | 12.8 scenes/min | ETA: 880 min
+  Progress: 45900/57154 scenes (80.3%) | 12.8 scenes/min | ETA: 877 min
+  Saving checkpoint...
+  Progress: 45950/57154 scenes (80.4%) | 12.8 scenes/min | ETA: 876 min
+  Progress: 46000/57154 scenes (80.5%) | 12.8 scenes/min | ETA: 873 min
+  Progress: 46050/57154 scenes (80.6%) | 12.8 scenes/min | ETA: 870 min
+  Progress: 46100/57154 scenes (80.7%) | 12.8 scenes/min | ETA: 867 min
+  Progress: 46150/57154 scenes (80.7%) | 12.7 scenes/min | ETA: 864 min
+  Progress: 46200/57154 scenes (80.8%) | 12.7 scenes/min | ETA: 860 min
+  Saving checkpoint...
+  Progress: 46250/57154 scenes (80.9%) | 12.7 scenes/min | ETA: 858 min
+  Progress: 46300/57154 scenes (81.0%) | 12.7 scenes/min | ETA: 855 min
+  Progress: 46350/57154 scenes (81.1%) | 12.7 scenes/min | ETA: 852 min
+  Progress: 46400/57154 scenes (81.2%) | 12.7 scenes/min | ETA: 849 min
+  Progress: 46450/57154 scenes (81.3%) | 12.7 scenes/min | ETA: 845 min
+  Progress: 46500/57154 scenes (81.4%) | 12.7 scenes/min | ETA: 842 min
+  Saving checkpoint...
+  Progress: 46550/57154 scenes (81.4%) | 12.6 scenes/min | ETA: 839 min
+  Progress: 46600/57154 scenes (81.5%) | 12.6 scenes/min | ETA: 836 min
+  Progress: 46650/57154 scenes (81.6%) | 12.6 scenes/min | ETA: 833 min
+  Progress: 46700/57154 scenes (81.7%) | 12.6 scenes/min | ETA: 830 min
+  Progress: 46750/57154 scenes (81.8%) | 12.6 scenes/min | ETA: 827 min
+  Progress: 46800/57154 scenes (81.9%) | 12.6 scenes/min | ETA: 824 min
+  Saving checkpoint...
+  Progress: 46850/57154 scenes (82.0%) | 12.5 scenes/min | ETA: 821 min
+  Progress: 46900/57154 scenes (82.1%) | 12.5 scenes/min | ETA: 818 min
+  Progress: 46950/57154 scenes (82.1%) | 12.5 scenes/min | ETA: 814 min
+  Progress: 47000/57154 scenes (82.2%) | 12.5 scenes/min | ETA: 810 min
+  Progress: 47050/57154 scenes (82.3%) | 12.5 scenes/min | ETA: 807 min
+  Progress: 47100/57154 scenes (82.4%) | 12.5 scenes/min | ETA: 804 min
+  Saving checkpoint...
+  Progress: 47150/57154 scenes (82.5%) | 12.5 scenes/min | ETA: 800 min
+  Progress: 47200/57154 scenes (82.6%) | 12.5 scenes/min | ETA: 796 min
+  Progress: 47250/57154 scenes (82.7%) | 12.5 scenes/min | ETA: 792 min
+  Progress: 47300/57154 scenes (82.8%) | 12.5 scenes/min | ETA: 788 min
+  Progress: 47350/57154 scenes (82.8%) | 12.5 scenes/min | ETA: 784 min
+  Progress: 47400/57154 scenes (82.9%) | 12.5 scenes/min | ETA: 780 min
+  Saving checkpoint...
+  Progress: 47450/57154 scenes (83.0%) | 12.5 scenes/min | ETA: 777 min
+  ⚠ Aggregation failed: HLS.L30.T13SGB.2024277T173146.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGB.2024277T173146.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGB.2024278T172540.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGB.2024278T172540.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGB.2024310T172550.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGB.2024310T172550.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGB.2024341T173201.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGB.2024341T173201.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGC.2024006T172533.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGC.2024006T172533.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGC.2024061T173140.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGC.2024061T173140.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGC.2024062T172517.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGC.2024062T172517.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGC.2024093T173131.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGC.2024093T173131.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGC.2024094T172457.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGC.2024094T172457.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGC.2024125T173107.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGC.2024125T173107.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGC.2024158T172425.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGC.2024158T172425.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGC.2024214T172450.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGC.2024214T172450.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGC.2024245T173121.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGC.2024245T173121.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGC.2024246T172504.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGC.2024246T172504.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGC.2024277T173122.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGC.2024277T173122.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGC.2024278T172516.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGC.2024278T172516.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGC.2024310T172526.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGC.2024310T172526.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGC.2024341T173137.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGC.2024341T173137.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGD.2024006T172510.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGD.2024006T172510.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGD.2024061T173117.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGD.2024061T173117.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGD.2024093T173107.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGD.2024093T173107.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGD.2024094T172433.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGD.2024094T172433.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGD.2024125T173043.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGD.2024125T173043.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGD.2024158T172401.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGD.2024158T172401.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGD.2024214T172426.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGD.2024214T172426.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGD.2024245T173057.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGD.2024245T173057.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGD.2024277T173059.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGD.2024277T173059.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGD.2024278T172452.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGD.2024278T172452.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGD.2024310T172502.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGD.2024310T172502.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13SGD.2024341T173113.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13SGD.2024341T173113.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEE.2024036T173736.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEE.2024036T173736.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEE.2024093T173107.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEE.2024093T173107.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEE.2024124T173637.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEE.2024124T173637.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEE.2024125T173043.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEE.2024125T173043.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEE.2024188T173639.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEE.2024188T173639.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEE.2024245T173057.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEE.2024245T173057.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEE.2024276T173714.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEE.2024276T173714.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEE.2024277T173059.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEE.2024277T173059.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEE.2024308T173723.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEE.2024308T173723.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEE.2024340T173728.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEE.2024340T173728.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEE.2024341T173113.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEE.2024341T173113.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEF.2024003T174309.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEF.2024003T174309.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEF.2024035T174310.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEF.2024035T174310.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEF.2024036T173713.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEF.2024036T173713.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEF.2024061T173117.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEF.2024061T173117.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEF.2024093T173107.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEF.2024093T173107.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEF.2024125T173043.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEF.2024125T173043.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEF.2024188T173615.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEF.2024188T173615.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEF.2024245T173057.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEF.2024245T173057.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEF.2024275T174255.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEF.2024275T174255.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEF.2024276T173650.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEF.2024276T173650.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEF.2024277T173059.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEF.2024277T173059.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEF.2024307T174301.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEF.2024307T174301.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEF.2024339T174313.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEF.2024339T174313.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEF.2024340T173704.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEF.2024340T173704.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEG.2024003T174246.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEG.2024003T174246.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEG.2024035T174246.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEG.2024035T174246.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEG.2024036T173713.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEG.2024036T173713.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEG.2024123T174216.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEG.2024123T174216.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEG.2024187T174158.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEG.2024187T174158.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEG.2024188T173615.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEG.2024188T173615.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEG.2024275T174231.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEG.2024275T174231.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEG.2024276T173650.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEG.2024276T173650.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEG.2024307T174237.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEG.2024307T174237.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEG.2024339T174249.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEG.2024339T174249.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEG.2024340T173704.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEG.2024340T173704.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEH.2024003T174246.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEH.2024003T174246.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEH.2024035T174246.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEH.2024035T174246.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEH.2024036T173649.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEH.2024036T173649.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEH.2024123T174216.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEH.2024123T174216.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEH.2024156T173535.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEH.2024156T173535.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEH.2024187T174158.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEH.2024187T174158.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEH.2024188T173551.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEH.2024188T173551.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEH.2024275T174231.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEH.2024275T174231.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEH.2024276T173626.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEH.2024276T173626.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEH.2024339T174249.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEH.2024339T174249.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEH.2024340T173640.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEH.2024340T173640.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEJ.2024003T174222.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEJ.2024003T174222.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEJ.2024036T173625.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEJ.2024036T173625.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEJ.2024156T173511.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEJ.2024156T173511.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEJ.2024339T174225.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEJ.2024339T174225.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEJ.2024340T173616.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEJ.2024340T173616.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEK.2024002T174820.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEK.2024002T174820.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEK.2024156T173511.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEK.2024156T173511.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEK.2024219T174147.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEK.2024219T174147.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEK.2024276T173602.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEK.2024276T173602.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEK.2024306T174807.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEK.2024306T174807.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEK.2024338T174816.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEK.2024338T174816.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEK.2024340T173616.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEK.2024340T173616.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEL.2024002T174820.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEL.2024002T174820.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEL.2024156T173447.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEL.2024156T173447.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEL.2024219T174123.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEL.2024219T174123.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEL.2024276T173538.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEL.2024276T173538.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEL.2024306T174807.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEL.2024306T174807.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEL.2024338T174816.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEL.2024338T174816.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEL.2024340T173552.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEL.2024340T173552.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEM.2024002T174756.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEM.2024002T174756.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEM.2024067T174121.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEM.2024067T174121.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEM.2024219T174059.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEM.2024219T174059.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEM.2024306T174743.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEM.2024306T174743.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEM.2024307T174126.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEM.2024307T174126.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEM.2024338T174753.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEM.2024338T174753.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEN.2024010T174747.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEN.2024010T174747.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEN.2024067T174121.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEN.2024067T174121.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEN.2024219T174059.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEN.2024219T174059.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEN.2024306T174743.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEN.2024306T174743.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEN.2024338T174753.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEN.2024338T174753.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TEN.2024339T174137.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TEN.2024339T174137.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFE.2024036T173736.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFE.2024036T173736.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFE.2024061T173117.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFE.2024061T173117.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFE.2024093T173107.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFE.2024093T173107.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFE.2024124T173637.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFE.2024124T173637.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFE.2024125T173043.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFE.2024125T173043.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFE.2024188T173639.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFE.2024188T173639.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFE.2024245T173057.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFE.2024245T173057.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFE.2024276T173714.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFE.2024276T173714.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFE.2024277T173059.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFE.2024277T173059.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFE.2024340T173728.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFE.2024340T173728.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFE.2024341T173113.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFE.2024341T173113.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFF.2024036T173713.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFF.2024036T173713.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFF.2024061T173053.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFF.2024061T173053.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFF.2024093T173043.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFF.2024093T173043.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFF.2024124T173613.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFF.2024124T173613.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFF.2024125T173019.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFF.2024125T173019.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFF.2024188T173615.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFF.2024188T173615.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFF.2024245T173033.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFF.2024245T173033.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFF.2024276T173650.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFF.2024276T173650.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFF.2024277T173035.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFF.2024277T173035.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFF.2024340T173704.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFF.2024340T173704.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFG.2024036T173649.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFG.2024036T173649.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFG.2024061T173053.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFG.2024061T173053.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFG.2024093T173043.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFG.2024093T173043.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFG.2024125T173019.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFG.2024125T173019.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFG.2024188T173551.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFG.2024188T173551.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFG.2024245T173033.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFG.2024245T173033.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFG.2024276T173626.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFG.2024276T173626.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFG.2024277T173035.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFG.2024277T173035.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFG.2024309T173042.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFG.2024309T173042.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFG.2024340T173640.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFG.2024340T173640.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFH.2024036T173649.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFH.2024036T173649.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFH.2024061T173029.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFH.2024061T173029.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFH.2024093T173019.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFH.2024093T173019.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFH.2024123T174216.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFH.2024123T174216.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFH.2024125T172955.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFH.2024125T172955.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFH.2024187T174158.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFH.2024187T174158.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFH.2024188T173551.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFH.2024188T173551.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFH.2024245T173009.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFH.2024245T173009.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFH.2024275T174231.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFH.2024275T174231.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFH.2024276T173626.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFH.2024276T173626.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFH.2024277T173011.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFH.2024277T173011.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFH.2024307T174237.v2.0_NDVI.tif 
+    Error: [rast] file does not exist: /data/processed_ndvi/daily/2024/HLS.L30.T13TFH.2024307T174237.v2.0_NDVI.tif 
+  ⚠ Aggregation failed: HLS.L30.T13TFH.2024309T173018.v2.0_NDVI.tif 
+    Error: [rast] cannot open this file as a SpatRaster: /data/processed_ndvi/daily/2024/HLS.L30.T13TFH.2024309T173018.v2.0_NDVI.tif 
+  Progress: 47500/57154 scenes (83.1%) | 12.5 scenes/min | ETA: 773 min
+  Progress: 47550/57154 scenes (83.2%) | 12.5 scenes/min | ETA: 769 min
+  Progress: 47600/57154 scenes (83.3%) | 12.5 scenes/min | ETA: 765 min
+  Progress: 47650/57154 scenes (83.4%) | 12.5 scenes/min | ETA: 761 min
+  Progress: 47700/57154 scenes (83.5%) | 12.5 scenes/min | ETA: 757 min
+  Saving checkpoint...
+  Progress: 47750/57154 scenes (83.5%) | 12.5 scenes/min | ETA: 754 min
+  Progress: 47800/57154 scenes (83.6%) | 12.5 scenes/min | ETA: 750 min
+  Progress: 47850/57154 scenes (83.7%) | 12.5 scenes/min | ETA: 746 min
+  Progress: 47900/57154 scenes (83.8%) | 12.5 scenes/min | ETA: 742 min
+  Progress: 47950/57154 scenes (83.9%) | 12.5 scenes/min | ETA: 738 min
+  Progress: 48000/57154 scenes (84.0%) | 12.5 scenes/min | ETA: 734 min
+  Saving checkpoint...
+  Progress: 48050/57154 scenes (84.1%) | 12.5 scenes/min | ETA: 730 min
+  Progress: 48100/57154 scenes (84.2%) | 12.5 scenes/min | ETA: 726 min
+  Progress: 48150/57154 scenes (84.2%) | 12.5 scenes/min | ETA: 722 min
+  Progress: 48200/57154 scenes (84.3%) | 12.5 scenes/min | ETA: 718 min
+  Progress: 48250/57154 scenes (84.4%) | 12.5 scenes/min | ETA: 715 min
+  Progress: 48300/57154 scenes (84.5%) | 12.5 scenes/min | ETA: 711 min
+  Saving checkpoint...
+  Progress: 48350/57154 scenes (84.6%) | 12.5 scenes/min | ETA: 707 min
+  Progress: 48400/57154 scenes (84.7%) | 12.5 scenes/min | ETA: 703 min
+  Progress: 48450/57154 scenes (84.8%) | 12.5 scenes/min | ETA: 699 min
+  Progress: 48500/57154 scenes (84.9%) | 12.4 scenes/min | ETA: 695 min
+  Progress: 48550/57154 scenes (84.9%) | 12.4 scenes/min | ETA: 691 min
+  Progress: 48600/57154 scenes (85.0%) | 12.4 scenes/min | ETA: 687 min
+  Saving checkpoint...
+  Progress: 48650/57154 scenes (85.1%) | 12.4 scenes/min | ETA: 684 min
+  Progress: 48700/57154 scenes (85.2%) | 12.4 scenes/min | ETA: 680 min
+  Progress: 48750/57154 scenes (85.3%) | 12.4 scenes/min | ETA: 676 min
+  Progress: 48800/57154 scenes (85.4%) | 12.4 scenes/min | ETA: 672 min
+  Progress: 48850/57154 scenes (85.5%) | 12.4 scenes/min | ETA: 668 min
+  Progress: 48900/57154 scenes (85.6%) | 12.4 scenes/min | ETA: 664 min
+  Saving checkpoint...
+  Progress: 48950/57154 scenes (85.6%) | 12.4 scenes/min | ETA: 660 min
+  Progress: 49000/57154 scenes (85.7%) | 12.4 scenes/min | ETA: 656 min
+  Progress: 49050/57154 scenes (85.8%) | 12.4 scenes/min | ETA: 652 min
+  Progress: 49100/57154 scenes (85.9%) | 12.4 scenes/min | ETA: 648 min
+  Progress: 49150/57154 scenes (86.0%) | 12.4 scenes/min | ETA: 644 min
+  Progress: 49200/57154 scenes (86.1%) | 12.4 scenes/min | ETA: 640 min
+  Saving checkpoint...
+  Progress: 49250/57154 scenes (86.2%) | 12.4 scenes/min | ETA: 636 min
+  Progress: 49300/57154 scenes (86.3%) | 12.4 scenes/min | ETA: 632 min
+  Progress: 49350/57154 scenes (86.3%) | 12.4 scenes/min | ETA: 628 min
+  Progress: 49400/57154 scenes (86.4%) | 12.4 scenes/min | ETA: 624 min
+  Progress: 49450/57154 scenes (86.5%) | 12.4 scenes/min | ETA: 620 min
+  Progress: 49500/57154 scenes (86.6%) | 12.4 scenes/min | ETA: 616 min
+  Saving checkpoint...
+  Progress: 49550/57154 scenes (86.7%) | 12.4 scenes/min | ETA: 612 min
+  Progress: 49600/57154 scenes (86.8%) | 12.4 scenes/min | ETA: 608 min
+  Progress: 49650/57154 scenes (86.9%) | 12.4 scenes/min | ETA: 604 min
+  Progress: 49700/57154 scenes (87.0%) | 12.4 scenes/min | ETA: 600 min
+  Progress: 49750/57154 scenes (87.0%) | 12.4 scenes/min | ETA: 596 min
+  Progress: 49800/57154 scenes (87.1%) | 12.4 scenes/min | ETA: 592 min
+  Saving checkpoint...
+  Progress: 49850/57154 scenes (87.2%) | 12.4 scenes/min | ETA: 588 min
+  Progress: 49900/57154 scenes (87.3%) | 12.4 scenes/min | ETA: 584 min
+  Progress: 49950/57154 scenes (87.4%) | 12.4 scenes/min | ETA: 580 min
+  Progress: 50000/57154 scenes (87.5%) | 12.4 scenes/min | ETA: 576 min
+  Progress: 50050/57154 scenes (87.6%) | 12.4 scenes/min | ETA: 572 min
+  Progress: 50100/57154 scenes (87.7%) | 12.4 scenes/min | ETA: 568 min
+  Saving checkpoint...
+  Progress: 50150/57154 scenes (87.7%) | 12.4 scenes/min | ETA: 565 min
+  Progress: 50200/57154 scenes (87.8%) | 12.4 scenes/min | ETA: 561 min
+  Progress: 50250/57154 scenes (87.9%) | 12.4 scenes/min | ETA: 557 min
+  Progress: 50300/57154 scenes (88.0%) | 12.4 scenes/min | ETA: 553 min
+  Progress: 50350/57154 scenes (88.1%) | 12.4 scenes/min | ETA: 549 min
+  Progress: 50400/57154 scenes (88.2%) | 12.4 scenes/min | ETA: 545 min
+  Saving checkpoint...
+  Progress: 50450/57154 scenes (88.3%) | 12.4 scenes/min | ETA: 541 min
+  Progress: 50500/57154 scenes (88.4%) | 12.4 scenes/min | ETA: 537 min
+  Progress: 50550/57154 scenes (88.4%) | 12.4 scenes/min | ETA: 533 min
+  Progress: 50600/57154 scenes (88.5%) | 12.4 scenes/min | ETA: 529 min
+  Progress: 50650/57154 scenes (88.6%) | 12.4 scenes/min | ETA: 525 min
+  Progress: 50700/57154 scenes (88.7%) | 12.4 scenes/min | ETA: 521 min
+  Saving checkpoint...
+  Progress: 50750/57154 scenes (88.8%) | 12.4 scenes/min | ETA: 517 min
+  Progress: 50800/57154 scenes (88.9%) | 12.4 scenes/min | ETA: 513 min
+  Progress: 50850/57154 scenes (89.0%) | 12.4 scenes/min | ETA: 509 min
+  Progress: 50900/57154 scenes (89.1%) | 12.4 scenes/min | ETA: 505 min
+  Progress: 50950/57154 scenes (89.1%) | 12.4 scenes/min | ETA: 501 min
+  Progress: 51000/57154 scenes (89.2%) | 12.4 scenes/min | ETA: 498 min
+  Saving checkpoint...
+  Progress: 51050/57154 scenes (89.3%) | 12.4 scenes/min | ETA: 494 min
+  Progress: 51100/57154 scenes (89.4%) | 12.4 scenes/min | ETA: 490 min
+  Progress: 51150/57154 scenes (89.5%) | 12.4 scenes/min | ETA: 486 min
+  Progress: 51200/57154 scenes (89.6%) | 12.4 scenes/min | ETA: 482 min
+  Progress: 51250/57154 scenes (89.7%) | 12.4 scenes/min | ETA: 478 min
+  Progress: 51300/57154 scenes (89.8%) | 12.4 scenes/min | ETA: 474 min
+  Saving checkpoint...
+  Progress: 51350/57154 scenes (89.8%) | 12.4 scenes/min | ETA: 470 min
+  Progress: 51400/57154 scenes (89.9%) | 12.4 scenes/min | ETA: 466 min
+  Progress: 51450/57154 scenes (90.0%) | 12.3 scenes/min | ETA: 462 min
+  Progress: 51500/57154 scenes (90.1%) | 12.3 scenes/min | ETA: 458 min
+  Progress: 51550/57154 scenes (90.2%) | 12.3 scenes/min | ETA: 454 min
+  Progress: 51600/57154 scenes (90.3%) | 12.3 scenes/min | ETA: 450 min
+  Saving checkpoint...
+  Progress: 51650/57154 scenes (90.4%) | 12.3 scenes/min | ETA: 446 min
+  Progress: 51700/57154 scenes (90.5%) | 12.3 scenes/min | ETA: 442 min
+  Progress: 51750/57154 scenes (90.5%) | 12.3 scenes/min | ETA: 438 min
+  Progress: 51800/57154 scenes (90.6%) | 12.3 scenes/min | ETA: 434 min
+  Progress: 51850/57154 scenes (90.7%) | 12.3 scenes/min | ETA: 430 min
+  Progress: 51900/57154 scenes (90.8%) | 12.3 scenes/min | ETA: 426 min
+  Saving checkpoint...
+  Progress: 51950/57154 scenes (90.9%) | 12.3 scenes/min | ETA: 422 min
+  Progress: 52000/57154 scenes (91.0%) | 12.3 scenes/min | ETA: 418 min
+  Progress: 52050/57154 scenes (91.1%) | 12.3 scenes/min | ETA: 414 min
+  Progress: 52100/57154 scenes (91.2%) | 12.3 scenes/min | ETA: 410 min
+  Progress: 52150/57154 scenes (91.2%) | 12.3 scenes/min | ETA: 406 min
+  Progress: 52200/57154 scenes (91.3%) | 12.3 scenes/min | ETA: 402 min
+  Saving checkpoint...
+  Progress: 52250/57154 scenes (91.4%) | 12.3 scenes/min | ETA: 398 min
+  Progress: 52300/57154 scenes (91.5%) | 12.3 scenes/min | ETA: 394 min
+  Progress: 52350/57154 scenes (91.6%) | 12.3 scenes/min | ETA: 390 min
+  Progress: 52400/57154 scenes (91.7%) | 12.3 scenes/min | ETA: 386 min
+  Progress: 52450/57154 scenes (91.8%) | 12.3 scenes/min | ETA: 382 min
+  Progress: 52500/57154 scenes (91.9%) | 12.3 scenes/min | ETA: 378 min
+  Saving checkpoint...
+  Progress: 52550/57154 scenes (91.9%) | 12.3 scenes/min | ETA: 374 min
+  Progress: 52600/57154 scenes (92.0%) | 12.3 scenes/min | ETA: 370 min
+  Progress: 52650/57154 scenes (92.1%) | 12.3 scenes/min | ETA: 365 min
+  Progress: 52700/57154 scenes (92.2%) | 12.3 scenes/min | ETA: 361 min
+  Progress: 52750/57154 scenes (92.3%) | 12.3 scenes/min | ETA: 357 min
+  Progress: 52800/57154 scenes (92.4%) | 12.3 scenes/min | ETA: 353 min
+  Saving checkpoint...
+
+=== AGGREGATION COMPLETE ===
+Scenes processed: 52822 
+Scenes failed: 714 
+Total observations (before deduplication): 25161768 
+Unique 4km pixels: 141019 
+Date range: 2013-04-12 to 2024-12-13 
+
+Applying deduplication for tile overlaps...
+  Removed6451305duplicate observations (25.6%)
+  Final observations: 18710463 
+
+Saving deduplicated timeseries to: /data/gam_models/conus_4km_ndvi_timeseries.csv 
+✓ Phase 1 complete
+
+
+=== PHASE 1 COMPLETE ===
+Total time: 71.78 hours
+Output saved to: /data/gam_models/conus_4km_ndvi_timeseries.csv 
+There were 50 or more warnings (use warnings() to see the first 50)

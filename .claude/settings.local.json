@@ -12,7 +12,12 @@
       "Read(//mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/2024/**)",
       "Read(//home/malexander/r_projects/gitlab/gdo-wildfire-risk-monitor/**)",
       "Bash(./monitor_progress.sh)",
-      "Bash(docker logs:*)"
+      "Bash(docker logs:*)",
+      "Bash(if [ -f .gitignore ])",
+      "Bash(then cat .gitignore)",
+      "Bash(else echo \"No .gitignore file exists\")",
+      "Bash(fi)",
+      "Bash(./monitor_phase2.sh:*)"
     ],
     "defaultMode": "acceptEdits"
   }

@@ -306,6 +306,11 @@ calculate_year_derivatives <- function(timeseries_df, config) {
       library(mgcv)
       library(dplyr)
       library(MASS)
+      # CRITICAL: Prevent nested parallelism - constrain each worker to 1 thread
+      # This prevents 8 workers × N threads = core explosion
+      Sys.setenv(OMP_NUM_THREADS = 1)
+      Sys.setenv(MKL_NUM_THREADS = 1)
+      Sys.setenv(OPENBLAS_NUM_THREADS = 1)
     })
     # Export required objects: timeseries_df, config, and functions
     # timeseries_df IS exported but accessed per-pixel (not duplicated per worker)
@@ -316,6 +321,10 @@ calculate_year_derivatives <- function(timeseries_df, config) {
                        "calc.derivs"),
                   envir = environment())
   }
+
+  # Accumulate results in a list to avoid repeated rbind (MUCH faster)
+  all_results <- list()
+  result_counter <- 0
 
   # Process batches with incremental checkpointing
   for (i in seq_along(pixel_batches)) {
@@ -361,16 +370,13 @@ calculate_year_derivatives <- function(timeseries_df, config) {
       })
     }
 
-    # Combine successful results from this batch
+    # Store successful results in list (avoid repeated rbind)
     batch_results <- batch_results[!sapply(batch_results, is.null)]
 
     if (length(batch_results) > 0) {
-      batch_df <- do.call(rbind, batch_results)
-
-      if (nrow(derivatives_df) > 0) {
-        derivatives_df <- rbind(derivatives_df, batch_df)
-      } else {
-        derivatives_df <- batch_df
+      for (result in batch_results) {
+        result_counter <- result_counter + 1
+        all_results[[result_counter]] <- result
       }
       n_processed <- n_processed + length(batch_results)
     }
@@ -390,12 +396,17 @@ calculate_year_derivatives <- function(timeseries_df, config) {
                   pixels_per_min, eta_mins))
     }
 
-    # Save checkpoint (RDS format: faster, smaller, preserves types)
+    # Save checkpoint every N pixels (convert list to df only when checkpointing)
     if (n_processed %% config$checkpoint_interval == 0) {
       cat("  Saving checkpoint...\n")
+      derivatives_df <- do.call(rbind, all_results)
       saveRDS(derivatives_df, checkpoint_file, compress = "gzip")
     }
   }
+
+  # Final conversion to dataframe
+  cat("\nCombining all results...\n")
+  derivatives_df <- do.call(rbind, all_results)
 
   # Clean up cluster
   if (config$n_cores > 1) {
