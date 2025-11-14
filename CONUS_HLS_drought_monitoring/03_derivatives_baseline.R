@@ -209,11 +209,13 @@ calculate_baseline_derivatives <- function(timeseries_df, config) {
 
     processed_pixels <- unique(derivatives_df$pixel_id)
     pixel_ids <- setdiff(pixel_ids, processed_pixels)
+    n_pixels_from_checkpoint <- length(processed_pixels)
 
-    cat("  Resuming from", length(processed_pixels), "completed pixels\n")
+    cat("  Resuming from", n_pixels_from_checkpoint, "completed pixels\n")
     cat("  ", length(pixel_ids), "pixels remaining\n\n")
   } else {
     derivatives_df <- data.frame()
+    n_pixels_from_checkpoint <- 0
   }
 
   if (length(pixel_ids) == 0) {
@@ -227,7 +229,8 @@ calculate_baseline_derivatives <- function(timeseries_df, config) {
   cat("Parallel cores:", config$n_cores, "\n\n")
 
   start_time <- Sys.time()
-  n_processed <- 0
+  # Initialize counters - if resuming from checkpoint, start from checkpoint count
+  n_processed <- n_pixels_from_checkpoint
   n_failed <- 0
 
   # Split pixels into small batches for better checkpointing
