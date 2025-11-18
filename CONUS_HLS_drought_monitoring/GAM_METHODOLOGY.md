@@ -230,7 +230,18 @@ pixel_id, year, yday, anomaly, anomaly_se, z_score, p_value
 - Log failed downloads/processing for recovery
 
 ### Pixel-Level Checks
-- Minimum observation threshold (e.g., ≥20 observations per year)
+- **Minimum observation threshold:** ≥20 observations per pixel over baseline period (2013-2024)
+  - **Rationale:** Ensures sufficient data density for reliable 12-knot GAM fitting
+  - **CONUS Phase 2 Results (2025-11-15):**
+    - Total pixels: 141,019
+    - Pixels with ≥20 observations: 132,982 (94.3%)
+    - Pixels filtered (<20 obs): 8,037 (5.7%)
+    - **Observation distribution:** Min=1, Median=132, Mean=132.7, Max=329
+  - **Interpretation:** 5.7% exclusion rate is expected and indicates healthy data quality filtering
+  - **Common causes for low observation counts:**
+    - Persistent cloud cover (Pacific Northwest, mountainous regions)
+    - CONUS boundary edge pixels (partial coverage)
+    - Water bodies flagged by Fmask quality control
 - GAM convergence diagnostics (`gam.check()`)
 - Flag pixels with excessive missing data
 

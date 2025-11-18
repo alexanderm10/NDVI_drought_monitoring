@@ -433,8 +433,18 @@ if (!interactive() || exists("run_phase3")) {
 
   # Load timeseries from Phase 1
   cat("Loading Phase 1 timeseries data...\n")
-  timeseries_4km <- read.csv(config$timeseries_file, stringsAsFactors = FALSE)
-  timeseries_4km$date <- as.Date(timeseries_4km$date)
+
+  # Check for RDS version (much faster loading than CSV)
+  rds_file <- sub("\\.csv$", ".rds", config$timeseries_file)
+
+  if (file.exists(rds_file)) {
+    cat("  Using RDS format (faster loading)...\n")
+    timeseries_4km <- readRDS(rds_file)
+  } else {
+    cat("  Loading CSV (this may take several minutes)...\n")
+    timeseries_4km <- read.csv(config$timeseries_file, stringsAsFactors = FALSE)
+    timeseries_4km$date <- as.Date(timeseries_4km$date)
+  }
 
   cat("  Total observations:", nrow(timeseries_4km), "\n")
   cat("  Unique pixels:", length(unique(timeseries_4km$pixel_id)), "\n")
