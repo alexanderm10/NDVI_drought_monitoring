@@ -83,7 +83,7 @@ config <- list(
   n_cores = 8,  # Use 8 cores for good balance (set to 1 for sequential)
 
   # Checkpointing (RDS format for faster I/O and smaller files)
-  checkpoint_interval = 100,  # Save progress every N pixels
+  checkpoint_interval = 500,  # Save progress every N pixels (was 100)
   resume_from_checkpoint = TRUE
 )
 
@@ -244,8 +244,10 @@ fit_all_baselines <- function(timeseries_df, config) {
 
   start_time <- Sys.time()
   # Initialize counters - if resuming from checkpoint, start from checkpoint count
-  n_processed <- n_pixels_from_checkpoint
+  n_processed <- n_pixels_from_checkpoint  # Total pixels (checkpoint + new)
+  n_processed_this_run <- 0  # Pixels processed in THIS run only (for progress/checkpoint logic)
   n_failed <- 0
+  last_saved_checkpoint <- 0  # Track checkpoint state for incremental saves (relative to this run)
 
   # Split pixels into small batches for better checkpointing
   # Each batch = config$n_cores pixels (one per core)
@@ -331,34 +333,45 @@ fit_all_baselines <- function(timeseries_df, config) {
         all_results[[result_counter]] <- result
       }
       n_processed <- n_processed + length(batch_results)
+      n_processed_this_run <- n_processed_this_run + length(batch_results)
     }
 
     n_failed <- n_failed + (length(batch_pixels) - length(batch_results))
 
-    # Progress reporting
-    if (n_processed %% 50 == 0 || i == length(pixel_batches)) {
+    # Progress reporting (based on total pixels attempted, not just successful)
+    n_attempted_this_run <- n_processed_this_run + n_failed
+    if (n_attempted_this_run %% 50 == 0 || i == length(pixel_batches)) {
       elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
-      pixels_per_min <- n_processed / elapsed
-      remaining <- length(pixel_ids) - n_processed - n_failed
-      eta_mins <- remaining / pixels_per_min
+      # Calculate rate based on successful pixels processed THIS run
+      successful_per_min <- if (elapsed > 0) n_processed_this_run / elapsed else 0
+      remaining <- length(pixel_ids) - n_attempted_this_run
+      eta_mins <- if (successful_per_min > 0) remaining / successful_per_min else Inf
 
-      cat(sprintf("  Progress: %d/%d pixels (%.1f%%) | %.1f pixels/min | ETA: %.0f min\n",
-                  n_processed, length(pixel_ids),
-                  100 * n_processed / length(pixel_ids),
-                  pixels_per_min, eta_mins))
+      cat(sprintf("  Progress: %d successful, %d failed, %d remaining | %.1f/min | ETA: %.0f min\n",
+                  n_processed, n_failed, remaining,
+                  successful_per_min, eta_mins))
     }
 
-    # Save checkpoint every N pixels (convert list to df only when checkpointing)
-    if (n_processed %% config$checkpoint_interval == 0) {
+    # Save checkpoint every N pixels (INCREMENTAL - only rbind new results to avoid quadratic slowdown)
+    if (n_processed_this_run > 0 && (n_processed_this_run - last_saved_checkpoint) >= config$checkpoint_interval) {
       cat("  Saving checkpoint...\n")
-      baseline_df <- do.call(rbind, all_results)
+      # Combine NEW results with existing checkpoint data
+      new_data <- do.call(rbind, all_results)
+      baseline_df <- rbind(baseline_df, new_data)
       saveRDS(baseline_df, checkpoint_file, compress = "gzip")
+      # Clear accumulated results for next checkpoint interval (critical for performance!)
+      all_results <- list()
+      result_counter <- 0
+      last_saved_checkpoint <- n_processed_this_run
     }
   }
 
-  # Final conversion to dataframe
+  # Final conversion to dataframe (combine checkpoint with any remaining results since last checkpoint)
   cat("\nCombining all results...\n")
-  baseline_df <- do.call(rbind, all_results)
+  if (length(all_results) > 0) {
+    new_data <- do.call(rbind, all_results)
+    baseline_df <- rbind(baseline_df, new_data)
+  }
 
   # No cluster cleanup needed with mclapply (uses forking, not SOCK cluster)
 
