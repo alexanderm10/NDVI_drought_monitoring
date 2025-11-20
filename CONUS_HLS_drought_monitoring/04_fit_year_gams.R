@@ -43,7 +43,7 @@ config <- list(
   n_cores = 8,  # Use 8 cores for good balance (set to 1 for sequential)
 
   # Checkpointing (RDS format for faster I/O and smaller files)
-  checkpoint_interval = 100,  # Save progress every N pixels
+  checkpoint_interval = 500,  # Save progress every N pixels (was 100)
   resume_from_checkpoint = TRUE
 )
 
@@ -232,6 +232,13 @@ fit_all_year_gams <- function(timeseries_df, config) {
       "(", length(config$target_years), "years)\n")
   cat("Total pixel-year combinations:", n_pixels * length(config$target_years), "\n\n")
 
+  # CRITICAL OPTIMIZATION: Pre-split data by pixel_id for O(1) access in workers
+  # On Linux: mclapply forks share this via copy-on-write (no serialization overhead!)
+  cat("Pre-splitting data by pixel for fast worker access...\n")
+  pixel_list <- split(timeseries_df, timeseries_df$pixel_id)
+  cat("  Created indexed list of", length(pixel_list), "pixels\n")
+  cat("  (Workers will access via copy-on-write shared memory)\n\n")
+
   # Check for checkpoint (RDS format for faster I/O)
   checkpoint_file <- sub("\\.csv$", "_checkpoint.rds", config$output_file)
 
@@ -241,11 +248,13 @@ fit_all_year_gams <- function(timeseries_df, config) {
 
     processed_pixels <- unique(year_splines_df$pixel_id)
     pixel_ids <- setdiff(pixel_ids, processed_pixels)
+    n_pixels_from_checkpoint <- length(processed_pixels)
 
-    cat("  Resuming from", length(processed_pixels), "completed pixels\n")
+    cat("  Resuming from", n_pixels_from_checkpoint, "completed pixels\n")
     cat("  ", length(pixel_ids), "pixels remaining\n\n")
   } else {
     year_splines_df <- data.frame()
+    n_pixels_from_checkpoint <- 0
   }
 
   if (length(pixel_ids) == 0) {
@@ -259,8 +268,11 @@ fit_all_year_gams <- function(timeseries_df, config) {
   cat("Parallel cores:", config$n_cores, "\n\n")
 
   start_time <- Sys.time()
-  n_processed <- 0
+  # Initialize counters - if resuming from checkpoint, start from checkpoint count
+  n_processed <- n_pixels_from_checkpoint  # Total pixels (checkpoint + new)
+  n_processed_this_run <- 0  # Pixels processed in THIS run only (for progress/checkpoint logic)
   n_failed <- 0
+  last_saved_checkpoint <- 0  # Track checkpoint state for incremental saves (relative to this run)
 
   # Split pixels into small batches for better checkpointing
   # Each batch = config$n_cores pixels (one per core)
@@ -269,25 +281,11 @@ fit_all_year_gams <- function(timeseries_df, config) {
 
   cat("Split into", length(pixel_batches), "batches of ~", batch_size, "pixels each\n\n")
 
-  # Set up cluster if using parallel processing
-  if (config$n_cores > 1) {
-    cl <- makeCluster(config$n_cores)
-    clusterEvalQ(cl, {
-      library(mgcv)
-      library(dplyr)
-      # CRITICAL: Prevent nested parallelism - constrain each worker to 1 thread
-      # This prevents 8 workers × N threads = core explosion
-      Sys.setenv(OMP_NUM_THREADS = 1)
-      Sys.setenv(MKL_NUM_THREADS = 1)
-      Sys.setenv(OPENBLAS_NUM_THREADS = 1)
-    })
-    # Export required objects: timeseries_df, config, and functions
-    # timeseries_df IS exported but accessed per-pixel (not duplicated per worker)
-    clusterExport(cl, c("timeseries_df", "config",
-                       "process_pixel_all_years", "apply_edge_padding",
-                       "fit_pixel_year_gam"),
-                  envir = environment())
-  }
+  # Set threading constraints for parallel workers
+  # CRITICAL: Prevent nested parallelism - constrain each worker to 1 thread
+  Sys.setenv(OMP_NUM_THREADS = 1)
+  Sys.setenv(MKL_NUM_THREADS = 1)
+  Sys.setenv(OPENBLAS_NUM_THREADS = 1)
 
   # Accumulate results in a list to avoid repeated rbind (MUCH faster)
   all_results <- list()
@@ -297,15 +295,19 @@ fit_all_year_gams <- function(timeseries_df, config) {
   for (i in seq_along(pixel_batches)) {
     batch_pixels <- pixel_batches[[i]]
 
-    # Process batch (parallel or sequential)
+    # Process batch using mclapply (forking on Linux - shares memory with parent!)
+    # pixel_list is accessible via copy-on-write shared memory
     if (config$n_cores > 1) {
-      # For parallel: each worker gets ONLY data for its assigned pixel
-      batch_results <- parLapply(cl, batch_pixels, function(pixel_id) {
-        # Each worker gets ONLY data for its assigned pixel (all years)
-        pixel_data <- timeseries_df[timeseries_df$pixel_id == pixel_id, ]
+      batch_results <- mclapply(batch_pixels, function(pixel_id) {
+        # Load required libraries in each fork
+        library(mgcv)
+        library(dplyr)
+
+        # O(1) access from pre-split list (shared via copy-on-write!)
+        pixel_data <- pixel_list[[as.character(pixel_id)]]
 
         # Skip if insufficient data
-        if (nrow(pixel_data) < config$min_observations) {
+        if (is.null(pixel_data) || nrow(pixel_data) < config$min_observations) {
           return(NULL)
         }
 
@@ -317,13 +319,13 @@ fit_all_year_gams <- function(timeseries_df, config) {
         } else {
           return(NULL)
         }
-      })
+      }, mc.cores = config$n_cores)
     } else {
       # Sequential processing
       batch_results <- lapply(batch_pixels, function(pixel_id) {
-        pixel_data <- timeseries_df[timeseries_df$pixel_id == pixel_id, ]
+        pixel_data <- pixel_list[[as.character(pixel_id)]]
 
-        if (nrow(pixel_data) < config$min_observations) {
+        if (is.null(pixel_data) || nrow(pixel_data) < config$min_observations) {
           return(NULL)
         }
 
@@ -346,39 +348,47 @@ fit_all_year_gams <- function(timeseries_df, config) {
         all_results[[result_counter]] <- result
       }
       n_processed <- n_processed + length(batch_results)
+      n_processed_this_run <- n_processed_this_run + length(batch_results)
     }
 
     n_failed <- n_failed + (length(batch_pixels) - length(batch_results))
 
-    # Progress reporting
-    if (n_processed %% 50 == 0 || i == length(pixel_batches)) {
+    # Progress reporting (based on total pixels attempted, not just successful)
+    n_attempted_this_run <- n_processed_this_run + n_failed
+    if (n_attempted_this_run %% 50 == 0 || i == length(pixel_batches)) {
       elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
-      pixels_per_min <- n_processed / elapsed
-      remaining <- length(pixel_ids) - n_processed - n_failed
-      eta_mins <- remaining / pixels_per_min
+      # Calculate rate based on successful pixels processed THIS run
+      successful_per_min <- if (elapsed > 0) n_processed_this_run / elapsed else 0
+      remaining <- length(pixel_ids) - n_attempted_this_run
+      eta_mins <- if (successful_per_min > 0) remaining / successful_per_min else Inf
 
-      cat(sprintf("  Progress: %d/%d pixels (%.1f%%) | %.1f pixels/min | ETA: %.0f min\n",
-                  n_processed, length(pixel_ids),
-                  100 * n_processed / length(pixel_ids),
-                  pixels_per_min, eta_mins))
+      cat(sprintf("  Progress: %d successful, %d failed, %d remaining | %.1f/min | ETA: %.0f min\n",
+                  n_processed, n_failed, remaining,
+                  successful_per_min, eta_mins))
     }
 
-    # Save checkpoint every N pixels (convert list to df only when checkpointing)
-    if (n_processed %% config$checkpoint_interval == 0) {
+    # Save checkpoint every N pixels (INCREMENTAL - only rbind new results to avoid quadratic slowdown)
+    if (n_processed_this_run > 0 && (n_processed_this_run - last_saved_checkpoint) >= config$checkpoint_interval) {
       cat("  Saving checkpoint...\n")
-      year_splines_df <- do.call(rbind, all_results)
+      # Combine NEW results with existing checkpoint data
+      new_data <- do.call(rbind, all_results)
+      year_splines_df <- rbind(year_splines_df, new_data)
       saveRDS(year_splines_df, checkpoint_file, compress = "gzip")
+      # Clear accumulated results for next checkpoint interval (critical for performance!)
+      all_results <- list()
+      result_counter <- 0
+      last_saved_checkpoint <- n_processed_this_run
     }
   }
 
-  # Final conversion to dataframe
+  # Final conversion to dataframe (combine checkpoint with any remaining results since last checkpoint)
   cat("\nCombining all results...\n")
-  year_splines_df <- do.call(rbind, all_results)
-
-  # Clean up cluster
-  if (config$n_cores > 1) {
-    stopCluster(cl)
+  if (length(all_results) > 0) {
+    new_data <- do.call(rbind, all_results)
+    year_splines_df <- rbind(year_splines_df, new_data)
   }
+
+  # No cluster cleanup needed with mclapply (uses forking, not SOCK cluster)
 
   elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
 
@@ -450,10 +460,17 @@ if (!interactive() || exists("run_phase4")) {
   cat("\n=== EXECUTING PHASE 4: YEAR-SPECIFIC GAM FITTING ===\n")
   cat("Started at:", as.character(Sys.time()), "\n\n")
 
-  # Load timeseries from Phase 1
+  # Load timeseries from Phase 1 (prefer RDS for faster loading)
   cat("Loading Phase 1 timeseries data...\n")
-  timeseries_4km <- read.csv(config$input_file, stringsAsFactors = FALSE)
-  timeseries_4km$date <- as.Date(timeseries_4km$date)
+  rds_file <- sub("\\.csv$", ".rds", config$input_file)
+  if (file.exists(rds_file)) {
+    cat("  Using RDS format (faster loading)...\n")
+    timeseries_4km <- readRDS(rds_file)
+  } else {
+    cat("  Using CSV format...\n")
+    timeseries_4km <- read.csv(config$input_file, stringsAsFactors = FALSE)
+    timeseries_4km$date <- as.Date(timeseries_4km$date)
+  }
   
   cat("  Total observations:", nrow(timeseries_4km), "\n")
   cat("  Years:", paste(sort(unique(timeseries_4km$year)), collapse = ", "), "\n\n")

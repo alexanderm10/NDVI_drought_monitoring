@@ -206,6 +206,40 @@ last_saved_checkpoint <- 0  # Relative to this run, not total pixels
 
 ---
 
+## 2025-11-20: Script 04 Refactored to mclapply
+
+### Issue
+Phase 4 was using SOCK cluster parallelization (parLapply) which caused:
+- 20+ minute cluster setup time (serializing 18.7M rows to 8 workers)
+- Processing rate: 3.4 pixels/min
+- ETA: 41,753 minutes (29 days!)
+
+### Solution
+Refactored to use mclapply with forking (same pattern as scripts 02/03):
+- Pre-split data: `pixel_list <- split(timeseries_df, timeseries_df$pixel_id)`
+- Use mclapply with copy-on-write memory sharing
+- Workers access `pixel_list[[as.character(pixel_id)]]` for O(1) lookup
+
+### Changes Made
+1. **Added pre-splitting** (lines 235-240)
+2. **Removed SOCK cluster** (makeCluster, clusterExport, clusterEvalQ)
+3. **Replaced parLapply → mclapply** (lines 300-322)
+4. **Removed stopCluster** cleanup
+
+### Performance Improvement
+| Metric | Before (parLapply) | After (mclapply) | Improvement |
+|--------|-------------------|------------------|-------------|
+| Setup time | 20+ min | Instant | Eliminated |
+| Processing rate | 3.4/min | 145.9/min | **43x faster** |
+| ETA | 29 days | 16 hours | **97% reduction** |
+
+### Scientific Accuracy
+**No change to statistical output.** Both approaches provide workers with identical data (all observations for each pixel across all years). The GAM fitting, edge padding, and all calculations are unchanged - only the data access pattern was optimized.
+
+**Status:** ✅ COMPLETE. Script 04 now uses consistent mclapply pattern with scripts 02/03.
+
+---
+
 ## Contact
 Updates made 2025-11-19 by Claude Code based on Midwest region performance testing.
 For questions about these changes, refer to this changelog and git history.
