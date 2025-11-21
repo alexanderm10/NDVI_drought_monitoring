@@ -240,6 +240,122 @@ Refactored to use mclapply with forking (same pattern as scripts 02/03):
 
 ---
 
+## Planned Enhancement: Posterior Uncertainty Estimates
+
+### Background
+Juliana's original spatial analysis used `post.distns()` to generate confidence intervals for GAM predictions. This enables significance testing for anomaly detection (determining if a year's NDVI is significantly below the baseline normal).
+
+### Implementation Plan
+
+**Priority phases:**
+1. **Phase 2 (02_fit_longterm_baseline.R)** - Most critical
+   - Add `lwr`, `upr` columns to baseline output
+   - Enables: "Is this year significantly below normal?"
+
+2. **Phase 4 (04_fit_year_gams.R)** - Secondary
+   - Add `lwr`, `upr` to year GAM output
+   - Shows reliability of individual year estimates
+
+3. **Phase 6 (06_calculate_anomalies.R)** - Downstream benefit
+   - Use baseline CI to classify "significant" vs "within normal variation"
+
+**Steps:**
+1. Copy `post.distns()` function from `0_Calculate_GAMM_Posteriors_Updated_Copy.R`
+2. Modify `process_pixel()` in scripts 02 and 04 to use posterior simulation
+3. Expand output dataframes: `mean` → `mean`, `lwr`, `upr`
+4. Update anomaly classification to use uncertainty bounds
+
+**Trade-offs:**
+- Increased processing time (posterior simulation slower than simple prediction)
+- Larger output files (3x columns for predictions)
+- But essential for rigorous, statistically-sound anomaly detection
+
+**Status:** ⚠️ SUPERSEDED by workflow revision below.
+
+---
+
+## 2025-11-20: Major Workflow Revision - DOY-Looped Spatial GAMs
+
+### Decision
+After reviewing Juliana's spatial_analysis workflow with colleagues, determined that the correct approach follows her scripts 05-06-07 (DOY-looped spatial GAMs), NOT scripts 03-04 (temporal GAMs per pixel).
+
+### Old Approach (Being Replaced)
+- **Script 02**: Temporal GAM `s(yday, k=12)` per pixel across all years
+- **Script 03**: Derivatives of baseline temporal curve
+- **Script 04**: Temporal GAM `s(yday, k=12)` per pixel for each year
+- **Paradigm**: Smooth across TIME for each spatial location
+
+### New Approach (Juliana's 05-06-07)
+- **Script 02 → Her 05**: DOY-looped spatial norms
+  - For each DOY (1-365), fit `gam(NDVI ~ s(x, y))` using ±7 day window
+  - Uses ALL years' data pooled together
+  - Smooth across SPACE for each time point
+
+- **Script 04 → Her 06**: DOY-looped year predictions
+  - For each year × DOY, fit `gam(NDVI ~ norm + s(x, y) - 1)` using 16-day trailing window
+  - Uses norm from script 02 as covariate
+  - Smooth across SPACE with norm adjustment
+
+- **Script 06 → Her 07**: Anomalies
+  - Simple: `anoms = year_prediction - norm`
+  - With uncertainty: `anoms_lwr`, `anoms_mean`, `anoms_upr`
+
+### Key Changes
+
+1. **Temporal → Spatial smoothing**: Fundamentally different statistical approach
+2. **DOY-looped**: 365 separate models instead of one per pixel
+3. **Derivatives tabled**: May revisit later (discrete differences or secondary smooth)
+4. **Uncertainty built-in**: `post.distns()` used throughout from start
+
+### Computational Impact
+
+| Metric | Old (Temporal GAMs) | New (Spatial GAMs) |
+|--------|--------------------|--------------------|
+| Number of models | ~134,000 (one per pixel) | 365 + (365 × 12 years) = 4,745 |
+| Model size | Small (one pixel's data) | Large (all pixels for one DOY) |
+| Memory per model | Low | High |
+| Parallelization | By pixel | By DOY |
+
+### Scripts Affected
+
+- **02_fit_longterm_baseline.R**: Complete rewrite to DOY-looped spatial approach
+- **03_derivatives_baseline.R**: Archive or remove (no longer applicable)
+- **04_fit_year_gams.R**: Complete rewrite to DOY-looped spatial approach
+- **05_derivatives_individual_years.R**: Archive or remove
+- **06_calculate_anomalies.R**: Simplify to match her script 07
+
+### Migration Plan
+
+**New script ordering:**
+| # | New Name | Based On | Status |
+|---|----------|----------|--------|
+| 01 | 01_aggregate_to_4km.R | Keep as-is | ✅ Done |
+| 02 | 02_doy_looped_norms.R | Her 05 | 📝 To write |
+| 03 | 03_doy_looped_year_predictions.R | Her 06 | 📝 To write |
+| 04 | 04_calculate_anomalies.R | Her 07 | 📝 To write |
+| 05 | 05_classify_drought.R | Current 07 | Renumber |
+| 06 | 06_derivatives.R | Current 03/05 | Tabled for later |
+
+**Steps:**
+1. Archive current scripts to `.archive/` folder
+2. Create new script files with placeholder structure
+3. Implement 02_doy_looped_norms.R with `post.distns()` uncertainty
+4. Implement 03_doy_looped_year_predictions.R with uncertainty
+5. Implement 04_calculate_anomalies.R
+6. Renumber 07 → 05
+7. Move derivatives scripts to 06 for future work
+
+### Rationale
+
+- Matches Juliana's vetted methodology
+- Only change from her work is data source (HLS instead of Landsat)
+- Spatial smoothing captures regional patterns
+- DOY-looped approach provides time-specific predictions
+
+**Status:** 📋 PLANNED. Ready to begin implementation.
+
+---
+
 ## Contact
 Updates made 2025-11-19 by Claude Code based on Midwest region performance testing.
 For questions about these changes, refer to this changelog and git history.
