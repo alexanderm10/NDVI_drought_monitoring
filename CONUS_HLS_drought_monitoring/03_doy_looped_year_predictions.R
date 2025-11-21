@@ -49,7 +49,7 @@ config <- list(
 
 
   # Parallelization (conservative for shared systems)
-  n_cores = 16
+  n_cores = 8  # Reduced from 16 due to memory constraints
 )
 
 cat("=== DOY-Looped Year Predictions ===\n")
