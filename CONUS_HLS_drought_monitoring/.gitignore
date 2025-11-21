@@ -1,0 +1,15 @@
+# Log files
+*.log
+logs/
+
+# R artifacts
+.Rhistory
+.RData
+.Rproj.user/
+
+# Temporary files
+*~
+*.tmp
+
+# Cache files
+scene_list_cache.csv
