@@ -18,6 +18,10 @@
 #
 # ==============================================================================
 
+# Limit BLAS/LAPACK threads to be a good neighbor on shared systems
+Sys.setenv(OMP_NUM_THREADS = 2)
+Sys.setenv(OPENBLAS_NUM_THREADS = 2)
+
 library(mgcv)
 library(dplyr)
 library(MASS)
@@ -49,7 +53,7 @@ config <- list(
 
 
   # Parallelization (conservative for shared systems)
-  n_cores = 8  # Reduced from 16 due to memory constraints
+  n_cores = 4  # Reduced further due to memory constraints
 )
 
 cat("=== DOY-Looped Year Predictions ===\n")
@@ -135,6 +139,9 @@ if (file.exists(rds_file)) {
 } else {
   stop("Timeseries data not found. Run script 01 first.")
 }
+
+# Fix year column from date (handles any parsing issues)
+timeseries_df$year <- as.integer(format(timeseries_df$date, "%Y"))
 
 cat("  Timeseries observations:", nrow(timeseries_df), "\n")
 
