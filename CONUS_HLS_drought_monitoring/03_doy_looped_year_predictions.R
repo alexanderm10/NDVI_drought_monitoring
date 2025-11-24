@@ -44,17 +44,21 @@ config <- list(
   # Minimum data requirement
   min_pixel_coverage = 0.33,  # Require 33% of pixels to have data
 
-  # Output
-  output_file = file.path(hls_paths$gam_models, "doy_looped_year_predictions.rds"),
-  stats_file = file.path(hls_paths$gam_models, "year_prediction_model_stats.rds"),
+  # Output (year-by-year files)
+  output_dir = file.path(hls_paths$gam_models, "modeled_ndvi"),
+  stats_file = file.path(hls_paths$gam_models, "modeled_ndvi_stats.rds"),
 
   # Posterior simulation
   n_posterior_sims = 100,
 
-
   # Parallelization (conservative for shared systems)
-  n_cores = 4  # Reduced further due to memory constraints
+  n_cores = 4
 )
+
+# Create output directory
+if (!dir.exists(config$output_dir)) {
+  dir.create(config$output_dir, recursive = TRUE)
+}
 
 cat("=== DOY-Looped Year Predictions ===\n")
 cat("Trailing window:", config$window_size, "days\n")
@@ -160,69 +164,45 @@ n_pixels <- length(unique(timeseries_df$pixel_id))
 cat("  Years:", min(years), "-", max(years), "(", length(years), "years)\n")
 cat("  Pixels:", n_pixels, "\n\n")
 
-# ==============================================================================
-# CREATE PREDICTION GRID
-# ==============================================================================
-
-cat("Creating prediction grid...\n")
-
-# Get pixel coordinates
+# Get pixel coordinates (used for all years)
 pixel_coords <- timeseries_df %>%
   group_by(pixel_id) %>%
   summarise(x = first(x), y = first(y), .groups = "drop") %>%
   as.data.frame()
 
-# Create output structure: pixel × year × DOY
-year_preds_df <- expand.grid(
-  pixel_id = unique(pixel_coords$pixel_id),
-  year = years,
-  yday = 1:365
-)
+# Check for existing year files (resume capability)
+existing_years <- character(0)
+for (yr in years) {
+  year_file <- file.path(config$output_dir, sprintf("modeled_ndvi_%d.rds", yr))
+  if (file.exists(year_file)) {
+    existing_years <- c(existing_years, yr)
+  }
+}
 
-# Add coordinates
-year_preds_df <- merge(year_preds_df, pixel_coords, by = "pixel_id")
+if (length(existing_years) > 0) {
+  cat("Found existing results for", length(existing_years), "years:", paste(existing_years, collapse=", "), "\n")
+  years_to_process <- setdiff(years, existing_years)
+} else {
+  years_to_process <- years
+}
 
-# Add norm values
-year_preds_df <- merge(
-  year_preds_df,
-  norms_df[, c("pixel_id", "yday", "mean")],
-  by = c("pixel_id", "yday"),
-  all.x = TRUE
-)
-names(year_preds_df)[names(year_preds_df) == "mean"] <- "norm"
+if (length(years_to_process) == 0) {
+  cat("All years already processed!\n")
+  quit(save = "no")
+}
 
-# Add columns for results
-year_preds_df$mean <- NA_real_
-year_preds_df$lwr <- NA_real_
-year_preds_df$upr <- NA_real_
-
-# Sort for efficient indexing
-year_preds_df <- year_preds_df[order(year_preds_df$year, year_preds_df$yday, year_preds_df$pixel_id), ]
-
-cat("  Output structure:", nrow(year_preds_df), "rows\n")
-cat("  (", n_pixels, "pixels ×", length(years), "years × 365 days)\n\n")
+cat("Will process", length(years_to_process), "years:", paste(years_to_process, collapse=", "), "\n\n")
 
 # ==============================================================================
-# CREATE YEAR-DOY JOB LIST
-# ==============================================================================
-
-# Create all year-DOY combinations
-job_list <- expand.grid(year = years, yday = 1:365)
-job_list <- job_list[order(job_list$year, job_list$yday), ]
-n_jobs <- nrow(job_list)
-
-cat("Total jobs:", n_jobs, "\n\n")
-
-# ==============================================================================
-# MAIN PROCESSING - PARALLEL
+# MAIN PROCESSING - YEAR-BY-YEAR
 # ==============================================================================
 
 cat("Processing year predictions...\n")
 cat("======================================\n\n")
 
-start_time <- Sys.time()
+overall_start <- Sys.time()
 
-# Merge timeseries with norms for the window calculations
+# Merge timeseries with norms once
 timeseries_with_norms <- merge(
   timeseries_df,
   norms_df[, c("pixel_id", "yday", "mean")],
@@ -231,94 +211,122 @@ timeseries_with_norms <- merge(
 )
 names(timeseries_with_norms)[names(timeseries_with_norms) == "mean"] <- "norm"
 
-# Define function to process a single year-DOY
-process_year_doy <- function(job_idx) {
-  yr <- job_list$year[job_idx]
-  day <- job_list$yday[job_idx]
+# Initialize overall stats tracking
+all_model_stats <- list()
 
-  # Get trailing window dates
-  window_dates <- get_trailing_window(yr, day, config$window_size)
+# Process each year sequentially
+for (yr in years_to_process) {
 
-  # Filter data for this window
-  df_subset <- timeseries_with_norms %>%
-    filter(date %in% window_dates) %>%
-    filter(!is.na(NDVI) & !is.na(norm))
+  cat("\n=== Processing Year", yr, "===\n")
+  year_start <- Sys.time()
 
-  # Check minimum data requirement
-  n_pixels_with_data <- length(unique(df_subset$pixel_id))
-  if (n_pixels_with_data < n_pixels * config$min_pixel_coverage) {
+  # Create prediction grid for this year only (pixel × DOY)
+  year_grid <- expand.grid(
+    pixel_id = unique(pixel_coords$pixel_id),
+    yday = 1:365
+  )
+  year_grid <- merge(year_grid, pixel_coords, by = "pixel_id")
+  year_grid <- merge(
+    year_grid,
+    norms_df[, c("pixel_id", "yday", "mean")],
+    by = c("pixel_id", "yday"),
+    all.x = TRUE
+  )
+  names(year_grid)[names(year_grid) == "mean"] <- "norm"
+  year_grid$mean <- NA_real_
+  year_grid$lwr <- NA_real_
+  year_grid$upr <- NA_real_
+
+  cat("  Grid:", nrow(year_grid), "pixel-DOY combinations\n")
+
+  # Define function to process a single DOY for this year
+  process_doy <- function(day) {
+    # Get trailing window dates
+    window_dates <- get_trailing_window(yr, day, config$window_size)
+
+    # Filter data
+    df_subset <- timeseries_with_norms %>%
+      filter(date %in% window_dates) %>%
+      filter(!is.na(NDVI) & !is.na(norm))
+
+    # Check data requirement
+    n_pixels_with_data <- length(unique(df_subset$pixel_id))
+    if (n_pixels_with_data < n_pixels * config$min_pixel_coverage) {
+      return(list(yday = day, result = NULL, stats = NULL, n_obs = nrow(df_subset)))
+    }
+
+    # Create prediction grid for this DOY
+    pred_grid <- year_grid %>%
+      filter(yday == day) %>%
+      select(pixel_id, x, y, norm)
+
+    # Fit model
+    fit_result <- fit_year_spatial_gam(df_subset, pred_grid, config$n_posterior_sims)
+
     return(list(
-      year = yr,
       yday = day,
-      result = NULL,
-      stats = NULL,
+      result = fit_result$result,
+      stats = fit_result$stats,
       n_obs = nrow(df_subset)
     ))
   }
 
-  # Create prediction grid with norms for this DOY
-  pred_grid <- year_preds_df %>%
-    filter(year == yr & yday == day) %>%
-    select(pixel_id, x, y, norm)
+  # Process all DOYs for this year in parallel
+  cat("  Processing 365 DOYs with", config$n_cores, "cores...\n")
 
-  # Fit model
-  fit_result <- fit_year_spatial_gam(df_subset, pred_grid, config$n_posterior_sims)
+  results_list <- mclapply(
+    1:365,
+    process_doy,
+    mc.cores = config$n_cores
+  )
 
-  return(list(
+  # Combine results for this year
+  cat("  Combining results...\n")
+
+  year_stats <- data.frame(
     year = yr,
-    yday = day,
-    result = fit_result$result,
-    stats = fit_result$stats,
-    n_obs = nrow(df_subset)
-  ))
-}
+    yday = 1:365,
+    R2 = NA_real_,
+    NormCoef = NA_real_,
+    SplineP = NA_real_,
+    RMSE = NA_real_,
+    n_obs = NA_integer_
+  )
 
-# Run parallel processing
-cat("Processing", n_jobs, "year-DOY combinations...\n\n")
+  for (res in results_list) {
+    if (!is.null(res$result)) {
+      idx <- which(year_grid$yday == res$yday)
+      year_grid$mean[idx] <- res$result$mean
+      year_grid$lwr[idx] <- res$result$lwr
+      year_grid$upr[idx] <- res$result$upr
+    }
 
-results_list <- mclapply(
-  1:n_jobs,
-  process_year_doy,
-  mc.cores = config$n_cores
-)
-
-# ==============================================================================
-# COMBINE RESULTS
-# ==============================================================================
-
-cat("Combining results...\n")
-
-# Initialize model stats data frame
-model_stats <- data.frame(
-  year = job_list$year,
-  yday = job_list$yday,
-  R2 = NA_real_,
-  NormCoef = NA_real_,
-  SplineP = NA_real_,
-  RMSE = NA_real_,
-  n_obs = NA_integer_
-)
-
-# Process results
-for (i in seq_along(results_list)) {
-  res <- results_list[[i]]
-
-  if (!is.null(res$result)) {
-    # Update predictions
-    idx <- which(year_preds_df$year == res$year & year_preds_df$yday == res$yday)
-    year_preds_df$mean[idx] <- res$result$mean
-    year_preds_df$lwr[idx] <- res$result$lwr
-    year_preds_df$upr[idx] <- res$result$upr
+    # Update stats
+    stat_idx <- which(year_stats$yday == res$yday)
+    year_stats$n_obs[stat_idx] <- res$n_obs
+    if (!is.null(res$stats)) {
+      year_stats$R2[stat_idx] <- res$stats$R2
+      year_stats$NormCoef[stat_idx] <- res$stats$NormCoef
+      year_stats$SplineP[stat_idx] <- res$stats$SplineP
+      year_stats$RMSE[stat_idx] <- res$stats$RMSE
+    }
   }
 
-  # Update stats
-  model_stats$n_obs[i] <- res$n_obs
-  if (!is.null(res$stats)) {
-    model_stats$R2[i] <- res$stats$R2
-    model_stats$NormCoef[i] <- res$stats$NormCoef
-    model_stats$SplineP[i] <- res$stats$SplineP
-    model_stats$RMSE[i] <- res$stats$RMSE
-  }
+  # Save this year's results
+  year_file <- file.path(config$output_dir, sprintf("modeled_ndvi_%d.rds", yr))
+  cat("  Saving to:", year_file, "\n")
+  saveRDS(year_grid, year_file)
+
+  # Track stats
+  all_model_stats[[as.character(yr)]] <- year_stats
+
+  # Summary for this year
+  n_complete <- sum(!is.na(year_grid$mean))
+  n_total <- nrow(year_grid)
+  pct_complete <- 100 * n_complete / n_total
+
+  year_elapsed <- as.numeric(difftime(Sys.time(), year_start, units = "mins"))
+  cat(sprintf("  Year %d: %.1f%% complete in %.1f minutes\n", yr, pct_complete, year_elapsed))
 }
 
 # ==============================================================================
@@ -326,32 +334,23 @@ for (i in seq_along(results_list)) {
 # ==============================================================================
 
 cat("\n======================================\n")
-cat("Processing complete!\n\n")
+cat("All years complete!\n\n")
 
-# Save predictions
-cat("Saving year predictions...\n")
-saveRDS(year_preds_df, config$output_file)
-
-# Save model stats
+# Save combined stats
 cat("Saving model statistics...\n")
-saveRDS(model_stats, config$stats_file)
+combined_stats <- do.call(rbind, all_model_stats)
+saveRDS(combined_stats, config$stats_file)
 
-# Summary statistics
-n_complete <- sum(!is.na(year_preds_df$mean))
-n_total <- nrow(year_preds_df)
-pct_complete <- 100 * n_complete / n_total
-
+# Overall summary
 cat("\nSummary:\n")
-cat("  Total pixel-year-DOY combinations:", n_total, "\n")
-cat("  Successfully fitted:", n_complete, sprintf("(%.1f%%)\n", pct_complete))
-cat("  Predictions saved to:", config$output_file, "\n")
+cat("  Years processed:", paste(years_to_process, collapse=", "), "\n")
+cat("  Output directory:", config$output_dir, "\n")
 cat("  Model stats saved to:", config$stats_file, "\n")
 
-# Model stats summary
 cat("\nModel Statistics Summary:\n")
-cat("  Mean R²:", round(mean(model_stats$R2, na.rm = TRUE), 3), "\n")
-cat("  Mean Norm Coef:", round(mean(model_stats$NormCoef, na.rm = TRUE), 3), "\n")
-cat("  Mean RMSE:", round(mean(model_stats$RMSE, na.rm = TRUE), 4), "\n")
+cat("  Mean R²:", round(mean(combined_stats$R2, na.rm = TRUE), 3), "\n")
+cat("  Mean Norm Coef:", round(mean(combined_stats$NormCoef, na.rm = TRUE), 3), "\n")
+cat("  Mean RMSE:", round(mean(combined_stats$RMSE, na.rm = TRUE), 4), "\n")
 
-elapsed_total <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
+elapsed_total <- as.numeric(difftime(Sys.time(), overall_start, units = "mins"))
 cat(sprintf("\nTotal time: %.1f minutes\n", elapsed_total))
