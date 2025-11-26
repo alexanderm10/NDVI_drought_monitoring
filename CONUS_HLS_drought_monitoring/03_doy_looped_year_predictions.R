@@ -220,55 +220,46 @@ for (yr in years_to_process) {
   cat("\n=== Processing Year", yr, "===\n")
   year_start <- Sys.time()
 
-  # Create prediction grid for this year only (pixel × DOY)
-  year_grid <- expand.grid(
-    pixel_id = unique(pixel_coords$pixel_id),
-    yday = 1:365
-  )
-  year_grid <- merge(year_grid, pixel_coords, by = "pixel_id")
-  year_grid <- merge(
-    year_grid,
-    norms_df[, c("pixel_id", "yday", "mean")],
-    by = c("pixel_id", "yday"),
-    all.x = TRUE
-  )
-  names(year_grid)[names(year_grid) == "mean"] <- "norm"
-  year_grid$mean <- NA_real_
-  year_grid$lwr <- NA_real_
-  year_grid$upr <- NA_real_
-
-  cat("  Grid:", nrow(year_grid), "pixel-DOY combinations\n")
+  # Don't create full year_grid upfront - save memory
 
   # Define function to process a single DOY for this year
   process_doy <- function(day) {
-    # Get trailing window dates
-    window_dates <- get_trailing_window(yr, day, config$window_size)
+    tryCatch({
+      # Get trailing window dates
+      window_dates <- get_trailing_window(yr, day, config$window_size)
 
-    # Filter data
-    df_subset <- timeseries_with_norms %>%
-      filter(date %in% window_dates) %>%
-      filter(!is.na(NDVI) & !is.na(norm))
+      # Filter data
+      df_subset <- timeseries_with_norms %>%
+        filter(date %in% window_dates) %>%
+        filter(!is.na(NDVI) & !is.na(norm))
 
-    # Check data requirement
-    n_pixels_with_data <- length(unique(df_subset$pixel_id))
-    if (n_pixels_with_data < n_pixels * config$min_pixel_coverage) {
-      return(list(yday = day, result = NULL, stats = NULL, n_obs = nrow(df_subset)))
-    }
+      # Check data requirement
+      n_pixels_with_data <- length(unique(df_subset$pixel_id))
+      if (n_pixels_with_data < n_pixels * config$min_pixel_coverage) {
+        return(list(yday = day, result = NULL, stats = NULL, n_obs = nrow(df_subset)))
+      }
 
-    # Create prediction grid for this DOY
-    pred_grid <- year_grid %>%
-      filter(yday == day) %>%
-      select(pixel_id, x, y, norm)
+      # Build prediction grid on-the-fly for just this DOY (141K rows)
+      # Get norms for this DOY
+      norms_for_doy <- norms_df[norms_df$yday == day, c("pixel_id", "mean")]
+      names(norms_for_doy)[names(norms_for_doy) == "mean"] <- "norm"
 
-    # Fit model
-    fit_result <- fit_year_spatial_gam(df_subset, pred_grid, config$n_posterior_sims)
+      # Merge with pixel coords
+      pred_grid <- merge(pixel_coords, norms_for_doy, by = "pixel_id", all.x = TRUE)
+      pred_grid <- pred_grid[, c("pixel_id", "x", "y", "norm")]
 
-    return(list(
-      yday = day,
-      result = fit_result$result,
-      stats = fit_result$stats,
-      n_obs = nrow(df_subset)
-    ))
+      # Fit model
+      fit_result <- fit_year_spatial_gam(df_subset, pred_grid, config$n_posterior_sims)
+
+      return(list(
+        yday = day,
+        result = fit_result$result,
+        stats = fit_result$stats,
+        n_obs = nrow(df_subset)
+      ))
+    }, error = function(e) {
+      return(list(yday = day, result = NULL, stats = NULL, n_obs = 0, error = as.character(e)))
+    })
   }
 
   # Process all DOYs for this year in parallel
@@ -293,24 +284,37 @@ for (yr in years_to_process) {
     n_obs = NA_integer_
   )
 
-  for (res in results_list) {
-    if (!is.null(res$result)) {
-      idx <- which(year_grid$yday == res$yday)
-      year_grid$mean[idx] <- res$result$mean
-      year_grid$lwr[idx] <- res$result$lwr
-      year_grid$upr[idx] <- res$result$upr
-    }
+  # Build year_grid from results
+  year_results_list <- list()
+
+  for (i in seq_along(results_list)) {
+    res <- results_list[[i]]
 
     # Update stats
-    stat_idx <- which(year_stats$yday == res$yday)
-    year_stats$n_obs[stat_idx] <- res$n_obs
+    year_stats$n_obs[i] <- res$n_obs
     if (!is.null(res$stats)) {
-      year_stats$R2[stat_idx] <- res$stats$R2
-      year_stats$NormCoef[stat_idx] <- res$stats$NormCoef
-      year_stats$SplineP[stat_idx] <- res$stats$SplineP
-      year_stats$RMSE[stat_idx] <- res$stats$RMSE
+      year_stats$R2[i] <- res$stats$R2
+      year_stats$NormCoef[i] <- res$stats$NormCoef
+      year_stats$SplineP[i] <- res$stats$SplineP
+      year_stats$RMSE[i] <- res$stats$RMSE
+    }
+
+    # Store results if present
+    if (!is.null(res$result)) {
+      doy_df <- data.frame(
+        pixel_id = pixel_coords$pixel_id,
+        yday = res$yday,
+        mean = res$result$mean,
+        lwr = res$result$lwr,
+        upr = res$result$upr
+      )
+      year_results_list[[i]] <- doy_df
     }
   }
+
+  # Combine all DOYs into year_grid
+  year_grid <- do.call(rbind, year_results_list)
+  year_grid <- merge(year_grid, pixel_coords, by = "pixel_id", all.x = TRUE)
 
   # Save this year's results
   year_file <- file.path(config$output_dir, sprintf("modeled_ndvi_%d.rds", yr))

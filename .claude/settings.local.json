@@ -17,7 +17,8 @@
       "Bash(then cat .gitignore)",
       "Bash(else echo \"No .gitignore file exists\")",
       "Bash(fi)",
-      "Bash(./monitor_phase2.sh:*)"
+      "Bash(./monitor_phase2.sh:*)",
+      "Bash(docker stats:*)"
     ],
     "defaultMode": "acceptEdits"
   }
