@@ -174,6 +174,62 @@ cat("  Unique pixels:", length(unique(timeseries_df$pixel_id)), "\n")
 cat("  Year range:", min(timeseries_df$year), "-", max(timeseries_df$year), "\n\n")
 
 # ==============================================================================
+# LAND COVER FILTERING
+# ==============================================================================
+
+cat("=== APPLYING LAND COVER FILTER ===\n")
+
+# Load land cover raster (Albers projection to match HLS data)
+library(terra)
+nlcd_file <- file.path(hls_paths$processed_ndvi, "land_cover/nlcd_4km_albers.tif")
+
+if (!file.exists(nlcd_file)) {
+  stop("NLCD land cover file not found: ", nlcd_file,
+       "\nRun 00_reproject_nlcd.R first to create the reprojected land cover file")
+}
+
+nlcd_raster <- rast(nlcd_file)
+cat("  NLCD raster loaded:", nlcd_file, "\n")
+
+# Extract NLCD codes for all pixel coordinates
+pixel_coords_prelim <- timeseries_df %>%
+  group_by(pixel_id) %>%
+  summarise(x = first(x), y = first(y), .groups = "drop")
+
+# Create spatial points from pixel coordinates
+# HLS coordinates are in Albers Equal Area (EPSG:5070), matching NLCD
+pixel_points <- vect(
+  pixel_coords_prelim[, c("x", "y")],
+  geom = c("x", "y"),
+  crs = "EPSG:5070"  # Albers Equal Area
+)
+
+# Extract NLCD values (no reprojection needed - both in Albers)
+pixel_coords_prelim$nlcd_code <- extract(nlcd_raster, pixel_points)[, 2]
+
+# Filter: Keep only pixels where NLCD code != 1 (exclude water/NoData)
+valid_pixels <- pixel_coords_prelim %>%
+  filter(!is.na(nlcd_code), nlcd_code != 1)
+
+cat("  Pixels before filtering:", nrow(pixel_coords_prelim), "\n")
+cat("  Pixels after filtering:", nrow(valid_pixels), "\n")
+cat("  Pixels removed (water/NoData):", nrow(pixel_coords_prelim) - nrow(valid_pixels), "\n")
+
+# Filter timeseries data to valid pixels only
+timeseries_df <- timeseries_df %>%
+  filter(pixel_id %in% valid_pixels$pixel_id)
+
+cat("  Timeseries rows after filtering:", format(nrow(timeseries_df), big.mark=","), "\n")
+
+# Save filtered pixel list for consistency across scripts
+saveRDS(
+  valid_pixels %>% select(pixel_id, x, y, nlcd_code),
+  file.path(hls_paths$gam_models, "valid_pixels_landcover_filtered.rds")
+)
+
+cat("=== LAND COVER FILTERING COMPLETE ===\n\n")
+
+# ==============================================================================
 # CREATE PREDICTION GRID
 # ==============================================================================
 

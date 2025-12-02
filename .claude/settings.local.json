@@ -18,7 +18,8 @@
       "Bash(else echo \"No .gitignore file exists\")",
       "Bash(fi)",
       "Bash(./monitor_phase2.sh:*)",
-      "Bash(docker stats:*)"
+      "Bash(docker stats:*)",
+      "Bash(Rscript:*)"
     ],
     "defaultMode": "acceptEdits"
   }
