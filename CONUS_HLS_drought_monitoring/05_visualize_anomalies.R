@@ -186,7 +186,7 @@ sample_weeks <- weekly_anoms %>%
   group_by(week_label) %>%
   summarise(n = n(), .groups = "drop") %>%
   filter(n > 100000) %>%  # Only weeks with good coverage
-  slice_sample(n = min(10, n())) %>%
+  slice_sample(n = min(10, nrow(.))) %>%
   pull(week_label)
 
 for (wk in sample_weeks) {

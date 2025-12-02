@@ -12,7 +12,15 @@
 #     - Use post.distns() to get uncertainty (mean, lwr, upr)
 #
 # Input: Phase 1 aggregated timeseries (01_aggregate_to_4km output)
-# Output: Norm predictions for each pixel-DOY with uncertainty
+# Output:
+#   1. doy_looped_norms.rds - Summary stats (mean, lwr, upr) per pixel-DOY
+#   2. doy_looped_norms_posteriors.rds - Raw posterior simulations for derivatives
+#
+# Modifications (2024):
+#   - Added return.sims=TRUE to post.distns() to save raw posteriors
+#   - Posteriors saved separately for derivative calculations (script 06)
+#   - Uses xz compression for posteriors to minimize storage (~10-30 GB)
+#   - Maintains backward compatibility: summary file unchanged
 #
 # ==============================================================================
 
@@ -111,21 +119,26 @@ fit_doy_spatial_gam <- function(df_doy, pred_grid, n_sims = 100) {
   if (is.null(gam_model)) return(NULL)
 
   # Get predictions with uncertainty using post.distns
+  # IMPORTANT: return.sims=TRUE saves raw posteriors for derivative calculations
   result <- tryCatch({
     post.distns(
       model.gam = gam_model,
       newdata = pred_grid,
       vars = c("x", "y"),
-      n = n_sims
+      n = n_sims,
+      return.sims = TRUE  # Save raw posteriors for derivatives
     )
   }, error = function(e) {
     warning("Posterior calculation failed: ", e$message)
     # Fall back to simple prediction without uncertainty
     pred <- predict(gam_model, newdata = pred_grid, se.fit = TRUE)
-    data.frame(
-      mean = pred$fit,
-      lwr = pred$fit - 1.96 * pred$se.fit,
-      upr = pred$fit + 1.96 * pred$se.fit
+    list(
+      ci = data.frame(
+        mean = pred$fit,
+        lwr = pred$fit - 1.96 * pred$se.fit,
+        upr = pred$fit + 1.96 * pred$se.fit
+      ),
+      sims = NULL
     )
   })
 
@@ -201,9 +214,20 @@ cat("Output structure:", nrow(norms_df), "rows (",
 
 days_to_process <- 1:365
 
+# Initialize posteriors storage (will be populated during processing or resume)
+norms_posteriors <- list()
+
 if (file.exists(config$output_file)) {
   cat("Found existing results, checking for missing DOYs...\n")
   existing_norms <- readRDS(config$output_file)
+
+  # Load existing posteriors if available
+  posteriors_file <- file.path(hls_paths$gam_models, "doy_looped_norms_posteriors.rds")
+  if (file.exists(posteriors_file)) {
+    cat("  Loading existing posteriors...\n")
+    norms_posteriors <- readRDS(posteriors_file)
+    cat(sprintf("    Loaded posteriors for %d DOYs\n", length(norms_posteriors)))
+  }
 
   # Find DOYs with all NAs (failed cores)
   doy_status <- tapply(existing_norms$mean, existing_norms$yday, function(x) sum(!is.na(x)))
@@ -263,12 +287,51 @@ if (length(days_to_process) > 0) {
 
   # Combine results into norms_df
   cat("Combining results...\n")
+
+  # Initialize posteriors storage for NEW results from this run
+  # Structure: list by DOY, each containing matrix (pixels x simulations)
+  # - Key: DOY as string ("1" to "365")
+  # - Value: matrix with nrow=pixels, ncol=100 (posterior simulations)
+  # This will be merged with existing posteriors (if in resume mode)
+  norms_posteriors_new <- list()
+
   for (res in results_list) {
     if (!is.null(res$result)) {
       idx <- which(norms_df$yday == res$day)
-      norms_df$mean[idx] <- res$result$mean
-      norms_df$lwr[idx] <- res$result$lwr
-      norms_df$upr[idx] <- res$result$upr
+
+      # Extract summary stats (backward compatibility)
+      if (is.list(res$result) && "ci" %in% names(res$result)) {
+        norms_df$mean[idx] <- res$result$ci$mean
+        norms_df$lwr[idx] <- res$result$ci$lwr
+        norms_df$upr[idx] <- res$result$ci$upr
+
+        # Store posteriors if available
+        if (!is.null(res$result$sims)) {
+          # Extract just the simulation columns (exclude metadata columns)
+          sim_cols <- grep("^X", names(res$result$sims), value = TRUE)
+          if (length(sim_cols) == 0) {
+            # If no X prefix, take all numeric columns after metadata
+            sim_cols <- setdiff(names(res$result$sims), c("X", "x", "y"))
+          }
+          norms_posteriors_new[[as.character(res$day)]] <-
+            as.matrix(res$result$sims[, sim_cols])
+        }
+      } else {
+        # Old format (no list structure) - for backward compatibility
+        norms_df$mean[idx] <- res$result$mean
+        norms_df$lwr[idx] <- res$result$lwr
+        norms_df$upr[idx] <- res$result$upr
+      }
+    }
+  }
+
+  # Merge new posteriors with existing posteriors
+  if (length(norms_posteriors_new) > 0) {
+    cat(sprintf("  Merging %d new posterior DOYs with existing data...\n",
+                length(norms_posteriors_new)))
+    # Update existing posteriors with new ones
+    for (doy_key in names(norms_posteriors_new)) {
+      norms_posteriors[[doy_key]] <- norms_posteriors_new[[doy_key]]
     }
   }
 
@@ -286,7 +349,25 @@ cat("Processing complete!\n\n")
 
 # Save final output
 cat("Saving final output...\n")
-saveRDS(norms_df, config$output_file)
+
+# Save summary stats (backward compatible, fast loading)
+cat("  Saving summary statistics (mean, lwr, upr)...\n")
+saveRDS(norms_df, config$output_file, compress = "gzip")
+
+# Save posteriors separately (for derivative calculations)
+posteriors_file <- file.path(hls_paths$gam_models, "doy_looped_norms_posteriors.rds")
+if (exists("norms_posteriors") && length(norms_posteriors) > 0) {
+  cat("  Saving posterior distributions...\n")
+  cat("    (this may take a few minutes due to compression)\n")
+  saveRDS(norms_posteriors, posteriors_file, compress = "xz")  # Maximum compression
+  cat(sprintf("  Posteriors saved: %s\n", posteriors_file))
+
+  # Report file size
+  post_size_mb <- file.info(posteriors_file)$size / (1024^2)
+  cat(sprintf("    File size: %.1f MB\n", post_size_mb))
+} else {
+  cat("  No posteriors to save (may be resume mode with no new data)\n")
+}
 
 # Summary statistics
 n_complete <- sum(!is.na(norms_df$mean))
