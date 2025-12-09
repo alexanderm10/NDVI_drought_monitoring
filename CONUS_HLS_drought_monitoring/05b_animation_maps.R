@@ -1,12 +1,15 @@
 # ==============================================================================
-# 05_visualize_anomalies.R
+# 05b_animation_maps.R
 #
-# Purpose: Create visualizations of NDVI anomalies
-#   1. Time series: Domain-wide average anomaly with error ribbon
-#   2. Animated map: Spatial anomalies rolling through dates
+# Purpose: Create SLOW animation and spatial maps of NDVI anomalies
+#   - Sample static maps (10 weeks)
+#   - Full animation frames (~600 frames)
+#   - Animated GIF
 #
 # Input: Script 04 anomaly outputs
-# Output: Figures in /data/figures/MIDWEST/
+# Output: Maps and animation in /data/figures/MIDWEST/
+#
+# Runtime: ~45-60 minutes (memory intensive)
 #
 # ==============================================================================
 
@@ -40,11 +43,17 @@ config <- list(
   aggregate_days = 7  # Aggregate to weekly for animation (reduces frame count)
 )
 
-cat("=== Visualize NDVI Anomalies ===\n")
-cat("Output directory:", config$output_dir, "\n\n")
+cat("=== Animation and Spatial Maps ===\n")
+cat("Output directory:", config$output_dir, "\n")
+cat("WARNING: This script is memory intensive and takes 45-60 minutes\n\n")
+
+# Create output directory if needed
+if (!dir.exists(config$output_dir)) {
+  dir.create(config$output_dir, recursive = TRUE)
+}
 
 # ==============================================================================
-# LOAD DATA (MEMORY EFFICIENT)
+# LOAD DATA (MEMORY EFFICIENT - WEEKLY AGGREGATES ONLY)
 # ==============================================================================
 
 cat("Loading anomaly data (processing year-by-year for memory efficiency)...\n")
@@ -61,8 +70,7 @@ if (file.exists(config$valid_pixels_file)) {
   stop("Valid pixels file not found - cannot verify filtering")
 }
 
-# Process each year separately to calculate aggregates without loading all data
-timeseries_list <- list()
+# Process each year separately to calculate weekly aggregates
 weekly_list <- list()
 
 for (i in seq_along(anomaly_files)) {
@@ -79,23 +87,6 @@ for (i in seq_along(anomaly_files)) {
   if (actual_pixels != expected_pixels) {
     warning(sprintf("Year %d: pixel count %d differs from expected %d", yr, actual_pixels, expected_pixels))
   }
-
-  # Calculate domain-wide average for time series (aggregate to dates)
-  # Use SE of the mean for uncertainty (precision of the aggregate statistic)
-  ts_yr <- anoms %>%
-    group_by(date, year, yday) %>%
-    summarise(
-      mean_anom = mean(anoms_mean, na.rm = TRUE),
-      sd_anom = sd(anoms_mean, na.rm = TRUE),
-      n_pixels = sum(!is.na(anoms_mean)),
-      .groups = "drop"
-    ) %>%
-    mutate(
-      se_anom = sd_anom / sqrt(n_pixels),
-      lwr_anom = mean_anom - 1.96 * se_anom,  # 95% CI
-      upr_anom = mean_anom + 1.96 * se_anom
-    )
-  timeseries_list[[i]] <- ts_yr
 
   # Calculate weekly aggregates for animation
   anoms_weekly <- anoms %>%
@@ -114,16 +105,14 @@ for (i in seq_along(anomaly_files)) {
   weekly_list[[i]] <- anoms_weekly
 
   # Free memory
-  rm(anoms, anoms_weekly)
+  rm(anoms)
   gc(verbose = FALSE)
 }
 
-# Combine aggregated results (much smaller than raw data)
-timeseries_df <- bind_rows(timeseries_list) %>% arrange(date)
+# Combine aggregated results
 weekly_anoms <- bind_rows(weekly_list)
 
-cat(sprintf("\n  Time series points: %d (aggregated across dates)\n", nrow(timeseries_df)))
-cat(sprintf("  Weekly data points: %s (aggregated for animation)\n", format(nrow(weekly_anoms), big.mark = ",")))
+cat(sprintf("\n  Weekly data points: %s (aggregated for animation)\n", format(nrow(weekly_anoms), big.mark = ",")))
 cat(sprintf("  ✓ Land cover filtering verified: %d pixels\n\n", expected_pixels))
 
 # ==============================================================================
@@ -137,97 +126,7 @@ states_albers <- st_transform(states_wgs84, crs = "EPSG:5070")
 cat("  ✓ State boundaries loaded and transformed to EPSG:5070\n\n")
 
 # ==============================================================================
-# TIME SERIES PLOT
-# ==============================================================================
-
-cat("Creating time series plot...\n")
-
-# Create plot
-p_timeseries <- ggplot(timeseries_df, aes(x = date)) +
-  # Error ribbon
-  geom_ribbon(aes(ymin = lwr_anom, ymax = upr_anom),
-              fill = "skyblue", alpha = 0.3) +
-  # Zero line
-  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
-  # Mean anomaly line
-  geom_line(aes(y = mean_anom), color = "darkblue", size = 0.8) +
-  # Add points to show where data exists (makes gaps visually apparent)
-  geom_point(aes(y = mean_anom), color = "darkblue", size = 1.2, alpha = 0.6) +
-  # Styling
-  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
-  labs(
-    title = "Domain-Wide NDVI Anomalies (2013-2024)",
-    subtitle = "Spatial average across all pixels with uncertainty bounds",
-    x = "Date",
-    y = "NDVI Anomaly (deviation from long-term normal)",
-    caption = sprintf("Data coverage varies by year (gaps indicate insufficient raw data for predictions)\\nShaded region: 95%% CI of domain-wide mean")
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    plot.title = element_text(face = "bold", size = 14),
-    plot.subtitle = element_text(color = "gray30"),
-    panel.grid.minor = element_blank(),
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    plot.background = element_rect(fill = "white", colour = NA),
-    panel.background = element_rect(fill = "white", colour = NA)
-  )
-
-# Save time series
-ts_file <- file.path(config$output_dir, "timeseries_domain_anomalies.png")
-ggsave(ts_file, p_timeseries, width = config$width, height = config$height * 0.7, dpi = config$dpi, bg = "white")
-cat(sprintf("  Saved: %s\n\n", ts_file))
-
-# ==============================================================================
-# TIME SERIES BY YEAR (FACETED)
-# ==============================================================================
-
-cat("Creating faceted time series by year...\n")
-
-# Add line grouping to break at gaps (identify continuous segments)
-timeseries_df <- timeseries_df %>%
-  arrange(year, yday) %>%
-  group_by(year) %>%
-  mutate(
-    gap = c(0, diff(yday)) > 2,  # Gap if more than 2 days between observations
-    line_group = cumsum(gap)      # Increment group at each gap
-  ) %>%
-  ungroup()
-
-# Month breaks for x-axis (approximate day of year for month starts)
-month_breaks <- c(1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335)
-month_labels <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-
-p_faceted <- ggplot(timeseries_df, aes(x = yday)) +
-  geom_ribbon(aes(ymin = lwr_anom, ymax = upr_anom, group = line_group),
-              fill = "skyblue", alpha = 0.3) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
-  geom_line(aes(y = mean_anom, group = line_group), color = "darkblue", size = 0.6) +
-  geom_point(aes(y = mean_anom), color = "darkblue", size = 0.8, alpha = 0.6) +
-  facet_wrap(~ year, ncol = 3) +
-  scale_x_continuous(breaks = month_breaks, labels = month_labels) +
-  labs(
-    title = "NDVI Anomalies by Year (2013-2024)",
-    subtitle = "Seasonal progression for each year",
-    x = NULL,
-    y = "NDVI Anomaly",
-    caption = "Note: Gaps indicate insufficient raw data for predictions"
-  ) +
-  theme_minimal(base_size = 11) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    panel.grid.minor = element_blank(),
-    strip.text = element_text(face = "bold"),
-    plot.background = element_rect(fill = "white", colour = NA),
-    panel.background = element_rect(fill = "white", colour = NA),
-    axis.text.x = element_text(angle = 45, hjust = 1)
-  )
-
-facet_file <- file.path(config$output_dir, "timeseries_by_year_faceted.png")
-ggsave(facet_file, p_faceted, width = config$width, height = config$height * 1.2, dpi = config$dpi, bg = "white")
-cat(sprintf("  Saved: %s\n\n", facet_file))
-
-# ==============================================================================
-# ANIMATED MAP
+# SAMPLE STATIC MAPS
 # ==============================================================================
 
 cat("Creating animated map...\n")
@@ -336,7 +235,10 @@ close(pb)
 
 cat(sprintf("\n  Saved %d frames to: %s\n", nrow(all_weeks), frames_dir))
 
-# Automatically create GIF using ImageMagick (if available)
+# ==============================================================================
+# CREATE ANIMATED GIF
+# ==============================================================================
+
 cat("\nCreating animated GIF...\n")
 gif_output <- file.path(config$output_dir, "anomalies_animated.gif")
 
@@ -374,10 +276,12 @@ if (convert_available) {
 # ==============================================================================
 
 cat("\n======================================\n")
-cat("Visualization complete!\n\n")
+cat("Animation and maps complete!\n\n")
 cat("Output files:\n")
-cat(sprintf("  1. Time series (full): %s\n", basename(ts_file)))
-cat(sprintf("  2. Time series (by year): %s\n", basename(facet_file)))
-cat(sprintf("  3. Sample maps: map_sample_*.png (%d files)\n", length(sample_weeks)))
-cat(sprintf("  4. Animation frames: animation_frames/*.png\n"))
+cat(sprintf("  1. Sample maps: map_sample_*.png (%d files)\n", length(sample_weeks)))
+cat(sprintf("  2. Animation frames: animation_frames/*.png (%d frames)\n", nrow(all_weeks)))
+if (convert_available && file.exists(gif_output)) {
+  cat(sprintf("  3. Animated GIF: %s\n", basename(gif_output)))
+}
 cat(sprintf("\nAll files saved to: %s\n", config$output_dir))
+cat("\nFor quick time series plots, run: 05a_timeseries_quick.R\n")

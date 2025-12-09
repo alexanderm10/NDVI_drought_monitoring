@@ -41,6 +41,7 @@ config <- list(
   # Input files
   norms_file = file.path(hls_paths$gam_models, "doy_looped_norms.rds"),
   year_dir = file.path(hls_paths$gam_models, "modeled_ndvi"),
+  valid_pixels_file = file.path(hls_paths$gam_models, "valid_pixels_landcover_filtered.rds"),
 
   # Output
   output_dir = file.path(hls_paths$gam_models, "modeled_ndvi_anomalies"),
@@ -60,6 +61,15 @@ if (!dir.exists(config$output_dir)) {
   cat("Created output directory\n")
 }
 
+# Load valid pixels (land cover filtered)
+cat("Loading valid pixels mask...\n")
+if (!file.exists(config$valid_pixels_file)) {
+  stop("Valid pixels file not found. Run script 02 first.")
+}
+valid_pixels_df <- readRDS(config$valid_pixels_file)
+valid_pixels <- valid_pixels_df$pixel_id
+cat("  Valid pixels (land cover filtered):", length(valid_pixels), "\n\n")
+
 # Load norms from script 02
 cat("Loading norms...\n")
 if (!file.exists(config$norms_file)) {
@@ -67,12 +77,20 @@ if (!file.exists(config$norms_file)) {
 }
 norms_df <- readRDS(config$norms_file)
 
+# Verify norms are filtered
+unique_norm_pixels <- unique(norms_df$pixel_id)
+if (length(unique_norm_pixels) != length(valid_pixels)) {
+  warning(sprintf("Norms pixel count (%d) differs from valid pixels (%d)",
+                  length(unique_norm_pixels), length(valid_pixels)))
+}
+
 # Prepare norms: keep only pixel_id, yday, mean (rename to 'norm')
 norms_df <- norms_df %>%
   select(pixel_id, yday, mean) %>%
   rename(norm = mean)
 
-cat("  Norms loaded:", nrow(norms_df), "pixel-DOY combinations\n\n")
+cat("  Norms loaded:", nrow(norms_df), "pixel-DOY combinations\n")
+cat("  Unique pixels in norms:", length(unique_norm_pixels), "\n\n")
 
 # Get list of year files from script 03
 year_files <- list.files(config$year_dir, pattern = "modeled_ndvi_\\d{4}\\.rds", full.names = TRUE)
@@ -132,6 +150,14 @@ for (yr in years) {
 
   year_preds <- readRDS(year_file)
   cat(sprintf("  Loaded predictions: %d rows\n", nrow(year_preds)))
+
+  # Verify year predictions are filtered
+  unique_year_pixels <- unique(year_preds$pixel_id)
+  cat(sprintf("  Unique pixels in predictions: %d\n", length(unique_year_pixels)))
+  if (length(unique_year_pixels) != length(valid_pixels)) {
+    warning(sprintf("Year predictions pixel count (%d) differs from valid pixels (%d)",
+                    length(unique_year_pixels), length(valid_pixels)))
+  }
 
   # Merge with norms on (pixel_id, yday)
   cat("  Merging with norms...\n")

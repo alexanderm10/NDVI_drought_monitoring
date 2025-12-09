@@ -37,7 +37,7 @@ services:
       resources:
         limits:
           cpus: '10.0'  # Limit to 10 CPU cores (shared server - leave capacity for others)
-          memory: 64G   # GAM processing can be memory intensive
+          memory: 96G   # Increased for script 03 with 4 cores (was 64G)
         reservations:
           cpus: '4.0'   # Reserve at least 4 cores
           memory: 16G   # Reserve at least 16GB

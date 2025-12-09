@@ -1,21 +1,20 @@
 # ==============================================================================
-# 05_visualize_anomalies.R
+# 05a_timeseries_quick.R
 #
-# Purpose: Create visualizations of NDVI anomalies
-#   1. Time series: Domain-wide average anomaly with error ribbon
-#   2. Animated map: Spatial anomalies rolling through dates
+# Purpose: Create FAST time series visualizations of NDVI anomalies
+#   - Domain-wide average time series with SE uncertainty
+#   - Faceted time series by year
 #
 # Input: Script 04 anomaly outputs
-# Output: Figures in /data/figures/MIDWEST/
+# Output: Time series plots in /data/figures/MIDWEST/
+#
+# Runtime: ~2-3 minutes (vs 45+ minutes for full animation)
 #
 # ==============================================================================
 
 library(dplyr)
 library(ggplot2)
 library(lubridate)
-library(viridis)
-library(sf)
-library(maps)
 
 # Source utility functions
 source("00_setup_paths.R")
@@ -33,18 +32,19 @@ config <- list(
   # Plotting parameters
   dpi = 300,
   width = 12,
-  height = 8,
-
-  # Animation parameters
-  fps = 5,  # Frames per second
-  aggregate_days = 7  # Aggregate to weekly for animation (reduces frame count)
+  height = 8
 )
 
-cat("=== Visualize NDVI Anomalies ===\n")
+cat("=== Quick Time Series Visualizations ===\n")
 cat("Output directory:", config$output_dir, "\n\n")
 
+# Create output directory if needed
+if (!dir.exists(config$output_dir)) {
+  dir.create(config$output_dir, recursive = TRUE)
+}
+
 # ==============================================================================
-# LOAD DATA (MEMORY EFFICIENT)
+# LOAD DATA (MEMORY EFFICIENT - TIME SERIES ONLY)
 # ==============================================================================
 
 cat("Loading anomaly data (processing year-by-year for memory efficiency)...\n")
@@ -61,9 +61,8 @@ if (file.exists(config$valid_pixels_file)) {
   stop("Valid pixels file not found - cannot verify filtering")
 }
 
-# Process each year separately to calculate aggregates without loading all data
+# Process each year separately to calculate time series aggregates
 timeseries_list <- list()
-weekly_list <- list()
 
 for (i in seq_along(anomaly_files)) {
   yr <- years[i]
@@ -97,44 +96,16 @@ for (i in seq_along(anomaly_files)) {
     )
   timeseries_list[[i]] <- ts_yr
 
-  # Calculate weekly aggregates for animation
-  anoms_weekly <- anoms %>%
-    mutate(
-      week_of_year = floor((yday - 1) / config$aggregate_days),
-      week_label = sprintf("%d-W%02d", year, week_of_year)
-    ) %>%
-    group_by(year, week_of_year, week_label, pixel_id, x, y) %>%
-    summarise(
-      mean_anom = mean(anoms_mean, na.rm = TRUE),
-      n_obs = n(),
-      .groups = "drop"
-    ) %>%
-    filter(!is.na(mean_anom))
-
-  weekly_list[[i]] <- anoms_weekly
-
   # Free memory
-  rm(anoms, anoms_weekly)
+  rm(anoms)
   gc(verbose = FALSE)
 }
 
-# Combine aggregated results (much smaller than raw data)
+# Combine aggregated results
 timeseries_df <- bind_rows(timeseries_list) %>% arrange(date)
-weekly_anoms <- bind_rows(weekly_list)
 
 cat(sprintf("\n  Time series points: %d (aggregated across dates)\n", nrow(timeseries_df)))
-cat(sprintf("  Weekly data points: %s (aggregated for animation)\n", format(nrow(weekly_anoms), big.mark = ",")))
 cat(sprintf("  ✓ Land cover filtering verified: %d pixels\n\n", expected_pixels))
-
-# ==============================================================================
-# LOAD STATE BOUNDARIES
-# ==============================================================================
-
-cat("Loading state boundaries...\n")
-# Get US state boundaries and transform to Albers Equal Area (EPSG:5070)
-states_wgs84 <- st_as_sf(map("state", plot = FALSE, fill = TRUE))
-states_albers <- st_transform(states_wgs84, crs = "EPSG:5070")
-cat("  ✓ State boundaries loaded and transformed to EPSG:5070\n\n")
 
 # ==============================================================================
 # TIME SERIES PLOT
@@ -227,157 +198,13 @@ ggsave(facet_file, p_faceted, width = config$width, height = config$height * 1.2
 cat(sprintf("  Saved: %s\n\n", facet_file))
 
 # ==============================================================================
-# ANIMATED MAP
-# ==============================================================================
-
-cat("Creating animated map...\n")
-cat(sprintf("  Weekly frames: %d\n", length(unique(weekly_anoms$week_label))))
-cat(sprintf("  Total data points: %s\n", format(nrow(weekly_anoms), big.mark = ",")))
-
-# Create static map for each week (sample of 10 weeks for testing)
-cat("  Generating sample maps...\n")
-
-# Get representative weeks
-sample_weeks <- weekly_anoms %>%
-  group_by(week_label) %>%
-  summarise(n = n(), .groups = "drop") %>%
-  filter(n > 100000) %>%  # Only weeks with good coverage
-  slice_sample(n = min(10, nrow(.))) %>%
-  pull(week_label)
-
-for (wk in sample_weeks) {
-  week_data <- weekly_anoms %>% filter(week_label == wk)
-
-  p_map <- ggplot(week_data, aes(x = x, y = y, fill = mean_anom)) +
-    geom_raster() +
-    geom_sf(data = states_albers, fill = NA, color = "black", linewidth = 0.3, inherit.aes = FALSE) +
-    scale_fill_gradient2(
-      low = "brown", mid = "white", high = "darkgreen",
-      midpoint = 0, limits = c(-0.3, 0.3), oob = scales::squish,
-      name = "NDVI Anomaly"
-    ) +
-    coord_sf(expand = FALSE) +
-    labs(
-      title = sprintf("NDVI Anomalies: %s", wk),
-      subtitle = sprintf("%s pixels", format(nrow(week_data), big.mark = ","))
-    ) +
-    theme_void() +
-    theme(
-      plot.title = element_text(face = "bold", hjust = 0.5),
-      plot.subtitle = element_text(hjust = 0.5),
-      legend.position = "right",
-      plot.background = element_rect(fill = "white", colour = NA),
-      panel.grid.major = element_blank(),
-      panel.grid.minor = element_blank()
-    )
-
-  map_file <- file.path(config$output_dir, sprintf("map_sample_%s.png", gsub("-", "_", wk)))
-  ggsave(map_file, p_map, width = 10, height = 8, dpi = 200, bg = "white")
-}
-
-cat(sprintf("  Saved %d sample maps\n", length(sample_weeks)))
-
-# ==============================================================================
-# CREATE ANIMATION FRAMES
-# ==============================================================================
-
-cat("\nCreating animation frames...\n")
-cat("  Generating PNG sequence for all weeks...\n")
-
-# Get all weeks, sorted
-all_weeks <- weekly_anoms %>%
-  group_by(week_label, year, week_of_year) %>%
-  summarise(n = n(), .groups = "drop") %>%
-  arrange(year, week_of_year)
-
-cat(sprintf("  Total frames to generate: %d\n", nrow(all_weeks)))
-
-# Create frames directory
-frames_dir <- file.path(config$output_dir, "animation_frames")
-if (!dir.exists(frames_dir)) {
-  dir.create(frames_dir, recursive = TRUE)
-}
-
-# Generate all frames (with progress)
-pb <- txtProgressBar(min = 0, max = nrow(all_weeks), style = 3)
-for (i in 1:nrow(all_weeks)) {
-  wk <- all_weeks$week_label[i]
-  week_data <- weekly_anoms %>% filter(week_label == wk)
-
-  p_frame <- ggplot(week_data, aes(x = x, y = y, fill = mean_anom)) +
-    geom_raster() +
-    geom_sf(data = states_albers, fill = NA, color = "black", linewidth = 0.3, inherit.aes = FALSE) +
-    scale_fill_gradient2(
-      low = "brown", mid = "white", high = "darkgreen",
-      midpoint = 0, limits = c(-0.3, 0.3), oob = scales::squish,
-      name = "NDVI\\nAnomaly"
-    ) +
-    coord_sf(expand = FALSE) +
-    labs(
-      title = sprintf("NDVI Anomalies: %s", wk),
-      subtitle = sprintf("%s pixels", format(nrow(week_data), big.mark = ","))
-    ) +
-    theme_void(base_size = 14) +
-    theme(
-      plot.title = element_text(face = "bold", hjust = 0.5),
-      plot.subtitle = element_text(hjust = 0.5, color = "gray40"),
-      legend.position = "right",
-      plot.background = element_rect(fill = "white", colour = NA),
-      panel.grid.major = element_blank(),
-      panel.grid.minor = element_blank()
-    )
-
-  frame_file <- file.path(frames_dir, sprintf("frame_%04d.png", i))
-  ggsave(frame_file, p_frame, width = 10, height = 8, dpi = 150, bg = "white")
-
-  setTxtProgressBar(pb, i)
-}
-close(pb)
-
-cat(sprintf("\n  Saved %d frames to: %s\n", nrow(all_weeks), frames_dir))
-
-# Automatically create GIF using ImageMagick (if available)
-cat("\nCreating animated GIF...\n")
-gif_output <- file.path(config$output_dir, "anomalies_animated.gif")
-
-# Check if ImageMagick convert is available
-convert_available <- system("which convert", ignore.stdout = TRUE, ignore.stderr = TRUE) == 0
-
-if (convert_available) {
-  cat("  Using ImageMagick to create GIF...\n")
-
-  # Create GIF using convert command
-  convert_cmd <- sprintf(
-    "convert -delay 20 -loop 0 %s/frame_*.png %s",
-    frames_dir, gif_output
-  )
-
-  result <- system(convert_cmd, ignore.stdout = FALSE, ignore.stderr = FALSE)
-
-  if (result == 0 && file.exists(gif_output)) {
-    gif_size_mb <- file.size(gif_output) / 1024^2
-    cat(sprintf("  ✓ GIF created successfully: %s (%.1f MB)\n",
-                basename(gif_output), gif_size_mb))
-  } else {
-    warning("Failed to create GIF with ImageMagick")
-    cat(sprintf("  Manual command:\n    %s\n", convert_cmd))
-  }
-} else {
-  cat("  ImageMagick 'convert' not found - skipping GIF creation\n")
-  cat(sprintf("  To create GIF manually, run:\n"))
-  cat(sprintf("    convert -delay 20 -loop 0 %s/frame_*.png %s\n",
-              frames_dir, gif_output))
-}
-
-# ==============================================================================
 # SUMMARY
 # ==============================================================================
 
 cat("\n======================================\n")
-cat("Visualization complete!\n\n")
+cat("Quick time series visualization complete!\n\n")
 cat("Output files:\n")
 cat(sprintf("  1. Time series (full): %s\n", basename(ts_file)))
 cat(sprintf("  2. Time series (by year): %s\n", basename(facet_file)))
-cat(sprintf("  3. Sample maps: map_sample_*.png (%d files)\n", length(sample_weeks)))
-cat(sprintf("  4. Animation frames: animation_frames/*.png\n"))
 cat(sprintf("\nAll files saved to: %s\n", config$output_dir))
+cat("\nFor animation and spatial maps, run: 05b_animation_maps.R\n")

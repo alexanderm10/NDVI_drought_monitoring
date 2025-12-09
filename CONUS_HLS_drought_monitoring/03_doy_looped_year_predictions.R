@@ -48,22 +48,29 @@ config <- list(
   output_dir = file.path(hls_paths$gam_models, "modeled_ndvi"),
   stats_file = file.path(hls_paths$gam_models, "modeled_ndvi_stats.rds"),
 
+  # Posteriors directory (organized by year, incremental saving to avoid memory issues)
+  posteriors_dir = file.path(hls_paths$gam_models, "year_predictions_posteriors"),
+
   # Posterior simulation
   n_posterior_sims = 100,
 
-  # Parallelization (conservative for shared systems)
-  n_cores = 4
+  # Parallelization (reduced to 3 cores for memory safety with posterior saving)
+  n_cores = 3  # Conservative with posterior saving (was 4 without posteriors)
 )
 
-# Create output directory
+# Create output directories
 if (!dir.exists(config$output_dir)) {
   dir.create(config$output_dir, recursive = TRUE)
+}
+if (!dir.exists(config$posteriors_dir)) {
+  dir.create(config$posteriors_dir, recursive = TRUE)
 }
 
 cat("=== DOY-Looped Year Predictions ===\n")
 cat("Trailing window:", config$window_size, "days\n")
 cat("Using", config$n_cores, "cores\n")
-cat("Output:", config$output_file, "\n\n")
+cat("Predictions:", config$output_dir, "\n")
+cat("Posteriors:", config$posteriors_dir, "\n\n")
 
 # ==============================================================================
 # HELPER FUNCTIONS
@@ -109,21 +116,26 @@ fit_year_spatial_gam <- function(df_subset, pred_grid, n_sims = 100) {
     RMSE = sqrt(mean(residuals(gam_model)^2))
   )
 
-  # Get predictions with uncertainty
+  # Get predictions with uncertainty AND posteriors
+  # IMPORTANT: return.sims=TRUE saves raw posteriors for uncertainty propagation
   result <- tryCatch({
     post.distns(
       model.gam = gam_model,
       newdata = pred_grid,
       vars = c("x", "y"),
-      n = n_sims
+      n = n_sims,
+      return.sims = TRUE  # Save posteriors for anomaly uncertainty
     )
   }, error = function(e) {
-    # Fall back to simple prediction
+    # Fall back to simple prediction without posteriors
     pred <- predict(gam_model, newdata = pred_grid, se.fit = TRUE)
-    data.frame(
-      mean = pred$fit,
-      lwr = pred$fit - 1.96 * pred$se.fit,
-      upr = pred$fit + 1.96 * pred$se.fit
+    list(
+      ci = data.frame(
+        mean = pred$fit,
+        lwr = pred$fit - 1.96 * pred$se.fit,
+        upr = pred$fit + 1.96 * pred$se.fit
+      ),
+      sims = NULL
     )
   })
 
@@ -147,7 +159,27 @@ if (file.exists(rds_file)) {
 # Fix year column from date (handles any parsing issues)
 timeseries_df$year <- as.integer(format(timeseries_df$date, "%Y"))
 
-cat("  Timeseries observations:", nrow(timeseries_df), "\n")
+cat("  Timeseries observations (before filtering):", nrow(timeseries_df), "\n")
+
+# ==============================================================================
+# APPLY LAND COVER FILTER (consistent with script 02)
+# ==============================================================================
+
+cat("\nApplying land cover filter...\n")
+valid_pixels_file <- file.path(hls_paths$gam_models, "valid_pixels_landcover_filtered.rds")
+if (!file.exists(valid_pixels_file)) {
+  stop("Filtered pixel list not found: ", valid_pixels_file,
+       "\nRun script 02 first to generate the filtered pixel list")
+}
+
+valid_pixels <- readRDS(valid_pixels_file)
+cat("  Valid pixels from script 02:", nrow(valid_pixels), "\n")
+
+# Filter timeseries to only valid (non-water) pixels
+timeseries_df <- timeseries_df %>%
+  filter(pixel_id %in% valid_pixels$pixel_id)
+
+cat("  Timeseries observations (after filtering):", nrow(timeseries_df), "\n")
 
 # Load norms from script 02
 norms_file <- file.path(hls_paths$gam_models, "doy_looped_norms.rds")
@@ -164,7 +196,7 @@ n_pixels <- length(unique(timeseries_df$pixel_id))
 cat("  Years:", min(years), "-", max(years), "(", length(years), "years)\n")
 cat("  Pixels:", n_pixels, "\n\n")
 
-# Get pixel coordinates (used for all years)
+# Get pixel coordinates (used for all years) - from filtered data
 pixel_coords <- timeseries_df %>%
   group_by(pixel_id) %>%
   summarise(x = first(x), y = first(y), .groups = "drop") %>%
@@ -251,9 +283,23 @@ for (yr in years_to_process) {
       # Fit model
       fit_result <- fit_year_spatial_gam(df_subset, pred_grid, config$n_posterior_sims)
 
+      # Save posteriors IMMEDIATELY to avoid memory buildup (like script 02)
+      if (!is.null(fit_result$result) && !is.null(fit_result$result$sims)) {
+        # Create year subdirectory if needed
+        year_post_dir <- file.path(config$posteriors_dir, as.character(yr))
+        if (!dir.exists(year_post_dir)) {
+          dir.create(year_post_dir, recursive = TRUE)
+        }
+
+        # Save posteriors for this year-DOY
+        posterior_file <- file.path(year_post_dir, sprintf("doy_%03d.rds", day))
+        saveRDS(fit_result$result$sims, posterior_file, compress = "xz")
+      }
+
+      # Return ONLY summary stats (not posteriors) to avoid memory issues
       return(list(
         yday = day,
-        result = fit_result$result,
+        result = if (!is.null(fit_result$result)) fit_result$result$ci else NULL,
         stats = fit_result$stats,
         n_obs = nrow(df_subset)
       ))

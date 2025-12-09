@@ -54,16 +54,27 @@ config <- list(
   checkpoint_file = file.path(hls_paths$gam_models, "doy_looped_norms_checkpoint.rds"),
   checkpoint_interval = 50,  # Save every N DOYs
 
+  # Posteriors directory (individual files per DOY to avoid memory issues)
+  posteriors_dir = file.path(hls_paths$gam_models, "doy_posteriors"),
+
   # Posterior simulation
   n_posterior_sims = 100,  # Number of simulations for uncertainty
 
-  # Parallelization (conservative for shared systems)
-  n_cores = 2  # Reduced further for resume run
+  # Parallelization - SERIAL PROCESSING to avoid mclapply memory issues
+  n_cores = 1  # Serial processing with incremental posterior saving
 )
 
 cat("=== DOY-Looped Spatial Norms ===\n")
 cat("Window size: +/-", config$window_size, "days\n")
-cat("Output:", config$output_file, "\n\n")
+cat("Output:", config$output_file, "\n")
+cat("Posteriors:", config$posteriors_dir, "\n")
+cat("Cores:", config$n_cores, "(serial processing)\n\n")
+
+# Create posteriors directory if it doesn't exist
+if (!dir.exists(config$posteriors_dir)) {
+  dir.create(config$posteriors_dir, recursive = TRUE)
+  cat("Created posteriors directory\n")
+}
 
 # ==============================================================================
 # HELPER FUNCTIONS
@@ -223,7 +234,7 @@ cat("  Timeseries rows after filtering:", format(nrow(timeseries_df), big.mark="
 
 # Save filtered pixel list for consistency across scripts
 saveRDS(
-  valid_pixels %>% select(pixel_id, x, y, nlcd_code),
+  valid_pixels %>% dplyr::select(pixel_id, x, y, nlcd_code),
   file.path(hls_paths$gam_models, "valid_pixels_landcover_filtered.rds")
 )
 
@@ -270,22 +281,11 @@ cat("Output structure:", nrow(norms_df), "rows (",
 
 days_to_process <- 1:365
 
-# Initialize posteriors storage (will be populated during processing or resume)
-norms_posteriors <- list()
-
 if (file.exists(config$output_file)) {
   cat("Found existing results, checking for missing DOYs...\n")
   existing_norms <- readRDS(config$output_file)
 
-  # Load existing posteriors if available
-  posteriors_file <- file.path(hls_paths$gam_models, "doy_looped_norms_posteriors.rds")
-  if (file.exists(posteriors_file)) {
-    cat("  Loading existing posteriors...\n")
-    norms_posteriors <- readRDS(posteriors_file)
-    cat(sprintf("    Loaded posteriors for %d DOYs\n", length(norms_posteriors)))
-  }
-
-  # Find DOYs with all NAs (failed cores)
+  # Find DOYs with all NAs (failed processing)
   doy_status <- tapply(existing_norms$mean, existing_norms$yday, function(x) sum(!is.na(x)))
   missing_doys <- as.integer(names(doy_status[doy_status == 0]))
 
@@ -300,8 +300,11 @@ if (file.exists(config$output_file)) {
   }
 }
 
+# Note: Posteriors are saved incrementally to individual files during processing
+cat("Posteriors will be saved to:", config$posteriors_dir, "\n")
+
 # ==============================================================================
-# MAIN PROCESSING - PARALLEL
+# MAIN PROCESSING - SERIAL (with incremental posterior saving)
 # ==============================================================================
 
 if (length(days_to_process) > 0) {
@@ -323,73 +326,65 @@ if (length(days_to_process) > 0) {
 
     # Skip if insufficient data
     if (nrow(df_doy) < 50) {
-      return(list(day = day, result = NULL, n_obs = nrow(df_doy)))
+      return(list(day = day, ci = NULL, n_obs = nrow(df_doy)))
     }
 
-    # Fit spatial GAM and get predictions
+    # Fit spatial GAM and get predictions with posteriors
     result <- fit_doy_spatial_gam(df_doy, pixel_coords, config$n_posterior_sims)
 
-    return(list(day = day, result = result, n_obs = nrow(df_doy)))
+    if (is.null(result)) {
+      return(list(day = day, ci = NULL, n_obs = nrow(df_doy)))
+    }
+
+    # Save posteriors to individual file IMMEDIATELY (avoid memory buildup)
+    if (!is.null(result$sims)) {
+      posterior_file <- file.path(config$posteriors_dir, sprintf("doy_%03d.rds", day))
+      saveRDS(result$sims, posterior_file, compress = "xz")
+    }
+
+    # Return ONLY summary stats (ci), not the full sims
+    return(list(day = day, ci = result$ci, n_obs = nrow(df_doy)))
   }
 
-  # Run parallel processing
-  cat("Processing", length(days_to_process), "DOYs...\n\n")
+  # Run SERIAL processing with progress reporting
+  cat("Processing", length(days_to_process), "DOYs in serial mode...\n")
+  cat("Posteriors saved incrementally to:", config$posteriors_dir, "\n\n")
 
-  results_list <- mclapply(
-    days_to_process,
-    process_single_doy,
-    mc.cores = config$n_cores
-  )
+  n_fitted <- 0
+  n_failed <- 0
 
-  # Combine results into norms_df
-  cat("Combining results...\n")
+  for (i in seq_along(days_to_process)) {
+    day <- days_to_process[i]
 
-  # Initialize posteriors storage for NEW results from this run
-  # Structure: list by DOY, each containing matrix (pixels x simulations)
-  # - Key: DOY as string ("1" to "365")
-  # - Value: matrix with nrow=pixels, ncol=100 (posterior simulations)
-  # This will be merged with existing posteriors (if in resume mode)
-  norms_posteriors_new <- list()
+    # Progress reporting every 10 DOYs
+    if (i %% 10 == 0 || i == 1) {
+      cat(sprintf("  DOY %d/%d (day %d)...\n", i, length(days_to_process), day))
+    }
 
-  for (res in results_list) {
-    if (!is.null(res$result)) {
+    # Process this DOY
+    res <- process_single_doy(day)
+
+    # Update norms_df with summary stats
+    if (!is.null(res$ci)) {
       idx <- which(norms_df$yday == res$day)
+      norms_df$mean[idx] <- res$ci$mean
+      norms_df$lwr[idx] <- res$ci$lwr
+      norms_df$upr[idx] <- res$ci$upr
+      n_fitted <- n_fitted + 1
+    } else {
+      n_failed <- n_failed + 1
+    }
 
-      # Extract summary stats (backward compatibility)
-      if (is.list(res$result) && "ci" %in% names(res$result)) {
-        norms_df$mean[idx] <- res$result$ci$mean
-        norms_df$lwr[idx] <- res$result$ci$lwr
-        norms_df$upr[idx] <- res$result$ci$upr
-
-        # Store posteriors if available
-        if (!is.null(res$result$sims)) {
-          # Extract just the simulation columns (exclude metadata columns)
-          sim_cols <- grep("^X", names(res$result$sims), value = TRUE)
-          if (length(sim_cols) == 0) {
-            # If no X prefix, take all numeric columns after metadata
-            sim_cols <- setdiff(names(res$result$sims), c("X", "x", "y"))
-          }
-          norms_posteriors_new[[as.character(res$day)]] <-
-            as.matrix(res$result$sims[, sim_cols])
-        }
-      } else {
-        # Old format (no list structure) - for backward compatibility
-        norms_df$mean[idx] <- res$result$mean
-        norms_df$lwr[idx] <- res$result$lwr
-        norms_df$upr[idx] <- res$result$upr
-      }
+    # Checkpoint every N DOYs
+    if (i %% config$checkpoint_interval == 0) {
+      cat(sprintf("  Checkpoint at DOY %d/%d... ", i, length(days_to_process)))
+      saveRDS(norms_df, config$checkpoint_file, compress = "gzip")
+      cat("saved\n")
     }
   }
 
-  # Merge new posteriors with existing posteriors
-  if (length(norms_posteriors_new) > 0) {
-    cat(sprintf("  Merging %d new posterior DOYs with existing data...\n",
-                length(norms_posteriors_new)))
-    # Update existing posteriors with new ones
-    for (doy_key in names(norms_posteriors_new)) {
-      norms_posteriors[[doy_key]] <- norms_posteriors_new[[doy_key]]
-    }
-  }
+  cat(sprintf("\nProcessed %d DOYs: %d fitted, %d failed\n",
+              length(days_to_process), n_fitted, n_failed))
 
   elapsed_total <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
 } else {
@@ -410,19 +405,17 @@ cat("Saving final output...\n")
 cat("  Saving summary statistics (mean, lwr, upr)...\n")
 saveRDS(norms_df, config$output_file, compress = "gzip")
 
-# Save posteriors separately (for derivative calculations)
-posteriors_file <- file.path(hls_paths$gam_models, "doy_looped_norms_posteriors.rds")
-if (exists("norms_posteriors") && length(norms_posteriors) > 0) {
-  cat("  Saving posterior distributions...\n")
-  cat("    (this may take a few minutes due to compression)\n")
-  saveRDS(norms_posteriors, posteriors_file, compress = "xz")  # Maximum compression
-  cat(sprintf("  Posteriors saved: %s\n", posteriors_file))
+# Report on posteriors (saved incrementally during processing)
+posterior_files <- list.files(config$posteriors_dir, pattern = "^doy_.*\\.rds$", full.names = TRUE)
+if (length(posterior_files) > 0) {
+  cat(sprintf("  Posteriors saved: %d individual DOY files in %s\n",
+              length(posterior_files), config$posteriors_dir))
 
-  # Report file size
-  post_size_mb <- file.info(posteriors_file)$size / (1024^2)
-  cat(sprintf("    File size: %.1f MB\n", post_size_mb))
+  # Report total size
+  total_size_mb <- sum(file.info(posterior_files)$size) / (1024^2)
+  cat(sprintf("    Total size: %.1f MB\n", total_size_mb))
 } else {
-  cat("  No posteriors to save (may be resume mode with no new data)\n")
+  cat("  Warning: No posterior files found\n")
 }
 
 # Summary statistics

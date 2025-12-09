@@ -19,7 +19,10 @@
       "Bash(fi)",
       "Bash(./monitor_phase2.sh:*)",
       "Bash(docker stats:*)",
-      "Bash(Rscript:*)"
+      "Bash(Rscript:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(docker cp:*)"
     ],
     "defaultMode": "acceptEdits"
   }
