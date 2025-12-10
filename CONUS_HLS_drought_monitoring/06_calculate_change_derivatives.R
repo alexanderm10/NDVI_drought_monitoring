@@ -29,6 +29,7 @@ Sys.setenv(OPENBLAS_NUM_THREADS = 2)
 
 library(dplyr)
 library(parallel)
+library(data.table)
 
 # Source utility functions
 source("00_setup_paths.R")
@@ -333,17 +334,27 @@ for (yr in years) {
                       config$posteriors_dir)
   }, mc.cores = config$n_cores)
 
-  # Combine results
+  # Combine results (memory-optimized)
   cat("  Combining results...\n")
   valid_results <- doy_results[!sapply(doy_results, is.null)]
+
+  # Free original list immediately
+  rm(doy_results)
+  gc(verbose = FALSE)
 
   if (length(valid_results) == 0) {
     cat("  WARNING: No valid results for this year\n\n")
     next
   }
 
-  year_df <- do.call(rbind, valid_results)
+  # Use data.table for memory-efficient binding
+  year_df <- data.table::rbindlist(valid_results)
+  year_df <- as.data.frame(year_df)  # Convert back to data.frame
   year_df$year <- yr
+
+  # Free intermediate results
+  rm(valid_results)
+  gc(verbose = FALSE)
 
   # Calculate statistics
   n_complete <- nrow(year_df)
@@ -369,6 +380,10 @@ for (yr in years) {
 
   cat(sprintf("  Year %d: %.1f%% significant in %.1f minutes\n\n",
               yr, pct_significant, elapsed_time))
+
+  # Clean up memory before next year
+  rm(year_df)
+  gc(verbose = FALSE)
 }
 
 # ==============================================================================
