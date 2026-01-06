@@ -326,17 +326,28 @@ for (yr in years) {
 
   cat(sprintf("  Available DOYs: %d\n", length(available_doys)))
   cat(sprintf("  Processing with %d cores...\n", config$n_cores))
+  flush.console()
 
   # Process all DOYs in parallel
   doy_results <- mclapply(available_doys, function(yday) {
-    process_year_doy(yr, yday, config$window_sizes, valid_pixel_ids,
-                      config$baseline_posteriors_dir, config$year_posteriors_dir,
-                      config$posteriors_dir)
-  }, mc.cores = config$n_cores)
+    tryCatch({
+      process_year_doy(yr, yday, config$window_sizes, valid_pixel_ids,
+                        config$baseline_posteriors_dir, config$year_posteriors_dir,
+                        config$posteriors_dir)
+    }, error = function(e) {
+      cat(sprintf("ERROR in year %d, DOY %d: %s\n", yr, yday, e$message))
+      return(NULL)
+    })
+  }, mc.cores = config$n_cores, mc.preschedule = FALSE)
 
   # Combine results (memory-optimized)
-  cat("  Combining results...\n")
+  cat("  Parallel processing complete.\n")
+  cat(sprintf("  Received %d results from mclapply\n", length(doy_results)))
+
   valid_results <- doy_results[!sapply(doy_results, is.null)]
+  cat(sprintf("  Valid results: %d of %d DOYs (%.1f%%)\n",
+              length(valid_results), length(available_doys),
+              100 * length(valid_results) / length(available_doys)))
 
   # Free original list immediately
   rm(doy_results)
@@ -347,10 +358,24 @@ for (yr in years) {
     next
   }
 
+  cat("  Combining results into data frame...\n")
+
   # Use data.table for memory-efficient binding
-  year_df <- data.table::rbindlist(valid_results)
-  year_df <- as.data.frame(year_df)  # Convert back to data.frame
-  year_df$year <- yr
+  year_df <- tryCatch({
+    df <- data.table::rbindlist(valid_results)
+    df <- as.data.frame(df)  # Convert back to data.frame
+    df$year <- yr
+    cat(sprintf("  Combined: %s rows, %d columns\n",
+                format(nrow(df), big.mark = ","), ncol(df)))
+    df
+  }, error = function(e) {
+    cat(sprintf("  ERROR during combining: %s\n", e$message))
+    cat("  Attempting to save valid_results for debugging...\n")
+    debug_file <- file.path(config$output_dir, sprintf("debug_valid_results_%d.rds", yr))
+    saveRDS(valid_results, debug_file)
+    cat(sprintf("  Saved to: %s\n", debug_file))
+    stop(e$message)
+  })
 
   # Free intermediate results
   rm(valid_results)
