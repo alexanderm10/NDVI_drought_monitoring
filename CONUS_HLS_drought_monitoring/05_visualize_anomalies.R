@@ -234,15 +234,21 @@ cat("Creating animated map...\n")
 cat(sprintf("  Weekly frames: %d\n", length(unique(weekly_anoms$week_label))))
 cat(sprintf("  Total data points: %s\n", format(nrow(weekly_anoms), big.mark = ",")))
 
-# Create static map for each week (sample of 10 weeks for testing)
+# Create static map for each week (sample from specific years)
 cat("  Generating sample maps...\n")
 
-# Get representative weeks
+# Target years for sample maps (consistent with derivative visualizations)
+sample_years <- c(2013, 2016, 2020, 2021, 2023, 2024)
+
+# Get representative weeks from target years
 sample_weeks <- weekly_anoms %>%
-  group_by(week_label) %>%
-  summarise(n = n(), .groups = "drop") %>%
-  filter(n > 100000) %>%  # Only weeks with good coverage
-  slice_sample(n = min(10, nrow(.))) %>%
+  filter(year %in% sample_years) %>%
+  group_by(week_label, year) %>%
+  summarise(n_pixels = n(), .groups = "drop") %>%
+  filter(n_pixels > 100000) %>%  # Only weeks with good coverage
+  group_by(year) %>%
+  slice_head(n = 2) %>%  # 2 samples per year
+  ungroup() %>%
   pull(week_label)
 
 for (wk in sample_weeks) {

@@ -41,8 +41,8 @@ config <- list(
   # Output directory
   output_dir = "/data/figures/DERIVATIVES",
 
-  # Years to visualize (matching Script 05 data range: 2013-2024)
-  years = c(2013, 2016, 2020, 2024),  # Mix of drought and normal years
+  # Years to visualize (matching Script 05 sample years)
+  years = c(2013, 2016, 2020, 2021, 2023, 2024),  # Mix of drought and normal years
 
   # Time windows
   windows = c(3, 7, 14, 30),
@@ -313,13 +313,138 @@ for (yr in config$years) {
 }
 
 # ==============================================================================
+# COMBINED VISUALIZATIONS (ALL YEARS)
+# ==============================================================================
+
+cat("\n=== Creating Combined Visualizations ===\n")
+
+# Load all year data for combined plots
+all_years_data <- list()
+
+for (yr in config$years) {
+  deriv_file <- file.path(config$derivatives_dir, sprintf("derivatives_%d.rds", yr))
+  if (file.exists(deriv_file)) {
+    cat(sprintf("  Loading %d...\n", yr))
+    deriv_df <- readRDS(deriv_file)
+    deriv_df$year <- yr
+
+    # Join with coordinates
+    deriv_spatial <- deriv_df %>%
+      left_join(valid_pixels_df, by = "pixel_id")
+
+    all_years_data[[as.character(yr)]] <- deriv_spatial
+    rm(deriv_df, deriv_spatial)
+    gc(verbose = FALSE)
+  }
+}
+
+combined_data <- bind_rows(all_years_data)
+rm(all_years_data)
+gc(verbose = FALSE)
+
+cat(sprintf("  Combined data: %s rows\n", format(nrow(combined_data), big.mark = ",")))
+
+# Calculate combined time series
+combined_ts <- combined_data %>%
+  mutate(date = as.Date(sprintf("%d-%03d", year, yday), format = "%Y-%j")) %>%
+  group_by(date, yday, year, window) %>%
+  summarise(
+    mean_anomaly = mean(anomaly_change_mean, na.rm = TRUE),
+    se_anomaly = sd(anomaly_change_mean, na.rm = TRUE) / sqrt(n()),
+    lwr_anomaly = mean_anomaly - 1.96 * se_anomaly,
+    upr_anomaly = mean_anomaly + 1.96 * se_anomaly,
+    pct_significant = 100 * sum(significant, na.rm = TRUE) / n(),
+    .groups = "drop"
+  ) %>%
+  mutate(window_label = sprintf("%d-day", window))
+
+# 1. Combined time series (all years, all windows)
+cat("  Creating combined time series...\n")
+
+p_combined_ts <- ggplot(combined_ts, aes(x = date, color = window_label, fill = window_label)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+  geom_ribbon(aes(ymin = lwr_anomaly, ymax = upr_anomaly),
+              alpha = 0.15, color = NA) +
+  geom_line(aes(y = mean_anomaly), linewidth = 0.6) +
+  scale_color_brewer(palette = "Set1", name = "Time Window") +
+  scale_fill_brewer(palette = "Set1", name = "Time Window") +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  labs(
+    title = sprintf("Change Rate Anomalies: All Years (%d-%d)",
+                    min(config$years), max(config$years)),
+    subtitle = "Domain average with 95% confidence intervals",
+    x = "Date",
+    y = "Change Rate Anomaly (NDVI/day)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "white", colour = NA),
+    panel.background = element_rect(fill = "white", colour = NA),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+
+combined_ts_file <- file.path(config$output_dir, "timeseries_combined_all_years.png")
+ggsave(combined_ts_file, p_combined_ts, width = 14, height = 7, dpi = 200, bg = "white")
+
+# 2. Faceted time series by year (one window at a time for clarity)
+cat("  Creating faceted time series...\n")
+
+# Month breaks for x-axis
+month_breaks <- c(1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335)
+month_labels <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+for (win in config$windows) {
+  win_data <- combined_ts %>% filter(window == win)
+
+  p_faceted <- ggplot(win_data, aes(x = yday)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+    geom_ribbon(aes(ymin = lwr_anomaly, ymax = upr_anomaly),
+                fill = "skyblue", alpha = 0.3) +
+    geom_line(aes(y = mean_anomaly), color = "darkblue", linewidth = 0.6) +
+    facet_wrap(~ year, ncol = 3) +
+    scale_x_continuous(breaks = month_breaks, labels = month_labels) +
+    labs(
+      title = sprintf("Change Rate Anomalies by Year (%d-day window)", win),
+      subtitle = "Seasonal progression for each year",
+      x = NULL,
+      y = "Change Rate Anomaly (NDVI/day)"
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank(),
+      strip.text = element_text(face = "bold"),
+      plot.background = element_rect(fill = "white", colour = NA),
+      panel.background = element_rect(fill = "white", colour = NA),
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+
+  faceted_file <- file.path(config$output_dir,
+                           sprintf("timeseries_faceted_win%02d.png", win))
+  ggsave(faceted_file, p_faceted, width = 12, height = 8, dpi = 200, bg = "white")
+}
+
+cat(sprintf("  Saved combined time series and %d faceted plots\n", length(config$windows)))
+
+# Clean up
+rm(combined_data, combined_ts)
+gc(verbose = FALSE)
+
+# ==============================================================================
 # SUMMARY
 # ==============================================================================
 
 cat("\n=== Visualization Complete ===\n")
 cat(sprintf("Output directory: %s\n", config$output_dir))
+cat(sprintf("Years visualized: %s\n", paste(config$years, collapse = ", ")))
 cat("\nCreated:\n")
-cat("  - Sample maps for each time window\n")
-cat("  - Maps of significant changes only\n")
-cat("  - Time series of change rate anomalies\n")
-cat("  - Percent significant change over time\n")
+cat("  - Sample maps for each time window (per year)\n")
+cat("  - Maps of significant changes only (per year)\n")
+cat("  - Individual time series per year (4 windows overlaid)\n")
+cat("  - Percent significant change over time (per year)\n")
+cat("  - Combined time series (all years, 4 windows)\n")
+cat("  - Faceted time series (one per window, showing all years)\n")
