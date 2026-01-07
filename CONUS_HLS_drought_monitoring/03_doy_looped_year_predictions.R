@@ -44,6 +44,13 @@ config <- list(
   # Minimum data requirement
   min_pixel_coverage = 0.33,  # Require 33% of pixels to have data
 
+  # SPATIAL RESOLUTION PARAMETER
+  # Modified from Juliana's approach for MIDWEST scale (see SPATIAL_SCALE_ANALYSIS.md)
+  # Juliana (Chicago 100km domain): k~30 → 18km resolution
+  # MIDWEST (2000km domain): k=150 → 161km resolution (ecosystem scale)
+  # Rationale: Matches county/watershed scale for ecosystem drought impacts
+  spatial_k = 150,
+
   # Output (year-by-year files)
   output_dir = file.path(hls_paths$gam_models, "modeled_ndvi"),
   stats_file = file.path(hls_paths$gam_models, "modeled_ndvi_stats.rds"),
@@ -93,12 +100,14 @@ get_trailing_window <- function(year, target_day, window_size = 16) {
 #' @param df_subset Data frame with NDVI, norm, x, y for this window
 #' @param pred_grid Prediction grid (with norm values)
 #' @param n_sims Number of posterior simulations
+#' @param spatial_k Basis dimension for spatial smooth (default 150)
 #' @return List with predictions and model stats
-fit_year_spatial_gam <- function(df_subset, pred_grid, n_sims = 100) {
+fit_year_spatial_gam <- function(df_subset, pred_grid, n_sims = 100, spatial_k = 150) {
 
   # Fit spatial GAM with norm as covariate
+  # spatial_k controls resolution: higher k = finer spatial detail
   gam_model <- tryCatch({
-    gam(NDVI ~ norm + s(x, y) - 1, data = df_subset)
+    gam(NDVI ~ norm + s(x, y, k = spatial_k) - 1, data = df_subset)
   }, error = function(e) {
     return(NULL)
   })
@@ -281,7 +290,7 @@ for (yr in years_to_process) {
       pred_grid <- pred_grid[, c("pixel_id", "x", "y", "norm")]
 
       # Fit model
-      fit_result <- fit_year_spatial_gam(df_subset, pred_grid, config$n_posterior_sims)
+      fit_result <- fit_year_spatial_gam(df_subset, pred_grid, config$n_posterior_sims, config$spatial_k)
 
       # Save posteriors IMMEDIATELY to avoid memory buildup (like script 02)
       if (!is.null(fit_result$result) && !is.null(fit_result$result$sims)) {
