@@ -45,11 +45,10 @@ config <- list(
   min_pixel_coverage = 0.33,  # Require 33% of pixels to have data
 
   # SPATIAL RESOLUTION PARAMETER
-  # Modified from Juliana's approach for MIDWEST scale (see SPATIAL_SCALE_ANALYSIS.md)
-  # Juliana (Chicago 100km domain): k~30 → 18km resolution
-  # MIDWEST (2000km domain): k=150 → 161km resolution (ecosystem scale)
-  # Rationale: Matches county/watershed scale for ecosystem drought impacts
-  spatial_k = 150,
+  # Testing k=80 to balance spatial resolution with data sparsity
+  # Previous tests: k=30 (stable), k=150 (overfitting)
+  # k=80 provides improved resolution without overfitting issues
+  spatial_k = 80,
 
   # Output (year-by-year files)
   output_dir = file.path(hls_paths$gam_models, "modeled_ndvi"),
@@ -200,6 +199,12 @@ cat("  Norms loaded:", nrow(norms_df), "pixel-DOY combinations\n")
 
 # Get unique years and pixels
 years <- sort(unique(timeseries_df$year))
+
+# TEST RUN: Only process specific years for k=80 comparison
+test_years <- c(2017, 2020, 2022, 2024)
+years <- years[years %in% test_years]
+cat("TEST MODE: Processing only selected years:", paste(years, collapse=", "), "\n")
+
 n_pixels <- length(unique(timeseries_df$pixel_id))
 
 cat("  Years:", min(years), "-", max(years), "(", length(years), "years)\n")
