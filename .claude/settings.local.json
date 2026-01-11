@@ -22,7 +22,12 @@
       "Bash(Rscript:*)",
       "Bash(ls:*)",
       "Bash(find:*)",
-      "Bash(docker cp:*)"
+      "Bash(docker cp:*)",
+      "Skill(session-start)",
+      "Skill(session-start:*)",
+      "Read(//mnt/malexander/datasets/ndvi_monitor/figures/**)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ],
     "defaultMode": "acceptEdits"
   }
