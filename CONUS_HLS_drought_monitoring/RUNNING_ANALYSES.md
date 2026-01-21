@@ -1,84 +1,82 @@
 # Currently Running Analyses
 
-**Updated**: 2026-01-11 14:50 CST
+**Updated**: 2026-01-21 16:30 CST
 
 ## Active Processes
 
-### Script 03: k=80 Spatial Resolution Test
+### 1. Full Dataset Redownload (cloud_cover_max=100%)
+- **Script**: redownload_all_years_cloud100.R
 - **Container**: conus-hls-drought-monitor
-- **Started**: 2026-01-11 14:46:26
-- **Log**: `03_k80_test_20260111_144626.log`
-- **Processing**: Years 2017, 2020, 2022, 2024 (4 years total)
-- **Configuration**:
-  - Spatial basis k=80 (middle ground between k=30 and k=150)
-  - 125,798 pixels
-  - 3 cores for parallel processing
-  - 365 DOYs per year
-- **Expected completion**: ~32-40 hours (approx. Jan 12 evening/Jan 13 morning)
+- **Started**: 2026-01-21 07:24
+- **Log**: `/data/redownload_cloud100.log`
+- **Workers**: 4 parallel workers @ 47-66% CPU
+- **Progress**: 2013 data - 8,107 NDVI files so far
+- **Expected**: Days to weeks (processing 2013-2024)
 - **Monitor**:
   ```bash
-  docker exec conus-hls-drought-monitor tail -f /workspace/03_k80_test_20260111_144626.log
+  docker exec conus-hls-drought-monitor tail -f /data/redownload_cloud100.log
+  # Check file counts:
+  for yr in 2013 2014 2015; do echo -n "$yr: "; ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l; done
   ```
 
-### Backups Created
-Before starting k=80 test, backed up existing k=30 versions:
-- `/mnt/malexander/datasets/ndvi_monitor/gam_models/modeled_ndvi/modeled_ndvi_2017_k30_backup.rds`
-- `/mnt/malexander/datasets/ndvi_monitor/gam_models/modeled_ndvi/modeled_ndvi_2020_k30_backup.rds`
-- `/mnt/malexander/datasets/ndvi_monitor/gam_models/modeled_ndvi/modeled_ndvi_2022_k30_backup.rds`
-- `/mnt/malexander/datasets/ndvi_monitor/gam_models/modeled_ndvi/modeled_ndvi_2024_k30_backup.rds`
+### 2. k=50 Spatial Basis Test
+- **Script**: 03_test_k50_year_predictions.R
+- **Container**: conus-hls-k50-test
+- **Started**: 2026-01-21 14:30
+- **Log**: `/data/test_k50.log`
+- **Workers**: 3 parallel workers @ 117-119% CPU, ~16-19GB RAM each
+- **Progress**: Processing Year 2017 (first of 4 test years)
+- **Test years**: 2017, 2020, 2022, 2024
+- **Expected**: 2-3 days for all 4 years
+- **Monitor**:
+  ```bash
+  docker exec conus-hls-k50-test tail -f /data/test_k50.log
+  docker exec conus-hls-k50-test ps aux | grep "R --no-save"
+  ```
 
-## Purpose of k=80 Test
+## Completed This Session
 
-Testing k=80 to find optimal spatial resolution:
-- **k=30** (baseline): Stable, no overfitting, but lower spatial resolution
-- **k=150** (tested Jan 7): Severe overfitting - 5,407 negative NDVI predictions due to data sparsity (~13 obs/pixel/year)
-- **k=80** (current): Middle ground - 2.67x better resolution than k=30, less overfitting risk than k=150
+1. **2018 parallel aggregation test** - COMPLETE
+   - Result: 13.9 obs/pixel (vs 11.3 baseline) = 23% improvement
+   - 36,402 scenes processed, 1.95M final observations
+   - Output: `/data/gam_models/test_2018_parallel_timeseries.csv`
 
-## Completed Today
+2. **Created production aggregation script** with disk checkpointing
+   - File: `01_aggregate_to_4km_parallel.R`
+   - Writes incrementally to disk instead of holding all in RAM
 
-- ✅ Analyzed k=150 test results from Jan 7
-- ✅ Identified overfitting issues (negative NDVI, doubled uncertainty)
-- ✅ Configured Script 03 for k=80 test
-- ✅ Created backups of k=30 versions
-- ✅ Started k=80 test run on 4 representative years
-- ✅ Committed changes to git (commit a0895e2)
+## Session Context
 
-## Next Steps (After k=80 Completion)
+Testing data density improvements:
+- Removed cloud_cover_max=40% pre-filter → 7x more scenes available
+- After Fmask pixel-level filtering: 23% more obs/pixel (13.9 vs 11.3)
+- Testing k=50 spatial basis (between k=30 stable and k=80 overfitting)
 
-1. **Compare k=80 results to k=30 and k=150**:
-   - Check for negative NDVI predictions
-   - Compare uncertainty widths
-   - Evaluate spatial pattern differences
-   - Assess model statistics (R², RMSE)
+## When k=50 Test Completes
 
-2. **Decision point**:
-   - If k=80 performs well: Rerun all years 2013-2024 with k=80
-   - If k=80 shows issues: Revert to k=30 or test intermediate value (k=50, k=60)
+1. Check for negative predictions:
+   ```r
+   results <- readRDS("/data/gam_models/modeled_ndvi_k50_test/modeled_ndvi_2017.rds")
+   sum(results$mean < 0, na.rm=TRUE)
+   ```
+2. If stable (few negatives), k=50 is viable
+3. If overfitting, fall back to k=30
 
-3. **Alternative approach** (if needed):
-   - Investigate multi-year data pooling to increase obs/pixel
-   - Test adaptive k based on pixel data density
+## Quick Commands for Next Session
 
-## Monitoring Commands
-
-Check progress:
 ```bash
-# View log tail
-docker exec conus-hls-drought-monitor tail -f /workspace/03_k80_test_20260111_144626.log
+# Check container status
+docker ps --filter "name=conus"
 
-# Check for output files
-ls -lth /mnt/malexander/datasets/ndvi_monitor/gam_models/modeled_ndvi/
+# Check k=50 test progress
+docker exec conus-hls-k50-test tail -50 /data/test_k50.log
+docker exec conus-hls-k50-test ps aux | grep "R --no-save"
 
-# Check process
-docker exec conus-hls-drought-monitor ps aux | grep Rscript
+# Check redownload progress
+docker exec conus-hls-drought-monitor tail -20 /data/redownload_cloud100.log
+for yr in 2013 2014 2015 2016; do echo -n "$yr: "; ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l; done
 
-# Container status
-docker ps | grep conus-hls-drought-monitor
+# If processes died, check logs for errors
+docker logs conus-hls-k50-test 2>&1 | tail -50
+docker logs conus-hls-drought-monitor 2>&1 | tail -50
 ```
-
-## Notes
-
-- Container left running to allow analysis to complete
-- Do NOT stop container until analysis completes
-- Analysis is memory-intensive but stable with 3 cores
-- Each year takes approximately 8-10 hours to process
