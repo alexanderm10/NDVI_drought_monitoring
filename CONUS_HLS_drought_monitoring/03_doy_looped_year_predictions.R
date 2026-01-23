@@ -45,10 +45,13 @@ config <- list(
   min_pixel_coverage = 0.33,  # Require 33% of pixels to have data
 
   # SPATIAL RESOLUTION PARAMETER
-  # Testing k=80 to balance spatial resolution with data sparsity
-  # Previous tests: k=30 (stable), k=150 (overfitting)
-  # k=80 provides improved resolution without overfitting issues
-  spatial_k = 80,
+  # k=50 selected based on testing (Jan 2026):
+  #   - k=30: stable but limited spatial resolution
+  #   - k=50: stable (0.11% negative predictions), good balance
+  #   - k=80: overfitting (207K negative predictions)
+  #   - k=150: severe overfitting
+  # k=50 test results: R²=0.698, RMSE=0.089, NormCoef=0.995
+  spatial_k = 50,
 
   # Output (year-by-year files)
   output_dir = file.path(hls_paths$gam_models, "modeled_ndvi"),
@@ -200,10 +203,8 @@ cat("  Norms loaded:", nrow(norms_df), "pixel-DOY combinations\n")
 # Get unique years and pixels
 years <- sort(unique(timeseries_df$year))
 
-# TEST RUN: Only process specific years for k=80 comparison
-test_years <- c(2017, 2020, 2022, 2024)
-years <- years[years %in% test_years]
-cat("TEST MODE: Processing only selected years:", paste(years, collapse=", "), "\n")
+# PRODUCTION MODE: Process all years
+# (Test mode removed - k=50 validated on 2017, 2020, 2022, 2024)
 
 n_pixels <- length(unique(timeseries_df$pixel_id))
 
