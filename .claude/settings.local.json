@@ -29,7 +29,9 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(# Check the download configuration - what bbox was actually used? grep -A 20 \"\"acquire_conus_data\\\\|bbox\\\\|Midwest\"\" CONUS_HLS_drought_monitoring/01a_midwest_data_acquisition_parallel.R)",
-      "Bash(docker inspect:*)"
+      "Bash(docker inspect:*)",
+      "Bash(git add:*)",
+      "Bash(docker run:*)"
     ],
     "defaultMode": "acceptEdits"
   }
