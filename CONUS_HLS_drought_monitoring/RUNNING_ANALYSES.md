@@ -1,14 +1,16 @@
 # Currently Running Analyses
 
-**Updated**: 2026-01-23 21:00 CST
+**Updated**: 2026-01-29 15:00 CST
 
-## Status: PAUSED (remote shutdown requested)
+## Status: RUNNING (download in progress)
 
-### Redownload Progress When Stopped
-- **Last position**: March 2014 (just started)
-- **2013**: COMPLETE - 25,039 NDVI files (includes new cloud_cover_max=100% scenes)
-- **2014**: Partial - ~11,678 files (Jan-Feb complete, March in progress)
-- **2015-2024**: Not yet reprocessed (still have old cloud_cover_max=40% data)
+### Redownload Progress
+- **Current position**: 2016 September (in progress)
+- **2013**: COMPLETE - 25,107 NDVI files
+- **2014**: COMPLETE - 34,487 NDVI files
+- **2015**: COMPLETE - 33,796 NDVI files
+- **2016**: IN PROGRESS - 26,152 files (Sep in progress, ~3 months remaining)
+- **2017-2024**: Pending
 
 ### File counts at shutdown:
 ```
@@ -44,9 +46,33 @@ The script has **resume capability** - it checks if each NDVI file exists before
 
 ---
 
-## Completed This Session (Jan 23, 2026)
+## Completed This Session (Jan 29, 2026)
 
-### 1. k=50 Spatial Basis Test - COMPLETE
+### 1. Comprehensive Methodology Documentation - COMPLETE
+- **METHODOLOGY.md**: 400+ line complete end-to-end pipeline documentation
+  - Data acquisition with cloud_cover_max=100% strategy
+  - Spatial aggregation (30m → 4km)
+  - Statistical modeling (GAMs with k=50)
+  - Operational workflows (monthly updates + annual baseline)
+- **OPERATIONAL_WORKFLOW.md**: User guide for monthly automation
+- **Updated GAM_METHODOLOGY.md**: Cross-referenced with main methodology
+- One-paragraph summary for presentations/proposals
+
+### 2. Monthly Update Automation - COMPLETE
+- **00_monthly_update.R**: Automated monthly data processing script
+  - Downloads new month's HLS scenes
+  - Aggregates to 4km
+  - Refits current year GAMs
+  - Recalculates anomalies
+  - Runtime: ~4-6 hours per month
+- **monthly_update.sh**: Bash wrapper for cron automation
+- Ready to deploy once historical data complete
+
+### 3. Log File Cleanup - COMPLETE
+- Removed all test logs (21 files, ~204MB freed)
+- Cleaned up repo for production readiness
+
+### 4. k=50 Spatial Basis Test - COMPLETE (from previous session)
 - **Result**: k=50 is stable (0.11% negative predictions)
 - Test years: 2017, 2020, 2022, 2024
 - Model stats: R²=0.698, RMSE=0.089, NormCoef=0.995
