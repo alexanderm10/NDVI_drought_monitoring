@@ -1,12 +1,14 @@
 # CONUS HLS-NDVI Drought Monitoring GAM Methodology
 
+> **Note:** This document focuses on the statistical modeling (GAM) components of the drought monitoring system. For the complete end-to-end pipeline including data acquisition, aggregation, and operational workflows, see **METHODOLOGY.md**.
+
 ## Overview
 Pixel-by-pixel Generalized Additive Model (GAM) analysis for vegetation stress detection using Harmonized Landsat Sentinel-2 (HLS) NDVI data at 4km resolution across the Contiguous United States (CONUS).
 
 **Spatial Coverage:** CONUS
 **Spatial Resolution:** 4km (aggregated from 30m HLS)
 **Temporal Coverage:** 2013-present
-**Update Frequency:** Biweekly incremental updates
+**Update Frequency:** Monthly incremental updates
 **Baseline Window:** Rolling complete-years-only (currently 2013-2024)
 
 ---
@@ -22,8 +24,16 @@ Pixel-by-pixel Generalized Additive Model (GAM) analysis for vegetation stress d
 - **Native Resolution:** 30m
 - **Bands Used:** Red (B04), NIR (B05/B8A), Fmask (quality)
 
-### Quality Filtering (Fmask)
-Scenes excluded if Fmask flags indicate:
+### Cloud Cover Strategy
+
+**Scene-Level Filter:**
+- `cloud_cover_max = 100%` (download all scenes regardless of cloud cover)
+- **Rationale:** 7x more scenes available vs traditional 40% threshold
+- **Benefit:** +23% valid observations after pixel-level filtering (validated on 2018 data)
+
+**Pixel-Level Quality Filtering (Fmask):**
+
+Pixels excluded if Fmask flags indicate:
 - Bit 1: Cloud (2)
 - Bit 2: Adjacent to cloud (4)
 - Bit 3: Cloud shadow (8)
@@ -40,6 +50,8 @@ quality_mask <- (
   (fmask %% 64) < 32    # Bit 5 not set (water)
 )
 ```
+
+See **METHODOLOGY.md** Section 1.2 for full cloud cover filtering rationale and validation results.
 
 ---
 
@@ -100,42 +112,40 @@ Where:
 
 ---
 
-### Phase 3: Year-Specific Splines with Edge Padding
+### Phase 3: Year-Specific Splines with Spatial Smoothing
 
-**Purpose:** Characterize annual phenology for each year independently
+**Purpose:** Characterize annual phenology for each year independently, incorporating spatial patterns
 
-**Edge Padding (31-day extensions):**
-To prevent boundary artifacts where GAM has no information beyond year edges:
-
-```r
-# Add 31 days from previous December
-prev_dec <- data %>%
-  filter(year == target_year - 1, yday > 334) %>%
-  mutate(year = target_year, yday = yday - 366)  # Negative DOY: -30 to 0
-
-# Add 31 days from next January
-next_jan <- data %>%
-  filter(year == target_year + 1, yday <= 31) %>%
-  mutate(year = target_year, yday = yday + 365)  # Extended DOY: 366-396
-
-# Combine with target year data
-year_data_padded <- bind_rows(target_year_data, prev_dec, next_jan)
-```
+**Method:** DOY-by-DOY processing with trailing 16-day window
 
 **GAM Specification:**
 ```r
-# For each pixel_id × year combination:
-gam_year <- gam(NDVI ~ s(yday, k=12), data=year_data_padded)
+# For each DOY, using trailing 16-day window:
+gam_year <- gam(NDVI ~ norm + s(x, y, k=50) - 1, data=trailing_window)
 ```
 
-**Prediction:**
-- Fit GAM on padded data (yday range: ~-30 to ~396)
-- Predict only for yday 1-365 (discard padding in output)
+**Parameters:**
+- `norm`: Offset from baseline climatology (from Phase 2)
+- `s(x, y, k=50)`: Spatial smooth with 50 basis functions
+  - **Spatial basis selection:** k=50 validated (Jan 2026)
+  - **Test results:** R²=0.698, RMSE=0.089, 0.11% negative predictions
+  - **Rationale:** Balances spatial detail vs overfitting
+- **Trailing window:** 16 days of observations prior to target DOY
+  - Provides temporal context without introducing future information
+  - Handles irregular satellite revisit patterns
+
+**Processing Strategy:**
+- Year-by-year: Process each year (2013-2024) separately
+- DOY-by-DOY: Within each year, process each DOY (1-365) separately
+- Parallelization: 3 cores (conservative for 96GB RAM)
+- Incremental posterior saving: Prevents memory buildup
 
 **Output:**
 ```
 pixel_id, year, yday, year_mean, year_se
 ```
+
+**Runtime:** ~1.5-2 days for all years (2013-2024)
 
 ---
 
@@ -189,18 +199,24 @@ pixel_id, year, yday, anomaly, anomaly_se, z_score, p_value
 
 ## Operational Update Workflow
 
-### Biweekly Incremental Updates
+### Monthly Incremental Updates
+
+**Trigger:** First week of each month (after previous month completes)
 
 **Steps:**
-1. Download new HLS scenes from NASA (scenes from last 14 days)
+1. Download new HLS scenes from NASA (previous month's data)
 2. Apply Fmask quality filtering
 3. Calculate NDVI for new scenes
-4. Aggregate new scenes to 4km grid (append to timeseries)
-5. Refit year-specific GAMs for current year only (using updated edge padding from next year if available)
-6. Recalculate anomalies for current year against existing climatology
-7. Update drought classifications for current year
+4. Aggregate new scenes to 4km grid (script: `01_aggregate_to_4km_parallel.R YYYY`)
+5. Update current year timeseries (append new data)
+6. Refit year-specific GAMs for current year only (script: `03_doy_looped_year_predictions.R --year=YYYY`)
+7. Recalculate anomalies for current year against existing climatology (script: `04_calculate_anomalies.R --year=YYYY`)
 
-**DO NOT recalculate climatology** (remains stable until next complete year)
+**DO NOT recalculate climatology** (remains stable until annual update)
+
+**Runtime:** ~4-6 hours total per monthly update
+
+See **METHODOLOGY.md** Section 5.2 for detailed operational procedures.
 
 ### Annual Climatology Update
 
@@ -273,10 +289,23 @@ pixel_id, year, yday, anomaly, anomaly_se, z_score, p_value
 - Provides context for phenological transitions across year boundaries
 - Empirically validated in Juliana's Chicago analysis
 
-### Why k=12 knots?
+### Why k=12 knots (baseline climatology)?
 - Captures seasonal phenology (spring green-up, summer peak, fall senescence)
 - Sufficient flexibility without overfitting
 - Standard choice for annual vegetation cycles
+- Cyclic basis ensures smooth year boundaries
+
+### Why k=50 spatial basis (year-specific models)?
+- **Tested options:** k=30, 50, 80, 150 (Jan 2026)
+- **k=50 validation results:**
+  - R² = 0.698 (good fit)
+  - RMSE = 0.089 (low error)
+  - Negative predictions: 0.11% (negligible overfitting)
+  - Normalization coefficient: 0.995 (well-calibrated)
+- **Comparison:**
+  - k=30: Stable but underfits spatial patterns
+  - k=80, k=150: Overfitting risk (more negative predictions)
+- **Rationale:** k=50 balances spatial detail and model stability
 
 ### Why trust NASA HLS harmonization?
 - NASA applies rigorous BRDF normalization
@@ -314,6 +343,12 @@ pixel_id, year, yday, anomaly, anomaly_se, z_score, p_value
 ---
 
 ## Version History
+
+**v2.0 (2026-01-29):**
+- Updated spatial basis: k=50 (validated Jan 2026)
+- Updated cloud cover strategy: 100% scene-level threshold
+- Clarified operational vs development workflows
+- Cross-referenced with METHODOLOGY.md
 
 **v1.0 (2025-01-10):**
 - Initial methodology documentation
