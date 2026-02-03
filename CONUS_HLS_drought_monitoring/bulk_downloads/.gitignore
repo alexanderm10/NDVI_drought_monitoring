@@ -1,0 +1,9 @@
+# Ignore downloaded raw data
+raw/
+
+# Ignore log files
+logs/*.log
+
+# Keep directory structure
+!logs/.gitkeep
+!raw/.gitkeep

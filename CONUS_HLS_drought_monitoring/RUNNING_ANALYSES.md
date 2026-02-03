@@ -1,16 +1,20 @@
 # Currently Running Analyses
 
-**Updated**: 2026-01-29 15:00 CST
+**Updated**: 2026-02-03 09:35 CST
 
-## Status: RUNNING (download in progress)
+## Status: RUNNING (parallel download in progress)
 
 ### Redownload Progress
-- **Current position**: 2016 September (in progress)
+- **Current position**: 2017 April (in progress)
 - **2013**: COMPLETE - 25,107 NDVI files
-- **2014**: COMPLETE - 34,487 NDVI files
-- **2015**: COMPLETE - 33,796 NDVI files
-- **2016**: IN PROGRESS - 26,152 files (Sep in progress, ~3 months remaining)
-- **2017-2024**: Pending
+- **2014**: COMPLETE - 34,490 NDVI files
+- **2015**: COMPLETE - 34,786 NDVI files
+- **2016**: COMPLETE - 36,646 NDVI files
+- **2017**: IN PROGRESS - 15,632 files (April in progress)
+- **2018**: 36,402 files (appears complete)
+- **2019**: 5,323 files (partial)
+- **2020**: 6,292 files (partial)
+- **2021-2024**: Pending
 
 ### File counts at shutdown:
 ```
@@ -46,7 +50,55 @@ The script has **resume capability** - it checks if each NDVI file exists before
 
 ---
 
-## Completed This Session (Jan 29, 2026)
+## Completed This Session (Feb 3, 2026)
+
+### 1. Morning Status Check & Aggregation Verification - COMPLETE
+- **Download Progress**: Container running 10 days, advanced from Sept 2016 to April 2017
+  - 2014-2016 completed since last session (+~70K files)
+  - 2018 appears complete (36,402 files)
+  - 2019-2020 partially downloaded
+- **Aggregation Completeness Check**: Verified 2013-2016 are fully aggregated and correct
+  - Confirmed all source tiles properly processed
+  - Verified "missing" dates are tiles outside Midwest bbox (California, Carolinas, Florida)
+  - All 4 years have consistent ~142K pixel coverage
+  - Zero missing values across all years
+  - Data quality metrics all within expected ranges
+- **Decision**: Wait for full year downloads before aggregating 2017+ (aggregation is faster than download)
+
+### 2. Bulk Download System Setup - COMPLETE
+- **Created**: `bulk_downloads/` directory with organized structure
+- **Modified getHLS.sh** to download only B04, B05, B8A, Fmask (60-70% data reduction)
+- **NDVI processing script**: Converts raw bands → NDVI format expected by current workflow
+- **Tile list**: 1,209 Midwest MGRS tiles (from 2016 complete data)
+- **Integration**: Saves to same location → current Docker script automatically skips
+- **Documentation**: QUICKSTART.md, README.md, getHLS_bands_README.md
+
+### 3. Parallel Bulk Download - LAUNCHED (Started 09:32 CST)
+- **Status**: RUNNING - querying NASA CMR for 2019 granules
+- **Years**: 2019-2024 (all 6 years, sequential processing)
+- **Method**: Direct MGRS tile targeting, 10 parallel download workers
+- **Expected speed**: 5-10x faster than CONUS-wide bbox search
+- **Logs**: `bulk_downloads/logs/{download,process}_YYYY.log`
+- **Master log**: `bulk_downloads/logs/all_years_master.log`
+
+**Monitor**:
+```bash
+# Overall progress
+tail -f bulk_downloads/logs/all_years_master.log
+
+# Current year detail
+tail -f bulk_downloads/logs/download_2019.log
+
+# File counts
+for yr in 2019 2020 2021 2022 2023 2024; do
+  echo -n "$yr: "
+  ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l
+done
+```
+
+---
+
+## Completed Previous Session (Jan 29, 2026)
 
 ### 1. Comprehensive Methodology Documentation - COMPLETE
 - **METHODOLOGY.md**: 400+ line complete end-to-end pipeline documentation
@@ -99,12 +151,32 @@ The script has **resume capability** - it checks if each NDVI file exists before
 
 ---
 
+## Aggregation Status (2013-2016)
+
+**Completeness Check (Feb 3, 2026): ALL YEARS VERIFIED COMPLETE ✓**
+
+| Year | Observations | Pixels | Obs/Pixel | Days | Coverage | Sensors | File Size |
+|------|-------------|--------|-----------|------|----------|---------|-----------|
+| 2013 | 1,270,784 | 142,099 | 8.9 | 222 | 85.1% | L30 only | 6.5 MB |
+| 2014 | 1,583,381 | 141,769 | 11.2 | 320 | 87.7% | L30 only | 8.3 MB |
+| 2015 | 1,616,606 | 142,466 | 11.3 | 305 | 83.8% | L30 97%, S30 3% | 8.5 MB |
+| 2016 | 2,139,261 | 142,111 | 15.1 | 291 | 80.6% | L30 57%, S30 43% | 12 MB |
+
+**Notes:**
+- All source files properly aggregated (11-18% of dates with no aggregated data are tiles outside Midwest bbox - verified correct)
+- Zero missing values in all years
+- NDVI ranges reasonable: -1 to 1
+- Increasing obs/pixel (8.9→15.1) as Sentinel-2 comes online in 2015-2016
+- Ready to aggregate 2017+ once downloads complete
+
+---
+
 ## Pipeline Status
 
 | Step | Script | Status |
 |------|--------|--------|
-| Download | `redownload_all_years_cloud100.R` | PAUSED at March 2014 |
-| Aggregation | `01_aggregate_to_4km_parallel.R` | 2013 COMPLETE, 2014+ pending |
+| Download | `redownload_all_years_cloud100.R` | RUNNING - April 2017 |
+| Aggregation | `01_aggregate_to_4km_parallel.R` | 2013-2016 COMPLETE & VERIFIED, 2017+ pending download |
 | Norms | `02_doy_looped_norms.R` | Needs re-run after all years aggregated |
 | Year Predictions | `03_doy_looped_year_predictions.R` | Updated to k=50, ready to run |
 
