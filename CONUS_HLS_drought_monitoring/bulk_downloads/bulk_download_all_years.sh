@@ -9,22 +9,26 @@
 
 cd /home/malexander/r_projects/github/NDVI_drought_monitoring/CONUS_HLS_drought_monitoring/bulk_downloads
 
+# Raw data directory on server (maps to /data/bulk_downloads_raw in Docker)
+RAW_DIR="/mnt/malexander/datasets/ndvi_monitor/bulk_downloads_raw"
+
 echo "=== BULK DOWNLOAD: 2019-2024 MIDWEST TILES ==="
 echo "Start time: $(date)"
 echo "Tiles: 1,209 Midwest MGRS tiles"
 echo "Years: 2019-2024"
+echo "Raw data: $RAW_DIR"
 echo ""
 
 for year in 2019 2020 2021 2022 2023 2024; do
   echo "=== YEAR $year ==="
   echo "Started: $(date)"
 
-  # Download raw bands
+  # Download raw bands to server location
   ./getHLS_bands.sh \
     midwest_tiles_noprefix.txt \
     ${year}-01-01 \
     ${year}-12-31 \
-    raw \
+    $RAW_DIR \
     > logs/download_${year}.log 2>&1
 
   if [ $? -eq 0 ]; then

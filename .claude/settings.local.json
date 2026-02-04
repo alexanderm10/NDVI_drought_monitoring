@@ -35,7 +35,26 @@
       "Bash(docker ps:*)",
       "Bash(docker rm:*)",
       "Bash(docker kill:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(chmod:*)",
+      "Bash(pgrep:*)",
+      "Bash(pstree:*)",
+      "Bash(ps:*)",
+      "Bash(lsof:*)",
+      "Bash(sudo tail:*)",
+      "Bash(comm:*)",
+      "Bash(timeout 300 ./getHLS_bands.sh test_tiles.txt 2019-01-01 2019-01-07 raw)",
+      "Bash(tee:*)",
+      "Bash(timeout:*)",
+      "Bash(for yr in 2019 2020 2021 2022 2023 2024)",
+      "Bash(do echo -n \"$yr: \" ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/)",
+      "Bash(done)",
+      "Bash(pkill:*)",
+      "Bash(kill:*)",
+      "Bash(mount:*)",
+      "Bash(for year in 2017 2018 2019)",
+      "Bash(do echo -n \"$year: \" ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$year/)",
+      "Bash(git check-ignore:*)"
     ],
     "defaultMode": "acceptEdits"
   }

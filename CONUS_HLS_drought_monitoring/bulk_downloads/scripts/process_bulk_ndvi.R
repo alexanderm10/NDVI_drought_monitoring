@@ -42,8 +42,8 @@ cat("\n=== BULK DOWNLOAD NDVI PROCESSING ===\n")
 cat("Year:", year_to_process, "\n")
 cat("Workers:", n_workers, "\n\n")
 
-# Paths
-bulk_raw_dir <- "/home/malexander/r_projects/github/NDVI_drought_monitoring/CONUS_HLS_drought_monitoring/bulk_downloads/raw"
+# Paths (raw data on server, not local repo)
+bulk_raw_dir <- "/mnt/malexander/datasets/ndvi_monitor/bulk_downloads_raw"
 output_base <- "/mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily"
 output_dir <- file.path(output_base, year_to_process)
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
