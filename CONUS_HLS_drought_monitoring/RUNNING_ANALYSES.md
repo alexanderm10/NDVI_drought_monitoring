@@ -1,20 +1,32 @@
 # Currently Running Analyses
 
-**Updated**: 2026-02-03 09:35 CST
+**Updated**: 2026-02-04 14:30 CST
 
-## Status: RUNNING (parallel download in progress)
+## Status: RUNNING (parallel downloads in progress)
 
-### Redownload Progress
-- **Current position**: 2017 April (in progress)
+### Download Process 1: Docker R Script
+- **Status**: RUNNING (restarted Feb 4, 10:37 AM after crash)
+- **Current position**: 2017 May
+- **Log**: `/data/redownload_cloud100_restart.log`
+- **Progress today**: +868 files (15,632 → 16,500)
+
+### Download Process 2: Bulk Download System
+- **Status**: RUNNING (started Feb 3, 5:14 PM)
+- **Current position**: 2019 S30 (Sentinel-2), Zone 11
+- **Log**: `bulk_downloads/logs/download_2019.log`
+- **L30 (Landsat)**: Complete for 2019
+- **S30 (Sentinel-2)**: Zone 11 of ~11 zones for 2019
+
+### File Counts by Year
 - **2013**: COMPLETE - 25,107 NDVI files
 - **2014**: COMPLETE - 34,490 NDVI files
 - **2015**: COMPLETE - 34,786 NDVI files
 - **2016**: COMPLETE - 36,646 NDVI files
-- **2017**: IN PROGRESS - 15,632 files (April in progress)
-- **2018**: 36,402 files (appears complete)
-- **2019**: 5,323 files (partial)
-- **2020**: 6,292 files (partial)
-- **2021-2024**: Pending
+- **2017**: IN PROGRESS - 16,500 files (May in progress)
+- **2018**: COMPLETE - 36,402 files
+- **2019**: 5,323 files (bulk download processing raw → NDVI)
+- **2020**: 6,292 files (queued for bulk download)
+- **2021-2024**: Queued for bulk download
 
 ### File counts at shutdown:
 ```
@@ -26,31 +38,77 @@
 
 ---
 
-## To Resume Next Session
+## Monitoring Active Downloads
 
-### 1. Start the container
+### Check Docker Download (Process 1)
 ```bash
-docker start conus-hls-drought-monitor
+# Check if R script running
+docker exec conus-hls-drought-monitor ps aux | grep "[R]script"
+
+# Monitor log
+docker exec conus-hls-drought-monitor tail -f /data/redownload_cloud100_restart.log
+
+# Check current position
+docker exec conus-hls-drought-monitor tail -5 /data/redownload_cloud100_restart.log | grep "Processing"
 ```
 
-### 2. Resume the redownload
+### Check Bulk Download (Process 2)
 ```bash
-docker exec -d conus-hls-drought-monitor bash -c "cd /workspace && Rscript redownload_all_years_cloud100.R >> /data/redownload_cloud100.log 2>&1"
+# Check if running
+ps aux | grep "bulk_download\|getHLS" | grep -v grep
+
+# Monitor log
+tail -f ~/r_projects/github/NDVI_drought_monitoring/CONUS_HLS_drought_monitoring/bulk_downloads/logs/download_2019.log
+
+# Quick status
+cd ~/r_projects/github/NDVI_drought_monitoring/CONUS_HLS_drought_monitoring/bulk_downloads
+./monitor_progress.sh
 ```
 
-### 3. Monitor progress
+### Check File Counts
 ```bash
-docker exec conus-hls-drought-monitor tail -f /data/redownload_cloud100.log
-
-# Check file counts:
-for yr in 2013 2014 2015 2016 2017; do echo -n "$yr: "; ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l; done
+for yr in 2017 2018 2019 2020 2021 2022 2023 2024; do
+  echo -n "$yr: "
+  ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l
+done
 ```
 
-The script has **resume capability** - it checks if each NDVI file exists before downloading, so it will skip already-completed scenes and continue from where it left off.
+**Both processes have resume capability** - they check for existing files and skip, so safe to restart if needed.
 
 ---
 
-## Completed This Session (Feb 3, 2026)
+## Completed This Session (Feb 4, 2026)
+
+### 1. Docker Download Restart - COMPLETE
+- **Problem**: Docker R script crashed after Feb 2, 11:27 PM (container still running but no R process)
+- **Solution**: Restarted R script without restarting container
+- **Command**: `docker exec -d conus-hls-drought-monitor bash -c "cd /workspace && nohup Rscript redownload_all_years_cloud100.R > /data/redownload_cloud100_restart.log 2>&1 &"`
+- **Result**:
+  - ✓ Script resumed successfully
+  - ✓ Fast-forwarded through 2013-March 2017 in 3 minutes (resume capability working)
+  - ✓ Resumed downloading at April 2017
+  - ✓ April 2017 complete: 195 files
+  - ✓ Now processing May 2017
+  - ✓ Progress: +868 files total (15,632 → 16,500)
+
+### 2. Bulk Download Path Correction - COMPLETE
+- **Issue**: Scripts were downloading to local repo `raw/` instead of server location
+- **Fix**: Updated paths in `bulk_download_all_years.sh` and `process_bulk_ndvi.R`
+  - Changed: `raw/` → `/mnt/malexander/datasets/ndvi_monitor/bulk_downloads_raw`
+  - Prevents filling local repo with large raw data files
+  - Server location has more space
+- **Symlink**: Created `bulk_downloads/raw -> /mnt/.../bulk_downloads_raw` for convenience
+- **Committed**: Changes pushed to GitHub (commit 8a73d56)
+
+### 3. Session Documentation - COMPLETE
+- Created `SESSION_SUMMARY_20260204.md` with full session details
+- Committed yesterday's session summary (`SESSION_SUMMARY_20260203.md`)
+- Updated `RUNNING_ANALYSES.md` with current status
+- All changes pushed to GitHub
+
+---
+
+## Completed Previous Session (Feb 3, 2026)
 
 ### 1. Morning Status Check & Aggregation Verification - COMPLETE
 - **Download Progress**: Container running 10 days, advanced from Sept 2016 to April 2017
