@@ -1,175 +1,61 @@
 # Currently Running Analyses
 
-**Updated**: 2026-02-05 15:00 CST
+**Updated**: 2026-02-12 11:00 CST
 
-## Status: RUNNING (parallel downloads in progress)
+## Status: RUNNING (two parallel downloads inside Docker)
 
-### Download Process 1: Docker R Script
-- **Status**: RUNNING (container restarted Feb 4, 2:44 PM, cleaned 27 zombie processes)
-- **Current position**: Fast-forwarding through 2013 (will resume June 2017)
-- **Log**: `/data/redownload_cloud100_restart2.log`
-- **Progress session**: +4,660 files (15,632 → 20,292 before crash #2)
-- **Note**: Script crashes every 4-6 hours, restarts add ~4K files each time
+Both download processes are now running inside the Docker container (`conus-hls-drought-monitor`), where `terra` is available for NDVI processing.
 
-### Download Process 2: Bulk Download System
-- **Status**: RUNNING (started Feb 3, 5:14 PM)
-- **Current position**: 2019 S30 (Sentinel-2), Zone 13
-- **Log**: `bulk_downloads/logs/download_2019.log`
-- **L30 (Landsat)**: Complete for 2019
-- **S30 (Sentinel-2)**: Zone 13 of ~11 zones for 2019
-- **Stability**: No crashes, running continuously
+### Download Process 1: Bulk Download (2019-2024) — Docker
+- **Status**: RUNNING
+- **Script**: `bulk_download_docker.sh` → `getHLS_bands.sh`
+- **Current position**: 2019 L30 (Landsat), tile zone 12 (T12STB)
+- **Log**: `bulk_downloads/logs/bulk_docker.log`
+- **Per-year log**: `bulk_downloads/logs/download_2019_docker.log`
+- **Tiles**: 1,209 Midwest MGRS tiles per year
+- **Workers**: 10 parallel wget
+- **Stability**: No crashes since Docker migration
 
-### File Counts by Year
-- **2013**: COMPLETE - 25,107 NDVI files
-- **2014**: COMPLETE - 34,490 NDVI files
-- **2015**: COMPLETE - 34,786 NDVI files
-- **2016**: COMPLETE - 36,646 NDVI files
-- **2017**: IN PROGRESS - 20,292 files (~56% complete, June in progress)
-- **2018**: COMPLETE - 36,402 files
-- **2019**: 5,323 files (bulk download processing raw → NDVI)
-- **2020**: 6,292 files (queued for bulk download)
-- **2021-2024**: Queued for bulk download
+### Download Process 2: 2025 R-based Download — Docker
+- **Status**: RUNNING (restarted Feb 12 from March 2025)
+- **Script**: `00_download_hls_data_parallel.R` with `start_year=2025`
+- **Current position**: March 2025
+- **Log**: `/mnt/malexander/datasets/ndvi_monitor/download_2025_restart.log` (also `/data/download_2025_restart.log` in Docker)
+- **Jan-Feb 2025**: Skipped (already downloaded)
+- **Workers**: 4 parallel R workers, 40 CONUS tiles
+- **Stability**: Fresh restart, running clean
 
-### File counts at shutdown:
-```
-2013: 25,039 files
-2014: 11,678 files (partial)
-2015: 4,679 files (old data)
-2016: 5,955 files (old data)
-```
+### Previous Download (Stopped)
+- **Old host bulk download**: Killed Feb 12 (was running on host without `terra`)
+  - 2019: Raw download complete, NDVI processing failed (no `terra`)
+  - 2020: Raw download complete, NDVI processing failed (no `terra`)
+  - 2021: L30 complete, S30 ~42% through — will resume in Docker
+  - Now re-running inside Docker where NDVI processing will succeed
+- **Old 2025 R download**: Crashed Feb 9 with zombie R workers, restarted Feb 12
 
 ---
 
-## Monitoring Active Downloads
+## Monitoring
 
-### Check Docker Download (Process 1)
+### Custom Agent (New)
+A `download-monitor` agent was created at `.claude/agents/download-monitor.md`. In Claude Code, ask "check on my downloads" to trigger it.
+
+### Manual Monitoring
 ```bash
-# Check if R script running
-docker exec conus-hls-drought-monitor ps aux | grep "[R]script"
+# Bulk download (2019-2024)
+tail -f CONUS_HLS_drought_monitoring/bulk_downloads/logs/bulk_docker.log
 
-# Monitor log
-docker exec conus-hls-drought-monitor tail -f /data/redownload_cloud100_restart.log
+# 2025 download
+tail -f /mnt/malexander/datasets/ndvi_monitor/download_2025_restart.log
 
-# Check current position
-docker exec conus-hls-drought-monitor tail -5 /data/redownload_cloud100_restart.log | grep "Processing"
-```
+# Docker container health
+docker exec conus-hls-drought-monitor ps aux | grep -E "[R]script|[w]get"
 
-### Check Bulk Download (Process 2)
-```bash
-# Check if running
-ps aux | grep "bulk_download\|getHLS" | grep -v grep
-
-# Monitor log
-tail -f ~/r_projects/github/NDVI_drought_monitoring/CONUS_HLS_drought_monitoring/bulk_downloads/logs/download_2019.log
-
-# Quick status
-cd ~/r_projects/github/NDVI_drought_monitoring/CONUS_HLS_drought_monitoring/bulk_downloads
-./monitor_progress.sh
-```
-
-### Check File Counts
-```bash
-for yr in 2017 2018 2019 2020 2021 2022 2023 2024; do
-  echo -n "$yr: "
-  ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l
-done
-```
-
-**Both processes have resume capability** - they check for existing files and skip, so safe to restart if needed.
-
----
-
-## Session Updates (Feb 4-5, 2026)
-
-### Feb 4, 2:45 PM - Docker Container Restart (Crash #2)
-- **Problem**: Docker R script crashed again after 4 hours (2,687 files downloaded)
-  - Position: June 2017
-  - 27 zombie processes accumulated
-  - Progress: April → June 2017 (+3,792 files)
-- **Diagnosis**:
-  - NOT memory (only 2GB/96GB used)
-  - NOT disk space (232TB available)
-  - Likely: Network timeouts or R parallel backend issues
-- **Solution**: Restarted container (cleared zombies) + restarted R script
-  - New log: `/data/redownload_cloud100_restart2.log`
-  - Will resume from June 2017
-- **Pattern**: Script crashes every 4-6 hours with no error messages
-- **Strategy**: Accept periodic restarts (2-3 more needed to finish 2017)
-
----
-
-## Completed Earlier This Session (Feb 4, 2026)
-
-### 1. Docker Download Restart (Crash #1) - COMPLETE
-- **Problem**: Docker R script crashed after Feb 2, 11:27 PM (container still running but no R process)
-- **Solution**: Restarted R script without restarting container
-- **Command**: `docker exec -d conus-hls-drought-monitor bash -c "cd /workspace && nohup Rscript redownload_all_years_cloud100.R > /data/redownload_cloud100_restart.log 2>&1 &"`
-- **Result**:
-  - ✓ Script resumed successfully
-  - ✓ Fast-forwarded through 2013-March 2017 in 3 minutes (resume capability working)
-  - ✓ Resumed downloading at April 2017
-  - ✓ April 2017 complete: 195 files
-  - ✓ Now processing May 2017
-  - ✓ Progress: +868 files total (15,632 → 16,500)
-
-### 2. Bulk Download Path Correction - COMPLETE
-- **Issue**: Scripts were downloading to local repo `raw/` instead of server location
-- **Fix**: Updated paths in `bulk_download_all_years.sh` and `process_bulk_ndvi.R`
-  - Changed: `raw/` → `/mnt/malexander/datasets/ndvi_monitor/bulk_downloads_raw`
-  - Prevents filling local repo with large raw data files
-  - Server location has more space
-- **Symlink**: Created `bulk_downloads/raw -> /mnt/.../bulk_downloads_raw` for convenience
-- **Committed**: Changes pushed to GitHub (commit 8a73d56)
-
-### 3. Session Documentation - COMPLETE
-- Created `SESSION_SUMMARY_20260204.md` with full session details
-- Committed yesterday's session summary (`SESSION_SUMMARY_20260203.md`)
-- Updated `RUNNING_ANALYSES.md` with current status
-- All changes pushed to GitHub
-
----
-
-## Completed Previous Session (Feb 3, 2026)
-
-### 1. Morning Status Check & Aggregation Verification - COMPLETE
-- **Download Progress**: Container running 10 days, advanced from Sept 2016 to April 2017
-  - 2014-2016 completed since last session (+~70K files)
-  - 2018 appears complete (36,402 files)
-  - 2019-2020 partially downloaded
-- **Aggregation Completeness Check**: Verified 2013-2016 are fully aggregated and correct
-  - Confirmed all source tiles properly processed
-  - Verified "missing" dates are tiles outside Midwest bbox (California, Carolinas, Florida)
-  - All 4 years have consistent ~142K pixel coverage
-  - Zero missing values across all years
-  - Data quality metrics all within expected ranges
-- **Decision**: Wait for full year downloads before aggregating 2017+ (aggregation is faster than download)
-
-### 2. Bulk Download System Setup - COMPLETE
-- **Created**: `bulk_downloads/` directory with organized structure
-- **Modified getHLS.sh** to download only B04, B05, B8A, Fmask (60-70% data reduction)
-- **NDVI processing script**: Converts raw bands → NDVI format expected by current workflow
-- **Tile list**: 1,209 Midwest MGRS tiles (from 2016 complete data)
-- **Integration**: Saves to same location → current Docker script automatically skips
-- **Documentation**: QUICKSTART.md, README.md, getHLS_bands_README.md
-
-### 3. Parallel Bulk Download - LAUNCHED (Started 09:32 CST)
-- **Status**: RUNNING - querying NASA CMR for 2019 granules
-- **Years**: 2019-2024 (all 6 years, sequential processing)
-- **Method**: Direct MGRS tile targeting, 10 parallel download workers
-- **Expected speed**: 5-10x faster than CONUS-wide bbox search
-- **Logs**: `bulk_downloads/logs/{download,process}_YYYY.log`
-- **Master log**: `bulk_downloads/logs/all_years_master.log`
-
-**Monitor**:
-```bash
-# Overall progress
-tail -f bulk_downloads/logs/all_years_master.log
-
-# Current year detail
-tail -f bulk_downloads/logs/download_2019.log
+# Check for zombies
+docker exec conus-hls-drought-monitor ps aux | grep " Z "
 
 # File counts
-for yr in 2019 2020 2021 2022 2023 2024; do
+for yr in 2019 2020 2021 2022 2023 2024 2025; do
   echo -n "$yr: "
   ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l
 done
@@ -177,76 +63,32 @@ done
 
 ---
 
-## Completed Previous Session (Jan 29, 2026)
+## Session Summary (Feb 12, 2026)
 
-### 1. Comprehensive Methodology Documentation - COMPLETE
-- **METHODOLOGY.md**: 400+ line complete end-to-end pipeline documentation
-  - Data acquisition with cloud_cover_max=100% strategy
-  - Spatial aggregation (30m → 4km)
-  - Statistical modeling (GAMs with k=50)
-  - Operational workflows (monthly updates + annual baseline)
-- **OPERATIONAL_WORKFLOW.md**: User guide for monthly automation
-- **Updated GAM_METHODOLOGY.md**: Cross-referenced with main methodology
-- One-paragraph summary for presentations/proposals
+### Work Completed
+1. **Killed host processes**: Bulk download process group + 3 zombie `curl` processes
+2. **Restarted Docker**: Cleared 4 zombie R workers from crashed 2025 download
+3. **Moved bulk download into Docker**: Created `bulk_download_docker.sh` and `process_bulk_ndvi_docker.R` with Docker-internal paths (`/data/` instead of `/mnt/malexander/...`). `terra` now available for NDVI processing.
+4. **Copied .netrc**: Earthdata credentials placed at `/.netrc` in container (matching `$HOME=/`)
+5. **Restarted 2025 download**: `acquire_conus_data(start_year=2025)` — skipped Jan-Feb, now on March 2025
+6. **Created download-monitor agent**: `.claude/agents/download-monitor.md` — custom Claude Code agent for automated status checks
 
-### 2. Monthly Update Automation - COMPLETE
-- **00_monthly_update.R**: Automated monthly data processing script
-  - Downloads new month's HLS scenes
-  - Aggregates to 4km
-  - Refits current year GAMs
-  - Recalculates anomalies
-  - Runtime: ~4-6 hours per month
-- **monthly_update.sh**: Bash wrapper for cron automation
-- Ready to deploy once historical data complete
+### Files Created
+- `.claude/agents/download-monitor.md`
+- `bulk_downloads/bulk_download_docker.sh`
+- `bulk_downloads/scripts/process_bulk_ndvi_docker.R`
 
-### 3. Log File Cleanup - COMPLETE
-- Removed all test logs (21 files, ~204MB freed)
-- Cleaned up repo for production readiness
-
-### 4. k=50 Spatial Basis Test - COMPLETE (from previous session)
-- **Result**: k=50 is stable (0.11% negative predictions)
-- Test years: 2017, 2020, 2022, 2024
-- Model stats: R²=0.698, RMSE=0.089, NormCoef=0.995
-- **Decision**: Updated production script `03_doy_looped_year_predictions.R` to use k=50
-
-### 2. 2013 Aggregation - COMPLETE
-- **Output**: `/data/gam_models/aggregated_years/ndvi_4km_2013.rds` (6.5MB)
-- 1,270,784 final observations
-- Mean: 8.9 obs/pixel (Landsat-only year, no Sentinel-2)
-- Note: "Failed" count (19K) was tiles outside Midwest bbox, not actual failures
-
-### 3. Aggregation Script Improvements
-- Updated `01_aggregate_to_4km_parallel.R`:
-  - RDS batch checkpointing (15x smaller than CSV)
-  - Command-line year selection: `Rscript 01_aggregate_to_4km_parallel.R 2014`
-  - `--workers=N` flag for parallelism control
-  - Automatic skip of completed years
-  - Year-specific temp directories
-  - Resume capability
-
-### 4. Removed obsolete files
-- Deleted `aggregate_2013_only.R` (functionality merged into main script)
-- Removed k=50 test container
+### Commits
+- `d3993a5` — `[ops][docker] Move bulk download into Docker and add download-monitor agent`
 
 ---
 
-## Aggregation Status (2013-2016)
+## Key Notes for Next Session
 
-**Completeness Check (Feb 3, 2026): ALL YEARS VERIFIED COMPLETE ✓**
-
-| Year | Observations | Pixels | Obs/Pixel | Days | Coverage | Sensors | File Size |
-|------|-------------|--------|-----------|------|----------|---------|-----------|
-| 2013 | 1,270,784 | 142,099 | 8.9 | 222 | 85.1% | L30 only | 6.5 MB |
-| 2014 | 1,583,381 | 141,769 | 11.2 | 320 | 87.7% | L30 only | 8.3 MB |
-| 2015 | 1,616,606 | 142,466 | 11.3 | 305 | 83.8% | L30 97%, S30 3% | 8.5 MB |
-| 2016 | 2,139,261 | 142,111 | 15.1 | 291 | 80.6% | L30 57%, S30 43% | 12 MB |
-
-**Notes:**
-- All source files properly aggregated (11-18% of dates with no aggregated data are tiles outside Midwest bbox - verified correct)
-- Zero missing values in all years
-- NDVI ranges reasonable: -1 to 1
-- Increasing obs/pixel (8.9→15.1) as Sentinel-2 comes online in 2015-2016
-- Ready to aggregate 2017+ once downloads complete
+- **`.netrc` is ephemeral**: It was copied into the running container. If the container is rebuilt (`docker compose build`), you need to re-copy it: `docker cp ~/.netrc conus-hls-drought-monitor:/.netrc`
+- **Bulk download is resumable**: `getHLS_bands.sh` skips existing files, so restarts are safe
+- **2025 download is resumable**: R script checks for existing NDVI files before downloading
+- **NDVI processing for 2019/2020**: Will happen automatically after each year's download completes inside Docker
 
 ---
 
@@ -254,23 +96,23 @@ done
 
 | Step | Script | Status |
 |------|--------|--------|
-| Download | `redownload_all_years_cloud100.R` | RUNNING - April 2017 |
-| Aggregation | `01_aggregate_to_4km_parallel.R` | 2013-2016 COMPLETE & VERIFIED, 2017+ pending download |
-| Norms | `02_doy_looped_norms.R` | Needs re-run after all years aggregated |
-| Year Predictions | `03_doy_looped_year_predictions.R` | Updated to k=50, ready to run |
+| Download (2013-2018) | `redownload_all_years_cloud100.R` | COMPLETE |
+| Download (2019-2024) | `bulk_download_docker.sh` | RUNNING - 2019 in Docker |
+| Download (2025) | `00_download_hls_data_parallel.R` | RUNNING - March 2025 |
+| Aggregation | `01_aggregate_to_4km_parallel.R` | 2013-2016 COMPLETE, 2017+ pending |
+| Norms | `02_doy_looped_norms.R` | Pending aggregation |
+| Year Predictions | `03_doy_looped_year_predictions.R` | Updated to k=50, ready |
 
 ---
 
-## Next Steps (when resuming)
+## Aggregation Status (2013-2016)
 
-1. **Resume redownload** - Continue from March 2014 through 2024
-2. **Aggregate each year** as download completes:
-   ```bash
-   docker exec -d conus-hls-drought-monitor bash -c "cd /workspace && Rscript 01_aggregate_to_4km_parallel.R 2014 > /data/aggregate_2014.log 2>&1"
-   ```
-3. **After all years aggregated**: Combine into single timeseries, run Script 02 (norms), then Script 03 (predictions)
-
----
+| Year | Observations | Pixels | Obs/Pixel | Days | Sensors | File Size |
+|------|-------------|--------|-----------|------|---------|-----------|
+| 2013 | 1,270,784 | 142,099 | 8.9 | 222 | L30 only | 6.5 MB |
+| 2014 | 1,583,381 | 141,769 | 11.2 | 320 | L30 only | 8.3 MB |
+| 2015 | 1,616,606 | 142,466 | 11.3 | 305 | L30 97%, S30 3% | 8.5 MB |
+| 2016 | 2,139,261 | 142,111 | 15.1 | 291 | L30 57%, S30 43% | 12 MB |
 
 ## Key Configuration
 
