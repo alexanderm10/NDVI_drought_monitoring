@@ -54,7 +54,16 @@
       "Bash(mount:*)",
       "Bash(for year in 2017 2018 2019)",
       "Bash(do echo -n \"$year: \" ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$year/)",
-      "Bash(git check-ignore:*)"
+      "Bash(git check-ignore:*)",
+      "Bash(docker restart:*)",
+      "Bash(du -sh:*)",
+      "Bash(# Check how many granules have been downloaded for 2021 so far find /mnt/malexander/datasets/ndvi_monitor/bulk_downloads_raw/S30/2021/ -name \"\"*.tif\"\")",
+      "Bash(# The slower download - check docker container processes docker exec conus-hls-drought-monitor ps aux)",
+      "Bash(# Now check the Docker/slower process - what year is it on? # Look for any running R scripts or download scripts inside the container docker exec conus-hls-drought-monitor ls /home/ ; docker exec conus-hls-drought-monitor ls /app/ ; docker exec conus-hls-drought-monitor ls /)",
+      "Bash(# Check what the Docker container was doing - look for R script logs, cron jobs, etc. docker exec conus-hls-drought-monitor ls /home/rstudio/)",
+      "Bash(# Check if there''s a separate log for the Docker slower download \\(2025 year?\\) ls /mnt/malexander/datasets/ndvi_monitor/)",
+      "Bash(# Check how the 2025 download was started - look for the script grep -l \"\"download_2025\"\" /home/malexander/r_projects/github/NDVI_drought_monitoring/CONUS_HLS_drought_monitoring/scripts/*.R ; ls /home/malexander/r_projects/github/NDVI_drought_monitoring/CONUS_HLS_drought_monitoring/scripts/)",
+      "Bash(# Check if .netrc is accessible inside the container docker exec conus-hls-drought-monitor ls -la /home/rstudio/.netrc || docker exec conus-hls-drought-monitor cat /etc/passwd)"
     ],
     "defaultMode": "acceptEdits"
   }
