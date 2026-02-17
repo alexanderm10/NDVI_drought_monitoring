@@ -1,37 +1,33 @@
 # Currently Running Analyses
 
-**Updated**: 2026-02-12 11:00 CST
+**Updated**: 2026-02-17 09:15 CST
 
 ## Status: RUNNING (two parallel downloads inside Docker)
 
-Both download processes are now running inside the Docker container (`conus-hls-drought-monitor`), where `terra` is available for NDVI processing.
+Both download processes are running inside the Docker container (`conus-hls-drought-monitor`), where `terra` is available for NDVI processing. Stability fixes applied Feb 16 have resolved the `FutureInterruptError` crashes.
 
 ### Download Process 1: Bulk Download (2019-2024) — Docker
 - **Status**: RUNNING
-- **Script**: `bulk_download_docker.sh` → `getHLS_bands.sh`
-- **Current position**: 2019 L30 (Landsat), tile zone 12 (T12STB)
-- **Log**: `bulk_downloads/logs/bulk_docker.log`
-- **Per-year log**: `bulk_downloads/logs/download_2019_docker.log`
+- **Script**: `bulk_download_docker.sh` → `getHLS_bands.sh` + `process_bulk_ndvi_docker.R`
+- **Current position**: 2021 S30 download active; NDVI processing running per-year
+- **Log**: `bulk_downloads/logs/bulk_docker.log`, per-year: `download_YYYY_docker.log`
 - **Tiles**: 1,209 Midwest MGRS tiles per year
-- **Workers**: 10 parallel wget
-- **Stability**: No crashes since Docker migration
+- **Workers**: 10 parallel wget (download), 4 parallel R (NDVI)
+- **NDVI output**: 2019: 50,441 files; 2020: 13,305; 2021: 6,301 (in progress)
 
 ### Download Process 2: 2025 R-based Download — Docker
-- **Status**: RUNNING (restarted Feb 12 from March 2025)
-- **Script**: `00_download_hls_data_parallel.R` with `start_year=2025`
-- **Current position**: March 2025
-- **Log**: `/mnt/malexander/datasets/ndvi_monitor/download_2025_restart.log` (also `/data/download_2025_restart.log` in Docker)
-- **Jan-Feb 2025**: Skipped (already downloaded)
+- **Status**: RUNNING (restarted Feb 16 after stability fixes)
+- **Script**: `01a_midwest_data_acquisition_parallel.R` with `start_year=2025`
+- **Current position**: July 2025 (Jan–June complete)
+- **Log**: `/mnt/malexander/datasets/ndvi_monitor/download_2025_conus.log`
 - **Workers**: 4 parallel R workers, 40 CONUS tiles
-- **Stability**: Fresh restart, running clean
+- **NDVI output**: 27,991 daily files; 84,115 raw TIFs across 37 tiles
+- **Stability**: Running clean since Feb 16 restart with stability fixes
 
-### Previous Download (Stopped)
-- **Old host bulk download**: Killed Feb 12 (was running on host without `terra`)
-  - 2019: Raw download complete, NDVI processing failed (no `terra`)
-  - 2020: Raw download complete, NDVI processing failed (no `terra`)
-  - 2021: L30 complete, S30 ~42% through — will resume in Docker
-  - Now re-running inside Docker where NDVI processing will succeed
-- **Old 2025 R download**: Crashed Feb 9 with zombie R workers, restarted Feb 12
+### Previous Issues (Resolved)
+- **Feb 12**: Migrated from host to Docker (host lacked `terra` for NDVI processing)
+- **Feb 13**: 2025 download crashed with `FutureInterruptError` during November processing
+- **Feb 16**: Root cause identified and fixed — see "Session Summary (Feb 16)" below
 
 ---
 
@@ -83,6 +79,66 @@ done
 
 ---
 
+## Session Summary (Feb 16, 2026)
+
+### Problem: `FutureInterruptError` Crashes
+
+Both the 2025 download (`01a_midwest_data_acquisition_parallel.R`) and the bulk NDVI processing (`process_bulk_ndvi.R` / `process_bulk_ndvi_docker.R`) were crashing with `FutureInterruptError` — R parallel workers were being interrupted mid-execution, leaving zombie processes and no NDVI output.
+
+### Root Cause
+
+R's `future` parallel framework was accumulating memory across long-running jobs. Workers were never recycled, so memory grew until the system killed them. Additionally, `terra` raster objects weren't being freed inside worker functions, and the default `future.globals.maxSize` was too small for the raster data being passed.
+
+### Fixes Applied (3 scripts)
+
+**1. `01a_midwest_data_acquisition_parallel.R` (2025 CONUS download)**
+- Added `options(future.globals.maxSize = 2 * 1024^3)` (2 GB limit)
+- Fresh worker pool each month: `plan(multisession)` at start, `plan(sequential)` + `gc()` after
+- `tryCatch` around `future_lapply` with sequential fallback on failure
+- `gc(verbose = FALSE)` inside each worker after processing
+- Increased `max_items` from 100 to 1000 to avoid scene truncation
+
+**2. `process_bulk_ndvi.R` (host NDVI processing)**
+- Added `options(future.globals.maxSize = 2 * 1024^3)`
+- Chunked processing: 5,000 granules per chunk instead of all-at-once
+- Fresh worker pool per chunk with cleanup between chunks
+- `tryCatch` with sequential fallback per chunk
+- `rm()` + `gc()` for raster objects inside `calculate_ndvi_bulk()`
+
+**3. `process_bulk_ndvi_docker.R` (Docker NDVI processing)**
+- Same fixes as `process_bulk_ndvi.R` (Docker-path variant)
+
+### Key Pattern: Stable R Parallel Processing
+
+```r
+# 1. Set generous global size limit
+options(future.globals.maxSize = 2 * 1024^3)
+
+# 2. Fresh workers each iteration
+plan(multisession, workers = 4)
+
+# 3. Wrap in tryCatch with sequential fallback
+results <- tryCatch({
+  future_lapply(..., future.seed = TRUE)
+}, error = function(e) {
+  lapply(...)  # sequential fallback
+})
+
+# 4. Clean up after each iteration
+plan(sequential)
+gc(verbose = FALSE)
+
+# 5. Free rasters inside workers
+rm(red, nir, ndvi); gc(verbose = FALSE)
+```
+
+### Result
+- 2025 download: Running stable since restart, processing ~1 month/day
+- Bulk NDVI: 2019 produced 50,441 files, 2020 produced 13,305 files (previously 0)
+- No new zombie processes generated
+
+---
+
 ## Key Notes for Next Session
 
 - **`.netrc` is ephemeral**: It was copied into the running container. If the container is rebuilt (`docker compose build`), you need to re-copy it: `docker cp ~/.netrc conus-hls-drought-monitor:/.netrc`
@@ -97,8 +153,9 @@ done
 | Step | Script | Status |
 |------|--------|--------|
 | Download (2013-2018) | `redownload_all_years_cloud100.R` | COMPLETE |
-| Download (2019-2024) | `bulk_download_docker.sh` | RUNNING - 2019 in Docker |
-| Download (2025) | `00_download_hls_data_parallel.R` | RUNNING - March 2025 |
+| Download (2019-2024) | `bulk_download_docker.sh` | RUNNING - 2021 S30 downloading |
+| NDVI (2019-2024) | `process_bulk_ndvi_docker.R` | RUNNING - 2019-2021 processed |
+| Download (2025) | `01a_midwest_data_acquisition_parallel.R` | RUNNING - July 2025 |
 | Aggregation | `01_aggregate_to_4km_parallel.R` | 2013-2016 COMPLETE, 2017+ pending |
 | Norms | `02_doy_looped_norms.R` | Pending aggregation |
 | Year Predictions | `03_doy_looped_year_predictions.R` | Updated to k=50, ready |

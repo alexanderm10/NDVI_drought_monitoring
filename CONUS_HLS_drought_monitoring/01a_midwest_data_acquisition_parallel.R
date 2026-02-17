@@ -83,13 +83,15 @@ process_tile_month_worker <- function(tile, year, month_start, month_end,
     sentinel_count = 0
   )
 
-  # Search for HLS data (monthly chunks stay under 100-item API limit)
+  # Search for HLS data
+  # Use max_items=1000 to avoid truncation; cloud_cover=100 to get all scenes
+  # (pixel-level Fmask handles cloud masking during NDVI calculation)
   scenes <- search_hls_data(
     bbox = tile$bbox,
     start_date = month_start,
     end_date = month_end,
     cloud_cover = cloud_cover_max,
-    max_items = 100  # API limit
+    max_items = 1000
   )
 
   if (length(scenes) == 0) {
@@ -168,6 +170,7 @@ acquire_conus_data <- function(start_year = 2013,  # First HLS data available
   cat("Parallel processing: 4 workers\n\n")
 
   # Set up parallel processing (4 cores max to avoid overwhelming the system)
+  options(future.globals.maxSize = 2 * 1024^3)  # 2 GB
   plan(multisession, workers = 4)
   cat("✓ Parallel backend configured (4 workers)\n")
 
@@ -213,27 +216,61 @@ acquire_conus_data <- function(start_year = 2013,  # First HLS data available
       cat("\n--- Processing", format(as.Date(month_start), "%B %Y"), "---\n")
       cat("Processing", length(conus_tiles), "tiles in parallel (4 workers)...\n")
 
-      # Process all tiles for this month in PARALLEL
+      # Process all tiles for this month in PARALLEL with error recovery
       # Each tile gets its own worker with independent NASA session
-      # IMPORTANT: Explicitly export all needed objects and functions to workers
-      tile_results <- future_lapply(conus_tiles, function(tile) {
-        # Load required packages in each worker
-        library(httr)
-        library(terra)
+      # Fresh worker pool each month to prevent memory buildup
+      plan(multisession, workers = 4)
 
-        # Source required functions in each worker
-        # NOTE: Must source in this order to resolve dependencies
-        source("00_setup_paths.R")
-        source("01_HLS_data_acquisition_FINAL.R")
-        source("01a_midwest_data_acquisition_parallel.R")  # For process_tile_month_worker
+      tile_results <- tryCatch({
+        future_lapply(conus_tiles, function(tile) {
+          # Load required packages in each worker
+          library(httr)
+          library(terra)
 
-        # Get paths in worker environment
-        worker_hls_paths <- get_hls_paths()
+          # Source required functions in each worker
+          # NOTE: Must source in this order to resolve dependencies
+          source("00_setup_paths.R")
+          source("01_HLS_data_acquisition_FINAL.R")
+          source("01a_midwest_data_acquisition_parallel.R")  # For process_tile_month_worker
 
-        # Call the processing function (now available in worker)
-        process_tile_month_worker(tile, year, month_start, month_end,
-                                  cloud_cover_max, worker_hls_paths)
-      }, future.seed = TRUE)
+          # Get paths in worker environment
+          worker_hls_paths <- get_hls_paths()
+
+          # Call the processing function (now available in worker)
+          result <- process_tile_month_worker(tile, year, month_start, month_end,
+                                    cloud_cover_max, worker_hls_paths)
+          gc(verbose = FALSE)
+          result
+        }, future.seed = TRUE)
+      }, error = function(e) {
+        cat("WARNING: Parallel processing failed for", format(as.Date(month_start), "%B %Y"),
+            ":", conditionMessage(e), "\n")
+        cat("Falling back to sequential processing for this month...\n")
+
+        # Sequential fallback - process tiles one at a time
+        lapply(conus_tiles, function(tile) {
+          tryCatch({
+            library(httr)
+            library(terra)
+            source("00_setup_paths.R")
+            source("01_HLS_data_acquisition_FINAL.R")
+            source("01a_midwest_data_acquisition_parallel.R")
+            worker_hls_paths <- get_hls_paths()
+            result <- process_tile_month_worker(tile, year, month_start, month_end,
+                                      cloud_cover_max, worker_hls_paths)
+            gc(verbose = FALSE)
+            result
+          }, error = function(e2) {
+            cat("  ERROR processing tile", tile$id, ":", conditionMessage(e2), "\n")
+            list(tile_id = tile$id, scenes_found = 0, scenes_downloaded = 0,
+                 ndvi_processed = 0, landsat_count = 0, sentinel_count = 0)
+          })
+        })
+      })
+
+      # Clean up workers between months
+      plan(sequential)
+      gc(verbose = FALSE)
 
       # Aggregate results from all tiles
       for (tile_result in tile_results) {

@@ -73,10 +73,14 @@ calculate_ndvi_bulk <- function(granule_dir, sensor_type, output_dir) {
       fmask <- rast(fmask_file[1])
       mask_invalid <- fmask %in% c(1, 2, 3, 255)
       ndvi[mask_invalid] <- NA
+      rm(fmask, mask_invalid)
     }
 
     writeRaster(ndvi, ndvi_file, overwrite = TRUE,
                 datatype = "FLT4S", gdal = c("COMPRESS=LZW"))
+
+    rm(red, nir, ndvi)
+    gc(verbose = FALSE)
 
     return(list(status = "success", granule = granule_name))
 
@@ -118,17 +122,64 @@ if (length(granules) == 0) {
   quit(status = 0)
 }
 
-plan(multisession, workers = n_workers)
-cat("Processing with", n_workers, "parallel workers...\n\n")
+# Allow large globals for terra raster objects
+options(future.globals.maxSize = 2 * 1024^3)  # 2 GB
 
-results <- future_lapply(seq_along(granules), function(i) {
-  granule <- granules[[i]]
-  if (i %% 1000 == 0) {
-    cat("Progress:", i, "/", length(granules), "\n")
-  }
-  calculate_ndvi_bulk(granule$path, granule$sensor, output_dir)
-}, future.seed = TRUE)
+# Process in chunks to limit memory accumulation and enable recovery
+chunk_size <- 5000
+n_chunks <- ceiling(length(granules) / chunk_size)
+cat("Processing with", n_workers, "parallel workers in", n_chunks, "chunks of", chunk_size, "\n\n")
 
+all_results <- list()
+
+for (chunk_idx in seq_len(n_chunks)) {
+  chunk_start <- (chunk_idx - 1) * chunk_size + 1
+  chunk_end <- min(chunk_idx * chunk_size, length(granules))
+  chunk_indices <- chunk_start:chunk_end
+
+  cat("=== Chunk", chunk_idx, "/", n_chunks, " (granules", chunk_start, "-", chunk_end, ") ===\n")
+
+  # Fresh worker pool each chunk to prevent memory buildup
+  plan(multisession, workers = n_workers)
+
+  chunk_results <- tryCatch({
+    future_lapply(chunk_indices, function(i) {
+      granule <- granules[[i]]
+      if (i %% 500 == 0) {
+        cat("Progress:", i, "/", length(granules), "\n")
+      }
+      calculate_ndvi_bulk(granule$path, granule$sensor, output_dir)
+    }, future.seed = TRUE)
+  }, error = function(e) {
+    cat("WARNING: Chunk", chunk_idx, "failed:", conditionMessage(e), "\n")
+    cat("Falling back to sequential processing for this chunk...\n")
+
+    # Sequential fallback for failed chunks
+    lapply(chunk_indices, function(i) {
+      granule <- granules[[i]]
+      tryCatch(
+        calculate_ndvi_bulk(granule$path, granule$sensor, output_dir),
+        error = function(e2) {
+          list(status = "error", granule = basename(granule$path),
+               message = conditionMessage(e2))
+        }
+      )
+    })
+  })
+
+  all_results <- c(all_results, chunk_results)
+
+  # Clean up between chunks
+  plan(sequential)
+  gc(verbose = FALSE)
+
+  cat("Chunk", chunk_idx, "complete.",
+      sum(sapply(chunk_results, function(x) x$status == "success")), "succeeded,",
+      sum(sapply(chunk_results, function(x) x$status == "skipped")), "skipped,",
+      sum(sapply(chunk_results, function(x) x$status == "error")), "errors\n\n")
+}
+
+results <- all_results
 status_counts <- table(sapply(results, function(x) x$status))
 
 cat("\n=== PROCESSING COMPLETE ===\n")
