@@ -1,28 +1,25 @@
 # Currently Running Analyses
 
-**Updated**: 2026-02-17 09:15 CST
+**Updated**: 2026-02-18 16:15 CST
 
-## Status: RUNNING (two parallel downloads inside Docker)
+## Status: RUNNING — Two pipelines converging toward 2022
 
-Both download processes are running inside the Docker container (`conus-hls-drought-monitor`), where `terra` is available for NDVI processing. Stability fixes applied Feb 16 have resolved the `FutureInterruptError` crashes.
-
-### Download Process 1: Bulk Download (2019-2024) — Docker
-- **Status**: RUNNING
+### Pipeline 1: Bulk Forwards (2019→2024) — Docker
+- **Status**: RUNNING — 2021 NDVI processing, Chunk 12/42 (~29%)
 - **Script**: `bulk_download_docker.sh` → `getHLS_bands.sh` + `process_bulk_ndvi_docker.R`
-- **Current position**: 2021 S30 download active; NDVI processing running per-year
-- **Log**: `bulk_downloads/logs/bulk_docker.log`, per-year: `download_YYYY_docker.log`
-- **Tiles**: 1,209 Midwest MGRS tiles per year
-- **Workers**: 10 parallel wget (download), 4 parallel R (NDVI)
-- **NDVI output**: 2019: 50,441 files; 2020: 13,305; 2021: 6,301 (in progress)
+- **Log**: `bulk_downloads/logs/process_2021_docker.log`
+- **Workers**: 8 parallel R (NDVI calc), chunked in 5,000-granule batches
+- **NDVI output**: 2021: 60,734 files; 2022-2024: queued after 2021 finishes
+- **Note**: 2019/2020 NDVI output dirs are empty — need standalone re-run after 2021
 
-### Download Process 2: 2025 R-based Download — Docker
-- **Status**: RUNNING (restarted Feb 16 after stability fixes)
-- **Script**: `01a_midwest_data_acquisition_parallel.R` with `start_year=2025`
-- **Current position**: July 2025 (Jan–June complete)
-- **Log**: `/mnt/malexander/datasets/ndvi_monitor/download_2025_conus.log`
-- **Workers**: 4 parallel R workers, 40 CONUS tiles
-- **NDVI output**: 27,991 daily files; 84,115 raw TIFs across 37 tiles
-- **Stability**: Running clean since Feb 16 restart with stability fixes
+### Pipeline 2: Backwards Queue (2025→2022) — Docker
+- **Status**: RUNNING — `download_queue_backwards.sh` (started Feb 16)
+- **Script**: `download_queue_backwards.sh` → `01a_midwest_data_acquisition_parallel.R`
+- **Queue**: 2025 ✓ COMPLETE → **2024 in progress** (Feb 2024) → 2023 → 2022
+- **Log**: `/data/download_queue.log`, per-year: `/data/download_YYYY_conus.log`
+- **Workers**: 4 parallel R workers, 40 CONUS tiles, `cloud_cover_max=100`
+- **NDVI output**: 2025: 35,230 files (complete); 2024: 11,057 files (in progress)
+- **Meet-in-middle target**: Both pipelines converge at 2022
 
 ### Previous Issues (Resolved)
 - **Feb 12**: Migrated from host to Docker (host lacked `terra` for NDVI processing)
@@ -153,9 +150,9 @@ rm(red, nir, ndvi); gc(verbose = FALSE)
 | Step | Script | Status |
 |------|--------|--------|
 | Download (2013-2018) | `redownload_all_years_cloud100.R` | COMPLETE |
-| Download (2019-2024) | `bulk_download_docker.sh` | RUNNING - 2021 S30 downloading |
-| NDVI (2019-2024) | `process_bulk_ndvi_docker.R` | RUNNING - 2019-2021 processed |
-| Download (2025) | `01a_midwest_data_acquisition_parallel.R` | RUNNING - July 2025 |
+| Download (2019-2024) | `bulk_download_docker.sh` | RUNNING - 2021 NDVI chunk 12/42 |
+| NDVI (2019/2020) | `process_bulk_ndvi_docker.R` | PENDING - dirs empty, re-run after 2021 |
+| Download (2022-2025) | `download_queue_backwards.sh` | RUNNING - 2025 ✓, 2024 in progress |
 | Aggregation | `01_aggregate_to_4km_parallel.R` | 2013-2016 COMPLETE, 2017+ pending |
 | Norms | `02_doy_looped_norms.R` | Pending aggregation |
 | Year Predictions | `03_doy_looped_year_predictions.R` | Updated to k=50, ready |
