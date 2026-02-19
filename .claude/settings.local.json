@@ -63,7 +63,13 @@
       "Bash(# Check what the Docker container was doing - look for R script logs, cron jobs, etc. docker exec conus-hls-drought-monitor ls /home/rstudio/)",
       "Bash(# Check if there''s a separate log for the Docker slower download \\(2025 year?\\) ls /mnt/malexander/datasets/ndvi_monitor/)",
       "Bash(# Check how the 2025 download was started - look for the script grep -l \"\"download_2025\"\" /home/malexander/r_projects/github/NDVI_drought_monitoring/CONUS_HLS_drought_monitoring/scripts/*.R ; ls /home/malexander/r_projects/github/NDVI_drought_monitoring/CONUS_HLS_drought_monitoring/scripts/)",
-      "Bash(# Check if .netrc is accessible inside the container docker exec conus-hls-drought-monitor ls -la /home/rstudio/.netrc || docker exec conus-hls-drought-monitor cat /etc/passwd)"
+      "Bash(# Check if .netrc is accessible inside the container docker exec conus-hls-drought-monitor ls -la /home/rstudio/.netrc || docker exec conus-hls-drought-monitor cat /etc/passwd)",
+      "Bash(python3:*)",
+      "Bash(dmesg:*)",
+      "Bash(stat:*)",
+      "Bash(git status:*)",
+      "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring log --oneline -5)",
+      "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring status --short)"
     ],
     "defaultMode": "acceptEdits"
   }
