@@ -169,10 +169,8 @@ acquire_conus_data <- function(start_year = 2013,  # First HLS data available
   cat("Storage:", hls_paths$base, "\n")
   cat("Parallel processing: 4 workers\n\n")
 
-  # Set up parallel processing (4 cores max to avoid overwhelming the system)
+  # Set up globals max size (plan is set per-month inside the loop to prevent zombie accumulation)
   options(future.globals.maxSize = 2 * 1024^3)  # 2 GB
-  plan(multisession, workers = 4)
-  cat("✓ Parallel backend configured (4 workers)\n")
 
   # Create CONUS processing tiles (8x5 = 40 tiles)
   conus_tiles <- create_conus_tiles(n_tiles_x = 8, n_tiles_y = 5)
@@ -219,7 +217,8 @@ acquire_conus_data <- function(start_year = 2013,  # First HLS data available
       # Process all tiles for this month in PARALLEL with error recovery
       # Each tile gets its own worker with independent NASA session
       # Fresh worker pool each month to prevent memory buildup
-      plan(multisession, workers = 4)
+      # multicore (fork) instead of multisession: parent reaps workers cleanly, no zombies
+      plan(multicore, workers = 4)
 
       tile_results <- tryCatch({
         future_lapply(conus_tiles, function(tile) {
@@ -228,10 +227,9 @@ acquire_conus_data <- function(start_year = 2013,  # First HLS data available
           library(terra)
 
           # Source required functions in each worker
-          # NOTE: Must source in this order to resolve dependencies
+          # NOTE: process_tile_month_worker is auto-exported by future as a global
           source("00_setup_paths.R")
           source("01_HLS_data_acquisition_FINAL.R")
-          source("01a_midwest_data_acquisition_parallel.R")  # For process_tile_month_worker
 
           # Get paths in worker environment
           worker_hls_paths <- get_hls_paths()

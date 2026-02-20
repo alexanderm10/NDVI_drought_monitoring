@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# BULK DOWNLOAD ALL YEARS 2019-2024 (DOCKER VERSION)
+# BULK DOWNLOAD ALL YEARS 2019-2025 (DOCKER VERSION)
 # ==============================================================================
 # Runs inside Docker container where terra is available for NDVI processing.
 # Uses Docker-internal paths (/data/ instead of /mnt/malexander/...).
@@ -19,10 +19,10 @@ cd /workspace/bulk_downloads
 RAW_DIR="/data/bulk_downloads_raw"
 NDVI_DIR="/data/processed_ndvi/daily"
 
-echo "=== BULK DOWNLOAD (DOCKER): 2019-2024 MIDWEST TILES ==="
+echo "=== BULK DOWNLOAD (DOCKER): 2019-2025 MIDWEST TILES ==="
 echo "Start time: $(date)"
 echo "Tiles: 1,209 Midwest MGRS tiles"
-echo "Years: 2019-2024"
+echo "Years: 2019-2025"
 echo "Raw data: $RAW_DIR"
 echo "NDVI output: $NDVI_DIR"
 echo "Running inside Docker container: $(hostname)"
@@ -51,7 +51,7 @@ for year in 2019 2020; do
 done
 
 # Now continue with download + processing for remaining years
-for year in 2019 2020 2021 2022 2023 2024; do
+for year in 2019 2020 2021 2022 2023 2024 2025; do
   echo "=== YEAR $year ==="
   echo "Started: $(date)"
 
@@ -89,7 +89,7 @@ echo "=== ALL YEARS COMPLETE ==="
 echo "End time: $(date)"
 echo ""
 echo "Summary:"
-for year in 2019 2020 2021 2022 2023 2024; do
+for year in 2019 2020 2021 2022 2023 2024 2025; do
   count=$(ls $NDVI_DIR/$year/*_NDVI.tif 2>/dev/null | wc -l)
   echo "  $year: $count NDVI files"
 done
