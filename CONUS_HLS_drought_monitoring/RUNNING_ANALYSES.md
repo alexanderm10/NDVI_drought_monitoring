@@ -1,16 +1,18 @@
 # Currently Running Analyses
 
-**Updated**: 2026-02-20 13:00 CST
+**Updated**: 2026-03-12 15:00 MDT
 
-## Status: RUNNING — Bulk download processing 2019-2025
+## Status: RUNNING — Bulk download processing 2019-2025 (post-crash restart)
 
 ### Active Pipeline: Bulk Download (2019-2025) — Docker
-- **Status**: RUNNING — 2019 NDVI processing (raw data exists on disk)
+- **Status**: RUNNING — scanning granules for pre-processing check, then will skip completed downloads and process NDVI
 - **Script**: `bulk_download_docker.sh` → `getHLS_bands.sh` + `process_bulk_ndvi_docker.R`
 - **Log**: `bulk_downloads/logs/bulk_docker.log`
 - **Workers**: 8 parallel R (NDVI calc), chunked in 5,000-granule batches
-- **Year range**: 2019-2025 (extended from 2019-2024 this session)
-- **Container**: `conus-hls-drought-monitor`, clean restart (0 zombies)
+- **Year range**: 2019-2025
+- **Container**: `conus-hls-drought-monitor`, restarted after crash
+- **Download status**: 2019-2022 raw data complete, 2023-2025 need downloading
+- **NDVI status**: 2022 NDVI processing interrupted by crash, needs re-run
 
 ### Shelved: R-based 2025 Download (CONUS parallel)
 - **Reason**: Docker PID 1 (`tail -f /dev/null`) doesn't reap zombie processes. Every parallel R worker that exits becomes a permanent zombie until container restart. Tried `multisession` and `multicore` — both create zombies in this container.
@@ -78,6 +80,25 @@ done
 
 ---
 
+## Session Summary (Mar 12, 2026)
+
+### Work Completed
+1. **Crash recovery**: Remote machine went down overnight, container exited (code 255)
+2. **NFS remount**: CIFS mount to `ascend.egs.anl.gov` dropped during crash; confirmed it came back up, verified data integrity (38TB raw data intact)
+3. **Container restart**: Restarted container, re-copied `.netrc`, verified NFS visible inside container at `/data/`
+4. **Fixed re-download problem**: `wget -N` was re-downloading all existing files (timestamp mismatch after NFS remount). Added skip logic to `bulk_download_docker.sh` — counts existing granule directories and skips download if >1000 already exist for a year
+5. **NDVI processing hardening**: Added `validate_tif()` to both `process_bulk_ndvi.R` and `process_bulk_ndvi_docker.R` — catches corrupt/truncated downloads before loading (prevents SIGFPE crashes). Safe NDVI calc via `lapp()` instead of C++ raster algebra. Corrupt file logging for later re-download
+
+### Commits
+- See below
+
+### Key Finding: NFS Crash Recovery
+- NFS mount (`//ascend.egs.anl.gov/home/malexander`) drops on machine crash but auto-remounts on reboot
+- Docker bind mounts become stale — container must be restarted to pick up remounted filesystem
+- `wget -N` timestamp comparison breaks after NFS remount, causing full re-downloads of existing data
+
+---
+
 ## Session Summary (Feb 20, 2026)
 
 ### Work Completed
@@ -119,7 +140,7 @@ Docker's PID 1 (`tail -f /dev/null`) never calls `wait()`, so any orphaned child
 | Step | Script | Status |
 |------|--------|--------|
 | Download (2013-2018) | `redownload_all_years_cloud100.R` | COMPLETE |
-| Download (2019-2025) | `bulk_download_docker.sh` | RUNNING — 2019 NDVI processing |
+| Download (2019-2025) | `bulk_download_docker.sh` | RUNNING — 2019-2022 downloaded, 2023-2025 pending |
 | Aggregation | `01_aggregate_to_4km_parallel.R` | 2013-2016 COMPLETE, 2017+ pending |
 | Norms | `02_doy_looped_norms.R` | Pending aggregation |
 | Year Predictions | `03_doy_looped_year_predictions.R` | Updated to k=50, ready |
@@ -128,7 +149,8 @@ Docker's PID 1 (`tail -f /dev/null`) never calls `wait()`, so any orphaned child
 
 ## Key Notes for Next Session
 
-- **`.netrc` is ephemeral**: Re-copy after container rebuild: `docker cp ~/.netrc conus-hls-drought-monitor:/.netrc`
-- **Bulk download is resumable**: `getHLS_bands.sh` skips existing files, `process_bulk_ndvi_docker.R` skips processed scenes
-- **Current run won't include 2025**: Bash read the script at launch; 2025 will be picked up on next restart
-- **2020, 2022, 2023 are critical gaps**: Bulk download will fill these as it works through each year
+- **`.netrc` is ephemeral**: Re-copy after container rebuild/restart: `docker cp ~/.netrc conus-hls-drought-monitor:/.netrc`
+- **NFS mount may drop on crash**: Check with `df -h /mnt/malexander/datasets/ndvi_monitor/` — should show 316TB CIFS mount, not local `/dev/sda1`
+- **Docker bind mounts go stale after NFS remount**: Must restart container (`docker restart conus-hls-drought-monitor`) to pick up remounted filesystem
+- **Bulk download now has skip logic**: Counts granule dirs, skips download if >1000 exist. Won't re-download completed years
+- **NDVI processing validates TIFs**: `validate_tif()` catches corrupt files before loading, logs them for later re-download

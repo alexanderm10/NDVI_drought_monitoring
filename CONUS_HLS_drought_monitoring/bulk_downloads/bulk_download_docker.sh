@@ -55,30 +55,42 @@ for year in 2019 2020 2021 2022 2023 2024 2025; do
   echo "=== YEAR $year ==="
   echo "Started: $(date)"
 
-  # Download raw bands
-  ./getHLS_bands.sh \
-    midwest_tiles_noprefix.txt \
-    ${year}-01-01 \
-    ${year}-12-31 \
-    $RAW_DIR \
-    > logs/download_${year}_docker.log 2>&1
+  # Check if download already completed by counting raw granule directories
+  l30_count=$(find $RAW_DIR/L30/$year -mindepth 5 -maxdepth 5 -type d 2>/dev/null | wc -l)
+  s30_count=$(find $RAW_DIR/S30/$year -mindepth 5 -maxdepth 5 -type d 2>/dev/null | wc -l)
+  total_raw=$((l30_count + s30_count))
 
-  if [ $? -eq 0 ]; then
-    echo "✓ Download complete for $year"
-
-    # Process to NDVI (terra available in Docker)
-    echo "Processing to NDVI..."
-    Rscript scripts/process_bulk_ndvi_docker.R $year --workers=8 \
-      > logs/process_${year}_docker.log 2>&1
+  if [ "$total_raw" -gt 1000 ]; then
+    echo "⏭ Skipping download for $year — $total_raw granule dirs already exist (L30: $l30_count, S30: $s30_count)"
+  else
+    # Download raw bands
+    ./getHLS_bands.sh \
+      midwest_tiles_noprefix.txt \
+      ${year}-01-01 \
+      ${year}-12-31 \
+      $RAW_DIR \
+      > logs/download_${year}_docker.log 2>&1
 
     if [ $? -eq 0 ]; then
-      count=$(ls $NDVI_DIR/$year/*_NDVI.tif 2>/dev/null | wc -l)
-      echo "✓ Processing complete: $count NDVI files created for $year"
+      echo "✓ Download complete for $year"
     else
-      echo "✗ Processing FAILED for $year - check logs/process_${year}_docker.log"
+      echo "✗ Download FAILED for $year - check logs/download_${year}_docker.log"
+      echo "Completed $year: $(date)"
+      echo ""
+      continue
     fi
+  fi
+
+  # Process to NDVI (terra available in Docker)
+  echo "Processing to NDVI..."
+  Rscript scripts/process_bulk_ndvi_docker.R $year --workers=8 \
+    > logs/process_${year}_docker.log 2>&1
+
+  if [ $? -eq 0 ]; then
+    count=$(ls $NDVI_DIR/$year/*_NDVI.tif 2>/dev/null | wc -l)
+    echo "✓ Processing complete: $count NDVI files created for $year"
   else
-    echo "✗ Download FAILED for $year - check logs/download_${year}_docker.log"
+    echo "✗ Processing FAILED for $year - check logs/process_${year}_docker.log"
   fi
 
   echo "Completed $year: $(date)"

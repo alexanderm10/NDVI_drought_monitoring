@@ -41,6 +41,20 @@ output_base <- "/data/processed_ndvi/daily"
 output_dir <- file.path(output_base, year_to_process)
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
+# Log file for corrupt granules (for later re-download)
+corrupt_log <- file.path("logs", paste0("corrupt_granules_", year_to_process, ".txt"))
+
+# Validate TIF file before loading with terra
+# Catches truncated downloads and corrupt headers that would cause SIGFPE
+validate_tif <- function(filepath) {
+  if (!file.exists(filepath)) return(FALSE)
+  if (file.size(filepath) < 1024) return(FALSE)  # < 1KB = truncated
+  tryCatch({
+    terra::describe(filepath)
+    TRUE
+  }, error = function(e) FALSE)
+}
+
 # Function to calculate NDVI from HLS bands
 calculate_ndvi_bulk <- function(granule_dir, sensor_type, output_dir) {
 
@@ -64,12 +78,32 @@ calculate_ndvi_bulk <- function(granule_dir, sensor_type, output_dir) {
     return(list(status = "missing_bands", granule = granule_name))
   }
 
+  # Validate TIF files before loading — corrupt files cause SIGFPE (kills R process)
+  if (!validate_tif(b04_file[1])) {
+    cat("  CORRUPT: ", b04_file[1], " (skipping)\n")
+    write(b04_file[1], corrupt_log, append = TRUE)
+    return(list(status = "corrupt", granule = granule_name,
+                message = paste("Corrupt red band:", b04_file[1])))
+  }
+  if (!validate_tif(nir_file[1])) {
+    cat("  CORRUPT: ", nir_file[1], " (skipping)\n")
+    write(nir_file[1], corrupt_log, append = TRUE)
+    return(list(status = "corrupt", granule = granule_name,
+                message = paste("Corrupt NIR band:", nir_file[1])))
+  }
+
   tryCatch({
     red <- rast(b04_file[1])
     nir <- rast(nir_file[1])
-    ndvi <- (nir - red) / (nir + red)
 
-    if (length(fmask_file) > 0) {
+    # Safe NDVI: use lapp() with R-level math instead of terra's C++ raster
+    # algebra operators. R handles 0/0 as NaN (safe); C++ may SIGFPE.
+    ndvi <- terra::lapp(c(red, nir), function(r, n) {
+      denom <- n + r
+      ifelse(denom == 0, NA_real_, (n - r) / denom)
+    })
+
+    if (length(fmask_file) > 0 && validate_tif(fmask_file[1])) {
       fmask <- rast(fmask_file[1])
       mask_invalid <- fmask %in% c(1, 2, 3, 255)
       ndvi[mask_invalid] <- NA
@@ -176,6 +210,7 @@ for (chunk_idx in seq_len(n_chunks)) {
   cat("Chunk", chunk_idx, "complete.",
       sum(sapply(chunk_results, function(x) x$status == "success")), "succeeded,",
       sum(sapply(chunk_results, function(x) x$status == "skipped")), "skipped,",
+      sum(sapply(chunk_results, function(x) x$status == "corrupt")), "corrupt,",
       sum(sapply(chunk_results, function(x) x$status == "error")), "errors\n\n")
 }
 
@@ -187,7 +222,13 @@ cat("Total granules:", length(granules), "\n")
 cat("Success:", ifelse("success" %in% names(status_counts), status_counts["success"], 0), "\n")
 cat("Skipped (already exists):", ifelse("skipped" %in% names(status_counts), status_counts["skipped"], 0), "\n")
 cat("Missing bands:", ifelse("missing_bands" %in% names(status_counts), status_counts["missing_bands"], 0), "\n")
+cat("Corrupt files:", ifelse("corrupt" %in% names(status_counts), status_counts["corrupt"], 0), "\n")
 cat("Errors:", ifelse("error" %in% names(status_counts), status_counts["error"], 0), "\n")
+
+if (file.exists(corrupt_log)) {
+  n_corrupt <- length(readLines(corrupt_log))
+  cat("\nCorrupt file log:", corrupt_log, "(", n_corrupt, "files)\n")
+}
 
 errors <- Filter(function(x) x$status == "error", results)
 if (length(errors) > 0) {
