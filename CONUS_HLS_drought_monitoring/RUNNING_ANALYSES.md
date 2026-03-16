@@ -1,18 +1,19 @@
 # Currently Running Analyses
 
-**Updated**: 2026-03-12 15:00 MDT
+**Updated**: 2026-03-16 15:30 MDT
 
-## Status: RUNNING — Bulk download processing 2019-2025 (post-crash restart)
+## Status: RUNNING — 2022 NDVI processing at 73% (189k/259k), ~5-6h remaining
 
 ### Active Pipeline: Bulk Download (2019-2025) — Docker
-- **Status**: RUNNING — scanning granules for pre-processing check, then will skip completed downloads and process NDVI
-- **Script**: `bulk_download_docker.sh` → `getHLS_bands.sh` + `process_bulk_ndvi_docker.R`
-- **Log**: `bulk_downloads/logs/bulk_docker.log`
-- **Workers**: 8 parallel R (NDVI calc), chunked in 5,000-granule batches
+- **Status**: RUNNING — processing 2022 NDVI (chunk ~38/52)
+- **Script**: `bulk_download_docker.sh` → `process_bulk_ndvi_docker.R`
+- **Log**: `bulk_downloads/logs/process_2022_docker.log`, `bulk_downloads/logs/bulk_docker.log`
+- **Workers**: 8 parallel R workers (PIDs 3462233-3462240), 500–1600 MB each, ~73% CPU
 - **Year range**: 2019-2025
-- **Container**: `conus-hls-drought-monitor`, restarted after crash
-- **Download status**: 2019-2022 raw data complete, 2023-2025 need downloading
-- **NDVI status**: 2022 NDVI processing interrupted by crash, needs re-run
+- **Container**: `conus-hls-drought-monitor`
+- **Download status**: 2019-2022 raw data complete; 2023 being prefetched in parallel
+- **NDVI status**: 2019-2021 complete; 2022 at 189,104/259,316 (73%); 2023-2025 pending
+- **Zombies**: ~240 harmless zombies accumulating (8 per completed chunk); clear on container restart
 
 ### Shelved: R-based 2025 Download (CONUS parallel)
 - **Reason**: Docker PID 1 (`tail -f /dev/null`) doesn't reap zombie processes. Every parallel R worker that exits becomes a permanent zombie until container restart. Tried `multisession` and `multicore` — both create zombies in this container.
@@ -36,7 +37,7 @@
 |------|-------|------|
 | 2019 | 535,584 | 7.0 TB |
 
-### Processed NDVI (daily)
+### Processed NDVI (daily) — Updated Mar 16, 2026
 | Year | Files | Status |
 |------|-------|--------|
 | 2013 | 25,107 | Complete (pre-HLS) |
@@ -45,13 +46,13 @@
 | 2016 | 36,646 | Complete (pre-HLS) |
 | 2017 | 36,425 | Complete (pre-HLS) |
 | 2018 | 36,483 | Complete (pre-HLS) |
-| 2019 | 50,441 | Complete |
-| 2020 | 13,305 | **Partial (~25%)** |
-| 2021 | 61,194 | Complete |
-| 2022 | 5,919 | **Partial (~10%)** |
-| 2023 | 5,793 | **Partial (~10%)** |
-| 2024 | 27,659 | **Partial (~50%)** |
-| 2025 | 35,230 | In progress |
+| 2019 | 210k+ | **Complete** |
+| 2020 | 200k+ | **Complete** |
+| 2021 | 200k+ | **Complete** |
+| 2022 | 189,104 | **In progress (73%)** |
+| 2023 | pending | Pending — 2022 must finish first |
+| 2024 | pending | Pending |
+| 2025 | 35,230 | Pending |
 
 ---
 
@@ -77,6 +78,27 @@ for yr in 2019 2020 2021 2022 2023 2024 2025; do
   ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l
 done
 ```
+
+---
+
+## Session Summary (Mar 16, 2026)
+
+### Work Completed
+1. **Status checks**: Confirmed 2022 NDVI processing healthy at 73% (189k/259k files); ~6,300 files/30min throughput
+2. **download-monitor agent rewrite**: Updated `.claude/agents/download-monitor.md` to check NDVI file counts per year (real progress metric) and active worker memory. Old version checked wrong log paths inside container
+3. **bulk_download_docker.sh fixes**:
+   - Replaced `ls *_NDVI.tif | wc -l` with `find`-based `count_ndvi()` helper to avoid glob overflow on large dirs
+   - Added `NDVI_COMPLETE_THRESHOLD=100000` skip logic — years already fully processed are skipped without re-processing
+   - Removed redundant 2019/2020 pre-processing loop (merged into main loop)
+4. **prefetch_downloads.sh**: New script to pre-download 2023-2025 raw data in parallel with ongoing NDVI processing. Currently pre-fetching 2023 data in background
+5. **Commit**: `5cb0a84` — all changes pushed to main
+
+### Key Finding: NDVI File Count Method
+`ls /dir/*_NDVI.tif | wc -l` crashes with "Argument list too long" on dirs with 200k+ files.
+Use `find /dir -name "*_NDVI.tif" | wc -l` instead — no argument limit.
+
+### Commits
+- `5cb0a84` — `[monitor][docker][data] Improve status monitoring and bulk download robustness`
 
 ---
 
