@@ -69,7 +69,15 @@
       "Bash(stat:*)",
       "Bash(git status:*)",
       "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring log --oneline -5)",
-      "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring status --short)"
+      "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring status --short)",
+      "Bash(for yr in 2019 2020 2021 2022 2023 2024 2025)",
+      "Bash(do echo -n \"$yr: \")",
+      "Read(//mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/**)",
+      "Bash(docker start:*)",
+      "Bash(docker stop:*)",
+      "Bash(do echo:*)",
+      "Bash(for yr:*)",
+      "Bash(echo -n \"$yr S30: \")"
     ],
     "defaultMode": "acceptEdits"
   }

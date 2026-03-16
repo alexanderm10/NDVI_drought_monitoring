@@ -28,32 +28,28 @@ echo "NDVI output: $NDVI_DIR"
 echo "Running inside Docker container: $(hostname)"
 echo ""
 
-# First, process NDVI for years that already downloaded but failed processing
-# (2019 and 2020 raw data is complete, terra is now available in Docker)
-for year in 2019 2020; do
-  raw_count=$(find $RAW_DIR/L30/$year $RAW_DIR/S30/$year -name "*.tif" 2>/dev/null | head -1)
-  ndvi_count=$(ls $NDVI_DIR/$year/*_NDVI.tif 2>/dev/null | wc -l)
+# Helper: count NDVI files without glob overflow (find handles any file count)
+count_ndvi() {
+  find "$NDVI_DIR/$1" -name "*_NDVI.tif" 2>/dev/null | wc -l
+}
 
-  if [ -n "$raw_count" ] && [ "$ndvi_count" -eq 0 ]; then
-    echo "=== PROCESSING NDVI for $year (raw data exists, NDVI missing) ==="
-    echo "Started: $(date)"
-    Rscript scripts/process_bulk_ndvi_docker.R $year --workers=8 \
-      > logs/process_${year}_docker.log 2>&1
+# Minimum NDVI file threshold to consider a year "complete"
+# 2019-2021 have ~190-210k files each; anything above 100k is done
+NDVI_COMPLETE_THRESHOLD=100000
 
-    if [ $? -eq 0 ]; then
-      count=$(ls $NDVI_DIR/$year/*_NDVI.tif 2>/dev/null | wc -l)
-      echo "✓ Processing complete: $count NDVI files created for $year"
-    else
-      echo "✗ Processing FAILED for $year - check logs/process_${year}_docker.log"
-    fi
-    echo ""
-  fi
-done
-
-# Now continue with download + processing for remaining years
+# Download + process for each year
 for year in 2019 2020 2021 2022 2023 2024 2025; do
   echo "=== YEAR $year ==="
   echo "Started: $(date)"
+
+  # Skip years that already have enough NDVI files
+  existing_ndvi=$(count_ndvi $year)
+  if [ "$existing_ndvi" -ge "$NDVI_COMPLETE_THRESHOLD" ]; then
+    echo "⏭ Skipping $year — already has $existing_ndvi NDVI files (threshold: $NDVI_COMPLETE_THRESHOLD)"
+    echo "Completed $year: $(date)"
+    echo ""
+    continue
+  fi
 
   # Check if download already completed by counting raw granule directories
   l30_count=$(find $RAW_DIR/L30/$year -mindepth 5 -maxdepth 5 -type d 2>/dev/null | wc -l)
@@ -82,13 +78,13 @@ for year in 2019 2020 2021 2022 2023 2024 2025; do
   fi
 
   # Process to NDVI (terra available in Docker)
-  echo "Processing to NDVI..."
+  echo "Processing NDVI ($existing_ndvi files exist, processing remaining)..."
   Rscript scripts/process_bulk_ndvi_docker.R $year --workers=8 \
     > logs/process_${year}_docker.log 2>&1
 
   if [ $? -eq 0 ]; then
-    count=$(ls $NDVI_DIR/$year/*_NDVI.tif 2>/dev/null | wc -l)
-    echo "✓ Processing complete: $count NDVI files created for $year"
+    count=$(count_ndvi $year)
+    echo "✓ Processing complete: $count NDVI files for $year"
   else
     echo "✗ Processing FAILED for $year - check logs/process_${year}_docker.log"
   fi
@@ -102,6 +98,6 @@ echo "End time: $(date)"
 echo ""
 echo "Summary:"
 for year in 2019 2020 2021 2022 2023 2024 2025; do
-  count=$(ls $NDVI_DIR/$year/*_NDVI.tif 2>/dev/null | wc -l)
+  count=$(count_ndvi $year)
   echo "  $year: $count NDVI files"
 done
