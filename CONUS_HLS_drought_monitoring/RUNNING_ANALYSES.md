@@ -1,19 +1,22 @@
 # Currently Running Analyses
 
-**Updated**: 2026-03-18 13:30 MDT
+**Updated**: 2026-03-24 10:30 MDT
 
-## Status: RUNNING — 2023 NDVI processing starting (scanning granules), 2024 prefetch active
+## Status: RUNNING — 2024 NDVI processing (chunk 8/51, ~14%), 2025 prefetch active
 
 ### Active Pipeline: Bulk Download (2019-2025) — Docker
-- **Status**: RUNNING — 2023 NDVI processing (granule scan phase, 252k granules)
+- **Status**: RUNNING — 2024 NDVI processing (chunk 8/51, ~35k/255k granules processed)
 - **Script**: `bulk_download_docker.sh` → `process_bulk_ndvi_docker.R`
-- **Log**: `bulk_downloads/logs/process_2023_docker.log`, `bulk_downloads/logs/bulk_docker.log`
-- **Workers**: 8 parallel R workers (not yet spawned — scanning granule dirs)
+- **Log**: `bulk_downloads/logs/process_2024_docker.log`, `bulk_downloads/logs/bulk_docker.log`
+- **Workers**: 8 parallel R workers + 8 wget prefetch workers
 - **Year range**: 2019-2025
-- **Container**: `conus-hls-drought-monitor`
-- **Download status**: 2019-2023 raw data complete; 2024 being prefetched (10 wget workers)
-- **NDVI status**: 2019-2022 complete; 2023 scanning (5,793 existing + ~247k to process); 2024-2025 pending
-- **Zombies**: ~408 harmless zombies accumulated; clear on container restart
+- **Container**: `conus-hls-drought-monitor` (up 11 days since Mar 12)
+- **Download status**: 2019-2024 raw data complete; 2025 being prefetched (8 wget workers, currently on S30 tile T12UVU Oct 2025)
+- **NDVI status**: 2019-2023 complete; 2024 in progress (~14%); 2025 pending
+- **Throughput**: ~1,940 granules/hour (consistent with 2023 rate)
+- **ETA for 2024**: ~March 29 at current pace
+- **Error rate**: 0.04% (13 errors across 7 chunks)
+- **Zombies**: ~880 harmless zombies accumulated; clear on container restart
 
 ### Shelved: R-based 2025 Download (CONUS parallel)
 - **Reason**: Docker PID 1 (`tail -f /dev/null`) doesn't reap zombie processes. Every parallel R worker that exits becomes a permanent zombie until container restart. Tried `multisession` and `multicore` — both create zombies in this container.
@@ -37,7 +40,7 @@
 |------|-------|------|
 | 2019 | 535,584 | 7.0 TB |
 
-### Processed NDVI (daily) — Updated Mar 18, 2026
+### Processed NDVI (daily) — Updated Mar 24, 2026
 | Year | Files | Status |
 |------|-------|--------|
 | 2013 | 25,107 | Complete (pre-HLS) |
@@ -49,10 +52,10 @@
 | 2019 | 191,555 | **Complete** |
 | 2020 | 188,190 | **Complete** |
 | 2021 | 208,915 | **Complete** |
-| 2022 | 258,101 | **Complete** (finished Mar 18 12:33 MDT) |
-| 2023 | 5,793 | **In progress** — scanning 252k granules |
-| 2024 | pending | Pending — prefetch downloading |
-| 2025 | 35,230 | Pending |
+| 2022 | 258,101 | **Complete** (finished Mar 18) |
+| 2023 | 251,237 | **Complete** (finished Mar 23) |
+| 2024 | ~35,000 | **In progress** — chunk 8/51, ETA ~Mar 29 |
+| 2025 | — | Pending — raw data prefetch active |
 
 ---
 
@@ -78,6 +81,22 @@ for yr in 2019 2020 2021 2022 2023 2024 2025; do
   ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l
 done
 ```
+
+---
+
+## Session Summary (Mar 24, 2026)
+
+### Work Completed
+1. **Status check**: Confirmed 2023 NDVI processing completed (251,237 files) — 6 of 7 years done (2019-2023)
+2. **2024 processing healthy**: Chunk 8/51, 0.04% error rate, ~1,940 granules/hour throughput
+3. **Throughput analysis**: Compared 2023 vs 2024 processing rates — identical (~1,940/hr), no session degradation
+4. **2025 prefetch active**: wget workers downloading S30 tile T12UVU (Oct 2025 data)
+5. **Updated RUNNING_ANALYSES.md**: Refreshed all status tables
+
+### Key Milestone
+- **2023 NDVI processing complete** — 5 of 7 years (2019-2023) now fully processed
+- Pipeline is 71% through the 2019-2025 NDVI processing queue
+- 2024 ETA: ~March 29
 
 ---
 
@@ -179,7 +198,7 @@ Docker's PID 1 (`tail -f /dev/null`) never calls `wait()`, so any orphaned child
 | Step | Script | Status |
 |------|--------|--------|
 | Download (2013-2018) | `redownload_all_years_cloud100.R` | COMPLETE |
-| Download (2019-2025) | `bulk_download_docker.sh` | RUNNING — 2019-2023 downloaded, 2024 prefetching, 2025 pending |
+| Download (2019-2025) | `bulk_download_docker.sh` | RUNNING — 2019-2024 downloaded, 2024 NDVI chunk 8/51, 2025 prefetching |
 | Aggregation | `01_aggregate_to_4km_parallel.R` | 2013-2016 COMPLETE, 2017+ pending |
 | Norms | `02_doy_looped_norms.R` | Pending aggregation |
 | Year Predictions | `03_doy_looped_year_predictions.R` | Updated to k=50, ready |
