@@ -1,0 +1,30 @@
+Progress: 130000 / 254670 
+Chunk 26 complete. 4333 succeeded, 663 skipped, 0 corrupt, 1 errors
+
+=== Chunk 27 / 51  (granules 130001 - 135000 ) ===
+Progress: 130500 / 254670 
+Progress: 131000 / 254670 
+Progress: 131500 / 254670 
+Progress: 132000 / 254670 
+Progress: 132500 / 254670 
+Progress: 133000 / 254670 
+Progress: 133500 / 254670 
+Progress: 134000 / 254670 
+Progress: 134500 / 254670 
+Progress: 135000 / 254670 
+Chunk 27 complete. 4676 succeeded, 324 skipped, 0 corrupt, 0 errors
+
+=== Chunk 28 / 51  (granules 135001 - 140000 ) ===
+Progress: 135500 / 254670 
+Progress: 136000 / 254670 
+Progress: 136500 / 254670 
+Progress: 137000 / 254670 
+Progress: 137500 / 254670 
+Progress: 138000 / 254670 
+Progress: 138500 / 254670 
+Progress: 139000 / 254670 
+Progress: 139500 / 254670 
+Progress: 140000 / 254670 
+Chunk 28 complete. 4717 succeeded, 283 skipped, 0 corrupt, 0 errors
+
+=== Chunk 29 / 51  (granules 140001 - 145000 ) ===
