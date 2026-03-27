@@ -34,11 +34,12 @@ count_ndvi() {
 }
 
 # Minimum NDVI file threshold to consider a year "complete"
-# 2019-2021 have ~190-210k files each; anything above 100k is done
-NDVI_COMPLETE_THRESHOLD=100000
+# Most years have 190-260k files; 180k skips complete years but catches partial ones like 2024
+NDVI_COMPLETE_THRESHOLD=180000
 
 # Download + process for each year
-for year in 2019 2020 2021 2022 2023 2024 2025; do
+# 2019-2023 confirmed complete (Mar 2026) — start from 2024 to avoid slow CIFS scans
+for year in 2024 2025; do
   echo "=== YEAR $year ==="
   echo "Started: $(date)"
 

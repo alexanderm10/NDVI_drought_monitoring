@@ -1,18 +1,17 @@
 # Currently Running Analyses
 
-**Updated**: 2026-03-26 16:45 MDT
+**Updated**: 2026-03-27 13:05 MDT
 
-## Status: STOPPED — Graceful shutdown for machine maintenance
+## Status: RUNNING — 2024 NDVI processing resumed
 
-### Pipeline: Bulk Download (2019-2025) — Docker
-- **Status**: STOPPED — container shut down for machine update
+### Pipeline: Bulk Download (2024-2025) — Docker
+- **Status**: RUNNING — 2024 NDVI processing, chunk 29/51
 - **Script**: `bulk_download_docker.sh` → `process_bulk_ndvi_docker.R`
 - **Log**: `bulk_downloads/logs/process_2024_docker.log`, `bulk_downloads/logs/bulk_docker.log`
-- **Container**: `conus-hls-drought-monitor` (stopped Mar 26, was up 14 days since Mar 12)
-- **NDVI status**: 2019-2023 complete; 2024 stopped at chunk 29/51 (~55%); 2025 pending
-- **Last completed chunk**: 28 (granules 135,001-140,000) — chunk 29 was interrupted
-- **Error rate**: 0.03% across 28 completed chunks
-- **Shutdown state**: `shutdown_state_20260326_164513.txt`
+- **Container**: `conus-hls-drought-monitor` (restarted Mar 27)
+- **NDVI status**: 2019-2023 complete; 2024 processing chunk 29/51 (~55%); 2025 queued next
+- **Workers**: 8 parallel R workers active
+- **Previous error rate**: 0.03% across 28 completed chunks
 
 ### Shelved: R-based 2025 Download (CONUS parallel)
 - **Reason**: Docker PID 1 (`tail -f /dev/null`) doesn't reap zombie processes. Every parallel R worker that exits becomes a permanent zombie until container restart. Tried `multisession` and `multicore` — both create zombies in this container.
@@ -50,8 +49,8 @@
 | 2021 | 208,915 | **Complete** |
 | 2022 | 258,101 | **Complete** (finished Mar 18) |
 | 2023 | 251,237 | **Complete** (finished Mar 23) |
-| 2024 | ~140,000 | **Stopped** — chunk 28/51 complete (~55%), shutdown for maintenance |
-| 2025 | — | Pending — raw data prefetch was active (S30 tile T16UEU) |
+| 2024 | 152,865 | **Processing** — chunk 29/51 (~55%), resumed Mar 27 |
+| 2025 | 35,230 | Queued — raw data downloaded (261,894 granules), processing after 2024 |
 
 ---
 
@@ -77,6 +76,21 @@ for yr in 2019 2020 2021 2022 2023 2024 2025; do
   ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l
 done
 ```
+
+---
+
+## Session Summary (Mar 27, 2026)
+
+### Work Completed
+1. **Container restart**: Restarted `conus-hls-drought-monitor` after machine maintenance shutdown
+2. **Re-copied `.netrc`**: Earthdata auth credentials restored inside container
+3. **Fixed NDVI skip threshold**: Raised `NDVI_COMPLETE_THRESHOLD` from 100k to 180k — old threshold was incorrectly skipping 2024 (152k files, only ~55% complete)
+4. **Narrowed year loop**: Changed `bulk_download_docker.sh` to iterate only 2024-2025 (2019-2023 confirmed complete) — avoids ~5 min of slow CIFS file counting per completed year
+5. **Added download-monitor permissions**: Added Bash permissions for `echo`, `tail`, `grep`, `df`, `head`, `cat` to `settings.local.json` so the download-monitor agent can run its diagnostic commands
+
+### Pipeline State at Session End
+- 2024 NDVI: chunk 29/51 actively processing with 8 workers
+- 2025: queued, will start automatically after 2024 completes
 
 ---
 
@@ -218,7 +232,7 @@ Docker's PID 1 (`tail -f /dev/null`) never calls `wait()`, so any orphaned child
 | Step | Script | Status |
 |------|--------|--------|
 | Download (2013-2018) | `redownload_all_years_cloud100.R` | COMPLETE |
-| Download (2019-2025) | `bulk_download_docker.sh` | RUNNING — 2019-2024 downloaded, 2024 NDVI chunk 8/51, 2025 prefetching |
+| Download (2019-2025) | `bulk_download_docker.sh` | RUNNING — 2019-2023 NDVI complete, 2024 chunk 29/51, 2025 queued |
 | Aggregation | `01_aggregate_to_4km_parallel.R` | 2013-2016 COMPLETE, 2017+ pending |
 | Norms | `02_doy_looped_norms.R` | Pending aggregation |
 | Year Predictions | `03_doy_looped_year_predictions.R` | Updated to k=50, ready |

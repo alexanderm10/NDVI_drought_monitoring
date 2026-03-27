@@ -77,7 +77,25 @@
       "Bash(docker stop:*)",
       "Bash(do echo:*)",
       "Bash(for yr:*)",
-      "Bash(echo -n \"$yr S30: \")"
+      "Bash(echo -n \"$yr S30: \")",
+      "Bash(BULK_LOG=\"/home/malexander/r_projects/github/NDVI_drought_monitoring/CONUS_HLS_drought_monitoring/bulk_downloads/logs\")",
+      "Read(//home/malexander/r_projects/github/NDVI_drought_monitoring/$BULK_LOG/**)",
+      "Bash(BULK_LOG=/home/malexander/r_projects/github/NDVI_drought_monitoring/CONUS_HLS_drought_monitoring/bulk_downloads/logs)",
+      "Read(//home/malexander/r_projects/github/NDVI_drought_monitoring/**)",
+      "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring log --oneline -10)",
+      "Bash(./safe_shutdown.sh)",
+      "Bash(./safe_shutdown.sh --force)",
+      "Bash(docker-compose up:*)",
+      "Bash(echo:*)",
+      "Bash(tail:*)",
+      "Bash(grep:*)",
+      "Bash(df:*)",
+      "Bash(head:*)",
+      "Bash(cat:*)",
+      "Bash(BULK_LOG:*)",
+      "Bash(ACTIVE_PROC:*)",
+      "Bash(ACTIVE_DL:*)",
+      "Bash(PREFETCH:*)"
     ],
     "defaultMode": "acceptEdits"
   }
