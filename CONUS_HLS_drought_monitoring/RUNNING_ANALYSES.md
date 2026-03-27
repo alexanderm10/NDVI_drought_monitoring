@@ -1,17 +1,34 @@
 # Currently Running Analyses
 
-**Updated**: 2026-03-27 13:05 MDT
+**Updated**: 2026-03-27 14:35 MDT
 
-## Status: RUNNING — 2024 NDVI processing resumed
+## Status: RUNNING — 2024 + 2025 processing in parallel
 
-### Pipeline: Bulk Download (2024-2025) — Docker
-- **Status**: RUNNING — 2024 NDVI processing, chunk 29/51
-- **Script**: `bulk_download_docker.sh` → `process_bulk_ndvi_docker.R`
+### Pipeline 1: 2024 NDVI Processing — Docker
+- **Status**: RUNNING — chunk 29/51 (~55%)
+- **Script**: `bulk_download_docker.sh` → `process_bulk_ndvi_docker.R 2024 --workers=8`
 - **Log**: `bulk_downloads/logs/process_2024_docker.log`, `bulk_downloads/logs/bulk_docker.log`
-- **Container**: `conus-hls-drought-monitor` (restarted Mar 27)
-- **NDVI status**: 2019-2023 complete; 2024 processing chunk 29/51 (~55%); 2025 queued next
-- **Workers**: 8 parallel R workers active
-- **Previous error rate**: 0.03% across 28 completed chunks
+- **Container**: `conus-hls-drought-monitor`
+- **Workers**: 8 parallel R workers
+
+### Pipeline 2: 2025 NDVI Processing — Docker (parallel)
+- **Status**: RUNNING — started Mar 27 14:32, scanning/processing available granules
+- **Script**: `process_bulk_ndvi_docker.R 2025 --workers=4` (launched manually)
+- **Log**: `bulk_downloads/logs/process_2025_docker.log`
+- **Workers**: 4 parallel R workers
+- **Note**: Processing the ~262K granules already downloaded; 182 S30 tiles (zones 17-19) still downloading
+
+### Pipeline 3: 2025 S30 Prefetch — Docker
+- **Status**: RUNNING — finishing remaining S30 tiles (~24K granules, zones 17-19)
+- **Script**: `getHLS_bands.sh` (resumable, skips existing files)
+- **Log**: `bulk_downloads/logs/prefetch_2025.log`
+- **L30**: Complete (1,209/1,209 tiles)
+- **S30**: 1,027/1,209 tiles downloaded, remaining 182 in progress
+
+### Resource Usage
+- **Total workers**: 12 R workers + download processes
+- **System**: 48 CPUs, 199GB RAM free, 96TB disk free
+- **Error rate**: <0.002% across all processing
 
 ### Shelved: R-based 2025 Download (CONUS parallel)
 - **Reason**: Docker PID 1 (`tail -f /dev/null`) doesn't reap zombie processes. Every parallel R worker that exits becomes a permanent zombie until container restart. Tried `multisession` and `multicore` — both create zombies in this container.
@@ -49,8 +66,8 @@
 | 2021 | 208,915 | **Complete** |
 | 2022 | 258,101 | **Complete** (finished Mar 18) |
 | 2023 | 251,237 | **Complete** (finished Mar 23) |
-| 2024 | 152,865 | **Processing** — chunk 29/51 (~55%), resumed Mar 27 |
-| 2025 | 35,230 | Queued — raw data downloaded (261,894 granules), processing after 2024 |
+| 2024 | 152,865 | **Processing** — chunk 29/51 (~55%), 8 workers |
+| 2025 | 35,230+ | **Processing** — 4 workers in parallel with 2024; S30 prefetch finishing last 182 tiles |
 
 ---
 
@@ -79,7 +96,22 @@ done
 
 ---
 
-## Session Summary (Mar 27, 2026)
+## Session Summary (Mar 27, 2026 — afternoon)
+
+### Work Completed
+1. **Status check**: 2024 at chunk 29/51 (~55%), 2025 download 92% complete (L30 done, S30 missing 182 tiles in zones 17-19)
+2. **Restarted 2025 S30 prefetch**: Resumed `getHLS_bands.sh` to finish remaining ~24K S30 granules
+3. **Launched parallel 2025 NDVI processing**: Started `process_bulk_ndvi_docker.R 2025 --workers=4` alongside ongoing 2024 (8 workers) — 12 total workers, plenty of headroom on 48-CPU/251GB system
+
+### Pipeline State at Session End
+- 2024 NDVI: chunk 29/51, 8 workers
+- 2025 NDVI: processing started with 4 workers (will process available ~262K granules)
+- 2025 S30 prefetch: downloading remaining 182 tiles
+- After 2025 processing finishes, re-run to pick up granules from late-arriving S30 tiles, or let the main `bulk_download_docker.sh` handle it when 2024 completes
+
+---
+
+## Session Summary (Mar 27, 2026 — morning)
 
 ### Work Completed
 1. **Container restart**: Restarted `conus-hls-drought-monitor` after machine maintenance shutdown
@@ -232,7 +264,7 @@ Docker's PID 1 (`tail -f /dev/null`) never calls `wait()`, so any orphaned child
 | Step | Script | Status |
 |------|--------|--------|
 | Download (2013-2018) | `redownload_all_years_cloud100.R` | COMPLETE |
-| Download (2019-2025) | `bulk_download_docker.sh` | RUNNING — 2019-2023 NDVI complete, 2024 chunk 29/51, 2025 queued |
+| Download (2019-2025) | `bulk_download_docker.sh` | RUNNING — 2019-2023 complete, 2024 chunk 29/51, 2025 processing in parallel |
 | Aggregation | `01_aggregate_to_4km_parallel.R` | 2013-2016 COMPLETE, 2017+ pending |
 | Norms | `02_doy_looped_norms.R` | Pending aggregation |
 | Year Predictions | `03_doy_looped_year_predictions.R` | Updated to k=50, ready |
