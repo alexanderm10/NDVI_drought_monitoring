@@ -4,6 +4,7 @@ services:
   drought-monitor-r:
     build: .
     container_name: conus-hls-drought-monitor
+    init: true  # Use tini as PID 1 to reap zombie processes
     user: "${UID:-1000}:${GID:-1000}"  # Match host user to avoid permission issues
     volumes:
       # Mount the entire project directory

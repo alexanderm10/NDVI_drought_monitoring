@@ -101,7 +101,7 @@ fi
 log "Step 3: Checking for truncated NDVI files..."
 
 # NDVI TIF files should be at least 50KB; anything smaller is likely truncated
-truncated=$(find "$NDVI_DIR/2024/" -name "*_NDVI.tif" -size -50k 2>/dev/null || true)
+truncated=$(find "$NDVI_DIR/2024/" "$NDVI_DIR/2025/" -name "*_NDVI.tif" -size -50k 2>/dev/null || true)
 if [[ -n "$truncated" ]]; then
     count=$(echo "$truncated" | wc -l)
     log "  Found $count truncated NDVI file(s) — removing so they get reprocessed on restart"
