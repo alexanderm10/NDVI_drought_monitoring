@@ -46,16 +46,13 @@ config <- list(
   # Window parameters
   window_size = 7,  # +/- days around target DOY
 
-  # GAM parameters (may need tuning for CONUS scale)
-  gam_knots = -1,  # -1 lets mgcv choose automatically
-
   # Output
   output_file = file.path(hls_paths$gam_models, "doy_looped_norms.rds"),
   checkpoint_file = file.path(hls_paths$gam_models, "doy_looped_norms_checkpoint.rds"),
   checkpoint_interval = 50,  # Save every N DOYs
 
   # Posteriors directory (individual files per DOY to avoid memory issues)
-  posteriors_dir = file.path(hls_paths$gam_models, "doy_posteriors"),
+  posteriors_dir = file.path(hls_paths$gam_models, "baseline_posteriors"),
 
   # Posterior simulation
   n_posterior_sims = 100,  # Number of simulations for uncertainty

@@ -86,8 +86,8 @@ if (length(unique_norm_pixels) != length(valid_pixels)) {
 
 # Prepare norms: keep only pixel_id, yday, mean (rename to 'norm')
 norms_df <- norms_df %>%
-  select(pixel_id, yday, mean) %>%
-  rename(norm = mean)
+  select(pixel_id, yday, mean, lwr, upr) %>%
+  rename(norm = mean, norm_lwr = lwr, norm_upr = upr)
 
 cat("  Norms loaded:", nrow(norms_df), "pixel-DOY combinations\n")
 cat("  Unique pixels in norms:", length(unique_norm_pixels), "\n\n")
@@ -155,8 +155,9 @@ for (yr in years) {
   unique_year_pixels <- unique(year_preds$pixel_id)
   cat(sprintf("  Unique pixels in predictions: %d\n", length(unique_year_pixels)))
   if (length(unique_year_pixels) != length(valid_pixels)) {
-    warning(sprintf("Year predictions pixel count (%d) differs from valid pixels (%d)",
-                    length(unique_year_pixels), length(valid_pixels)))
+    stop(sprintf("Year predictions pixel count (%d) differs from valid pixels (%d). ",
+                 length(unique_year_pixels), length(valid_pixels)),
+         "Ensure script 03 was run after the current script 02 valid_pixels file was generated.")
   }
 
   # Merge with norms on (pixel_id, yday)
@@ -176,8 +177,8 @@ for (yr in years) {
   anomalies_df <- merged_df %>%
     mutate(
       anoms_mean = mean - norm,
-      anoms_lwr = lwr - norm,
-      anoms_upr = upr - norm
+      anoms_lwr = lwr - norm_upr,   # year lower bound minus norm upper bound
+      anoms_upr = upr - norm_lwr    # year upper bound minus norm lower bound
     ) %>%
     select(pixel_id, yday, x, y, anoms_mean, anoms_lwr, anoms_upr)
 

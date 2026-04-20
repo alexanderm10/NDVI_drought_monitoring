@@ -66,9 +66,7 @@ config <- list(
 
 #' Wrap DOY to valid range [1, 365]
 wrap_doy <- function(doy) {
-  while (doy < 1) doy <- doy + 365
-  while (doy > 365) doy <- doy - 365
-  return(doy)
+  ((doy - 1) %% 365) + 1
 }
 
 #' Check if posterior file exists

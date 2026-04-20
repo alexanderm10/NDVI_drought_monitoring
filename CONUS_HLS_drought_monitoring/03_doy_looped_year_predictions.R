@@ -102,9 +102,9 @@ get_trailing_window <- function(year, target_day, window_size = 16) {
 #' @param df_subset Data frame with NDVI, norm, x, y for this window
 #' @param pred_grid Prediction grid (with norm values)
 #' @param n_sims Number of posterior simulations
-#' @param spatial_k Basis dimension for spatial smooth (default 150)
+#' @param spatial_k Basis dimension for spatial smooth (default 50)
 #' @return List with predictions and model stats
-fit_year_spatial_gam <- function(df_subset, pred_grid, n_sims = 100, spatial_k = 150) {
+fit_year_spatial_gam <- function(df_subset, pred_grid, n_sims = 100, spatial_k = 50) {
 
   # Fit spatial GAM with norm as covariate
   # spatial_k controls resolution: higher k = finer spatial detail

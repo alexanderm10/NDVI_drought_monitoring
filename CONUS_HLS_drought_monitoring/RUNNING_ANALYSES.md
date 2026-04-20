@@ -1,43 +1,42 @@
 # Currently Running Analyses
 
-**Updated**: 2026-03-30 15:00 MDT
+**Updated**: 2026-04-20 MDT
 
-## Status: RUNNING — 2025 NDVI processing (single clean instance)
+## Status: RUNNING — 2018 NDVI processing (final year of 2013-2018 re-pass)
 
-### Pipeline: 2025 NDVI Processing — Docker
-- **Status**: RUNNING — chunk 15/58 (~25%), resuming from ~40% complete (skip-if-exists)
-- **Script**: `process_bulk_ndvi_docker.R 2025 --workers=8` (launched directly, not via orchestrator)
-- **Log**: `bulk_downloads/logs/process_2025_docker_restart.log`
-- **Container**: `conus-hls-drought-monitor`
-- **Workers**: 8 parallel R workers
-- **Error rate**: 0.06% (3 errors in chunk 14 — corrupt NASA source files)
-- **Zombie fix**: Container now uses `init: true` (tini as PID 1) — zombies are reaped properly
-
-### Resource Usage
+### Pipeline 1: 2013-2018 HLS Re-Download + NDVI Processing
+- **Status**: RUNNING — processing 2018 (year 6 of 6); 2013-2017 all complete
+- **Script**: `bulk_download_docker.sh` (loops 2013→2018)
+- **Log**: `bulk_downloads/logs/bulk_2013_2018.log` (per-year: `download_YYYY_docker.log`, `process_YYYY_docker.log`)
+- **Reason**: Original 2013-2018 download used `max_items=100` (now `page_size=2000`); files were ~5x sparser than expected
+- **2018 progress**: Chunk 8/39 (~20%), 67,807 NDVI files so far (target ~150-200K), 0 zombies, 0 errors
 - **Workers**: 8 R workers
-- **System**: 48 CPUs, ~200GB RAM available
-- **Zombies**: 0 (verified — tini reaping works)
+
+### Pipeline 2: 2025 Second Pass — COMPLETE
+- **Result**: 285,621 NDVI files (finished Apr 9, 2026)
+- **Improvement**: +2,074 late-arriving NASA granules caught vs pass 1 (283,547)
+- **Errors**: ~20 corrupt reads (tiles T11TPH/T12TUT/T11TLJ/T12RVV — expected corrupt NASA source)
 
 ---
 
 ## Data Inventory
 
-### Processed NDVI (daily) — Updated Mar 30, 2026
+### Processed NDVI (daily) — Updated Apr 20, 2026
 | Year | Files | Status |
 |------|-------|--------|
-| 2013 | 25,107 | Complete (pre-HLS) |
-| 2014 | 34,490 | Complete (pre-HLS) |
-| 2015 | 34,786 | Complete (pre-HLS) |
-| 2016 | 36,646 | Complete (pre-HLS) |
-| 2017 | 36,425 | Complete (pre-HLS) |
-| 2018 | 36,483 | Complete (pre-HLS) |
+| 2013 | ~40-50K (est.) | Re-processing complete |
+| 2014 | ~40-50K (est.) | Re-processing complete |
+| 2015 | ~120-150K (est.) | Re-processing complete |
+| 2016 | ~120-150K (est.) | Re-processing complete |
+| 2017 | 119,080 | **Re-processing complete** (Apr 16) |
+| 2018 | 67,807+ | **RUNNING** — chunk 8/39 (~20%) |
 | 2019 | 191,555 | **Complete** |
 | 2020 | 188,190 | **Complete** |
 | 2021 | 208,915 | **Complete** |
 | 2022 | 258,101 | **Complete** |
 | 2023 | 251,237 | **Complete** |
 | 2024 | 254,497 | **Complete** (finished Mar 29) |
-| 2025 | ~112,448+ | **Processing** — 8 workers, chunk 15/58, ~40% complete |
+| 2025 | 285,621 | **Complete** (pass 2 finished Apr 9) |
 
 ---
 
@@ -133,15 +132,72 @@ Moved bulk download into Docker container. Created `download-monitor` agent.
 
 ---
 
-## Pipeline Status
+## Pipeline Status (Apr 20, 2026)
 
 | Step | Script | Status |
 |------|--------|--------|
-| Download (2013-2018) | `redownload_all_years_cloud100.R` | COMPLETE |
-| Download (2019-2025) | `bulk_download_docker.sh` | 2019-2024 COMPLETE, 2025 processing |
-| Aggregation | `01_aggregate_to_4km_parallel.R` | 2013-2016 COMPLETE, 2017+ pending |
-| Norms | `02_doy_looped_norms.R` | Pending aggregation |
-| Year Predictions | `03_doy_looped_year_predictions.R` | Updated to k=50, ready |
+| NDVI Processing (2013-2017) | `bulk_download_docker.sh` | **COMPLETE** (re-pass) |
+| NDVI Processing (2018) | `bulk_download_docker.sh` | **RUNNING** — chunk 8/39 |
+| NDVI Processing (2019-2025) | `bulk_download_docker.sh` | **COMPLETE** |
+| Aggregation (2013-2025) | `01_aggregate_to_4km_parallel.R` | Pending — awaiting 2018 completion |
+| Norms (2013-2025) | `02_doy_looped_norms.R` | Pending aggregation |
+| Year Predictions | `03_doy_looped_year_predictions.R` | Pending norms |
+| Anomalies | `04_calculate_anomalies.R` | Pending year predictions |
+| Derivatives | `06_calculate_change_derivatives.R` | Pending anomalies |
+
+---
+
+## Next Steps (After 2018 Finishes, ~Apr 23-24)
+
+### 1. Re-aggregate 2013-2018 to 4km
+```bash
+# Delete old per-year files so the script re-processes them
+rm /mnt/malexander/datasets/ndvi_monitor/gam_models/aggregated_years/ndvi_4km_201{3,4,5,6,7,8}.rds
+
+docker exec conus-hls-drought-monitor Rscript 01_aggregate_to_4km_parallel.R 2013 2018 --workers=8
+```
+
+### 2. Aggregate 2025 (new year)
+```bash
+docker exec conus-hls-drought-monitor Rscript 01_aggregate_to_4km_parallel.R 2025 --workers=8
+```
+
+### 3. Combine all year files into timeseries
+See the combine snippet in [WORKFLOW.md](WORKFLOW.md) — produces `conus_4km_ndvi_timeseries.rds`.
+
+### 4. Check pixel coverage before fitting norms
+After combining, check DOY coverage distribution for 2013-2018 to evaluate whether the 33% pixel threshold still needs adjustment (see `TIMESERIES_GAPS_ANALYSIS.md` in repo root).
+
+### 5. Refit baseline norms (2013-2025)
+```bash
+docker exec conus-hls-drought-monitor Rscript 02_doy_looped_norms.R
+```
+
+### 6. Refit year predictions and downstream
+```bash
+docker exec conus-hls-drought-monitor Rscript 03_doy_looped_year_predictions.R
+docker exec conus-hls-drought-monitor Rscript 04_calculate_anomalies.R
+docker exec conus-hls-drought-monitor Rscript 06_calculate_change_derivatives.R
+```
+
+---
+
+## Geographic Coverage Discrepancy (Important for Analysis)
+
+The download methods used different geographic extents across years. This matters when comparing file counts or interpreting coverage gaps.
+
+| Years | Download Method | Geographic Extent |
+|-------|----------------|-------------------|
+| 2013-2018 (original) | `01a_midwest_data_acquisition.R` (CMR API, `max_items=100`) | Midwest bbox: -104.5 to -82.0 lon, 37.0 to 47.5 lat |
+| 2013-2018 (re-download, Apr 2026) | `bulk_download_docker.sh` + `midwest_tiles_noprefix.txt` | 1,209 Midwest MGRS tiles |
+| 2019-2024 | `bulk_download_docker.sh` + `midwest_tiles_noprefix.txt` | 1,209 Midwest MGRS tiles |
+| 2025 | `01a_midwest_data_acquisition_parallel.R` | **Full CONUS**: -125 to -66 lon, 25 to 49 lat |
+
+**Key implications:**
+- **2013-2024 are internally consistent** after the re-download: all use the same 1,209 Midwest MGRS tile list
+- **2025 covers more territory** (full CONUS) — its higher file counts (~283K vs ~188-254K for 2022-2024) partly reflect larger geographic coverage, not just more Sentinel passes
+- The 1,209-tile list was derived from 2016 complete data (Feb 3 commit); MGRS tiles are a fixed grid so tile completeness should not be an issue
+- **Do not directly compare 2025 file counts to 2013-2024** as a data quality metric — the domains differ
 
 ---
 

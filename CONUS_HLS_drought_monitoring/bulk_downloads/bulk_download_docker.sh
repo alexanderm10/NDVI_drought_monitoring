@@ -1,16 +1,23 @@
 #!/bin/bash
 # ==============================================================================
-# BULK DOWNLOAD ALL YEARS 2019-2025 (DOCKER VERSION)
+# BULK DOWNLOAD 2013-2018 RE-PASS (DOCKER VERSION)
 # ==============================================================================
-# Runs inside Docker container where terra is available for NDVI processing.
-# Uses Docker-internal paths (/data/ instead of /mnt/malexander/...).
+# Re-downloads HLS data for 2013-2018 to fill in granules missed by the
+# original download (which used max_items=100, now fixed to page_size=2000).
+# 2019-2025 already complete — not included here.
+#
+# Expected gains vs original:
+#   2013-2014: L30 only (Landsat 8), expect ~40-50K files (up from 25-34K)
+#   2015-2016: L30 + S30, expect ~120-150K files (up from 34-36K)
+#   2017-2018: L30 + S30A + S30B, expect ~150-200K files (up from 36K)
+#
 # Resumable: getHLS_bands.sh skips existing files, process_bulk_ndvi.R skips
-# already-processed scenes.
+# already-processed scenes. Safe to restart at any point.
 #
 # Usage (from host):
 #   docker exec -d conus-hls-drought-monitor bash -c \
 #     "cd /workspace/bulk_downloads && nohup ./bulk_download_docker.sh \
-#      > /workspace/bulk_downloads/logs/bulk_docker.log 2>&1"
+#      > /workspace/bulk_downloads/logs/bulk_2013_2018.log 2>&1"
 # ==============================================================================
 
 cd /workspace/bulk_downloads
@@ -19,10 +26,10 @@ cd /workspace/bulk_downloads
 RAW_DIR="/data/bulk_downloads_raw"
 NDVI_DIR="/data/processed_ndvi/daily"
 
-echo "=== BULK DOWNLOAD (DOCKER): 2019-2025 MIDWEST TILES ==="
+echo "=== BULK DOWNLOAD (DOCKER): 2013-2018 RE-PASS ==="
 echo "Start time: $(date)"
 echo "Tiles: 1,209 Midwest MGRS tiles"
-echo "Years: 2019-2025"
+echo "Years: 2013-2018"
 echo "Raw data: $RAW_DIR"
 echo "NDVI output: $NDVI_DIR"
 echo "Running inside Docker container: $(hostname)"
@@ -33,24 +40,17 @@ count_ndvi() {
   find "$NDVI_DIR/$1" -name "*_NDVI.tif" 2>/dev/null | wc -l
 }
 
-# Minimum NDVI file threshold to consider a year "complete"
-# Most years have 190-260k files; 180k skips complete years but catches partial ones like 2024
-NDVI_COMPLETE_THRESHOLD=180000
+# No NDVI_COMPLETE_THRESHOLD skip for 2013-2018 — all years need re-downloading.
+# 2013-2014 will have fewer files than later years (L30 only), so any threshold
+# would be wrong. We rely entirely on getHLS_bands.sh + process_bulk_ndvi skip-if-exists.
 
-# Download + process for each year
-# 2019-2023 confirmed complete (Mar 2026) — start from 2024 to avoid slow CIFS scans
-for year in 2024 2025; do
+# Download + process for each year 2013-2018
+for year in 2013 2014 2015 2016 2017 2018; do
   echo "=== YEAR $year ==="
   echo "Started: $(date)"
 
-  # Skip years that already have enough NDVI files
   existing_ndvi=$(count_ndvi $year)
-  if [ "$existing_ndvi" -ge "$NDVI_COMPLETE_THRESHOLD" ]; then
-    echo "⏭ Skipping $year — already has $existing_ndvi NDVI files (threshold: $NDVI_COMPLETE_THRESHOLD)"
-    echo "Completed $year: $(date)"
-    echo ""
-    continue
-  fi
+  echo "Existing NDVI files: $existing_ndvi"
 
   # Check if download already completed by counting raw granule directories
   l30_count=$(find $RAW_DIR/L30/$year -mindepth 5 -maxdepth 5 -type d 2>/dev/null | wc -l)
@@ -97,8 +97,8 @@ done
 echo "=== ALL YEARS COMPLETE ==="
 echo "End time: $(date)"
 echo ""
-echo "Summary:"
-for year in 2019 2020 2021 2022 2023 2024 2025; do
+echo "Summary (2013-2018 re-pass):"
+for year in 2013 2014 2015 2016 2017 2018; do
   count=$(count_ndvi $year)
   echo "  $year: $count NDVI files"
 done

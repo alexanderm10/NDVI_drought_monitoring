@@ -44,7 +44,7 @@ hls_paths <- get_hls_paths()
 args <- commandArgs(trailingOnly = TRUE)
 
 # Default values
-requested_years <- 2013:2024
+requested_years <- 2013:2025
 n_workers <- 8
 
 # Parse arguments

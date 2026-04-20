@@ -35,13 +35,29 @@ The workflow uses a **day-of-year (DOY) looped** approach that processes each DO
 
 ### Step-by-Step Execution
 
-#### **Script 01: Aggregate HLS Data** (~3-4 hours)
+#### **Script 01: Aggregate HLS Data** (~3-4 hours per year)
 ```bash
-docker exec conus-hls-drought-monitor Rscript 01_aggregate_to_4km.R
+# Single year
+docker exec conus-hls-drought-monitor Rscript 01_aggregate_to_4km_parallel.R 2025 --workers=8
+
+# Year range (e.g. re-aggregating 2013-2018 after re-download)
+docker exec conus-hls-drought-monitor Rscript 01_aggregate_to_4km_parallel.R 2013 2018 --workers=8
 ```
 - Input: Raw 30m HLS NDVI files
-- Output: 4km aggregated timeseries with cloud masking
-- Output file: `conus_4km_ndvi_timeseries.rds`
+- Output per year: `aggregated_years/ndvi_4km_YYYY.rds`
+- **Note:** Script skips years where `ndvi_4km_YYYY.rds` already exists. Delete the file first to force a re-run.
+
+#### **Combine Year Files** (~5 minutes)
+
+After Script 01 completes for all years, combine into the single file that Scripts 02-06 read:
+
+```r
+library(dplyr)
+year_files <- list.files("aggregated_years", pattern = "ndvi_4km_\\d{4}\\.rds", full.names = TRUE)
+combined <- bind_rows(lapply(year_files, readRDS))
+combined <- distinct(combined, pixel_id, sensor, date, .keep_all = TRUE)
+saveRDS(combined, file.path(gam_models_dir, "conus_4km_ndvi_timeseries.rds"))
+```
 
 #### **Script 02: Baseline Norms** (~6-8 hours, 4 cores)
 ```bash
@@ -190,6 +206,45 @@ Change Derivatives (rate of change anomalies)
 - **Resumable**: Scripts 02, 03, 06 can resume from checkpoints
 - **Land cover consistency**: Same valid pixels used across all scripts
 - **Posterior storage**: Keep posteriors for derivatives (don't delete)
+
+## Operational: Monthly Incremental Updates
+
+After the historical pipeline is complete, monthly updates only reprocess the current year — no baseline refit needed.
+
+```bash
+# 1. Download new scenes for target month
+docker exec conus-hls-drought-monitor Rscript 01a_midwest_data_acquisition_parallel.R 2026 01
+
+# 2. Re-aggregate current year (script skips already-processed scenes)
+docker exec conus-hls-drought-monitor Rscript 01_aggregate_to_4km_parallel.R 2026 --workers=8
+
+# 3. Re-combine timeseries (append new year data, deduplicate)
+# Run the combine snippet above
+
+# 4. Refit current year predictions
+docker exec conus-hls-drought-monitor Rscript 03_doy_looped_year_predictions.R
+
+# 5. Recalculate anomalies
+docker exec conus-hls-drought-monitor Rscript 04_calculate_anomalies.R
+```
+
+**Cron job (5th of each month at 2am):**
+```bash
+0 2 5 * * /home/malexander/r_projects/github/NDVI_drought_monitoring/CONUS_HLS_drought_monitoring/monthly_update.sh >> /home/malexander/monthly_update_cron.log 2>&1
+```
+
+**Annual baseline update (January 1st, after prior year is complete):**
+```bash
+# Archive old baseline
+cp /data/gam_models/doy_looped_norms.rds /data/gam_models/archive/doy_looped_norms_$(date +%Y%m%d).rds
+
+# Refit baseline with new year included (update year range in script first)
+docker exec conus-hls-drought-monitor Rscript 02_doy_looped_norms.R
+
+# Refit all year predictions for consistency with new baseline
+docker exec conus-hls-drought-monitor Rscript 03_doy_looped_year_predictions.R
+docker exec conus-hls-drought-monitor Rscript 04_calculate_anomalies.R
+```
 
 ## Troubleshooting
 
