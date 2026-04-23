@@ -38,5 +38,11 @@ __pycache__/
 # *_derivatives.csv
 # *_year_*.csv
 
+# Validation reports (diagnostic output, not source)
+CONUS_HLS_drought_monitoring/validation_reports/
+
+# Shutdown state files
+CONUS_HLS_drought_monitoring/shutdown_state_*.txt
+
 # nohup output
 nohup.out
