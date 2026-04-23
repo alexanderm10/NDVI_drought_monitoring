@@ -123,6 +123,12 @@ aggregate_scene_to_4km <- function(ndvi_path, grid_4km, method = "median", min_p
   pixel_ids <- values(grid_30m, mat = FALSE)
   ndvi_vals <- values(ndvi_30m, mat = FALSE)
 
+  # Clamp to physically valid NDVI range [-1, 1]. Values outside this range
+  # are artifacts from unmasked HLS fill values or sensor edge effects
+  # (observed in ~0.16% of pixels per scene). Set to NA rather than clamp
+  # to avoid introducing artificial boundary values.
+  ndvi_vals[ndvi_vals < -1 | ndvi_vals > 1] <- NA
+
   # Create dataframe
   df <- data.frame(
     pixel_id = pixel_ids,
