@@ -1,15 +1,23 @@
 # Currently Running Analyses
 
-**Updated**: 2026-04-20 MDT
+**Updated**: 2026-04-24 MDT
 
-## Status: RUNNING — 2018 NDVI processing (final year of 2013-2018 re-pass)
+## Status: RUNNING — 4km Aggregation (2013-2025, year 2 of 13)
 
-### Pipeline 1: 2013-2018 HLS Re-Download + NDVI Processing
-- **Status**: RUNNING — processing 2018 (year 6 of 6); 2013-2017 all complete
+### Pipeline 1: 4km Aggregation (Script 01)
+- **Status**: RUNNING — 2013 complete, 2014 processing now (year 2 of 13)
+- **Script**: `01_aggregate_to_4km_parallel.R 2013 2025 --workers=8 --tiles=bulk_downloads/midwest_tiles_noprefix.txt`
+- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/aggregation_2013_2025.log`
+- **Started**: 2026-04-24 08:40 MDT
+- **2013 result**: 40,426 files, 304.8 min, output 12 MB (`ndvi_4km_2013.rds`)
+- **Expected completion**: ~Apr 26-27 (3-5 hrs/year x 13 years)
+- **Workers**: 8 R workers, tile-filtered to 1,209 Midwest tiles
+
+### Pipeline 2: 2013-2018 HLS Re-Download + NDVI Processing — COMPLETE
+- **Status**: COMPLETE (finished Apr 22)
 - **Script**: `bulk_download_docker.sh` (loops 2013→2018)
-- **Log**: `bulk_downloads/logs/bulk_2013_2018.log` (per-year: `download_YYYY_docker.log`, `process_YYYY_docker.log`)
+- **Log**: `bulk_downloads/logs/bulk_2013_2018.log`
 - **Reason**: Original 2013-2018 download used `max_items=100` (now `page_size=2000`); files were ~5x sparser than expected
-- **2018 progress**: Chunk 8/39 (~20%), 67,807 NDVI files so far (target ~150-200K), 0 zombies, 0 errors
 - **Workers**: 8 R workers
 
 ### Pipeline 2: 2025 Second Pass — COMPLETE
@@ -62,6 +70,20 @@ for yr in 2019 2020 2021 2022 2023 2024 2025; do
   ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l
 done
 ```
+
+---
+
+## Session Summary (Apr 24, 2026)
+
+### Work Completed
+1. **Confirmed 2013-2018 re-download complete**: All 6 years finished Apr 22 (40K-193K files per year)
+2. **Preflight checks**: Verified all 13 year directories readable, grid consistency (150,480 cells, 125,798 valid pixels), 76 TB free disk
+3. **Added `--tiles` filter to aggregation script**: New `--tiles=<file>` CLI parameter filters input files to specified MGRS tiles. Handles T-prefix mismatch between filenames (`T09UYP`) and tile list (`09UYP`). Prevents wasted CIFS I/O when processing CONUS data against Midwest grid.
+4. **Discovered 2025 has same 1,209 Midwest tiles**: Despite being downloaded as full CONUS, all tiles in 2025 data are already Midwest-only. Tile filter still useful as safeguard.
+5. **Launched full 2013-2025 aggregation**: 8 workers, tile-filtered, all 13 years queued. 2013 completed in 304.8 min (12 MB output). 2014 in progress.
+
+### Files Modified
+- `01_aggregate_to_4km_parallel.R`: Added `--tiles=<file>` CLI argument and tile filtering logic
 
 ---
 
@@ -136,44 +158,31 @@ Moved bulk download into Docker container. Created `download-monitor` agent.
 
 | Step | Script | Status |
 |------|--------|--------|
-| NDVI Processing (2013-2017) | `bulk_download_docker.sh` | **COMPLETE** (re-pass) |
-| NDVI Processing (2018) | `bulk_download_docker.sh` | **RUNNING** — chunk 8/39 |
+| NDVI Processing (2013-2018) | `bulk_download_docker.sh` | **COMPLETE** (re-pass, finished Apr 22) |
 | NDVI Processing (2019-2025) | `bulk_download_docker.sh` | **COMPLETE** |
-| Aggregation (2013-2025) | `01_aggregate_to_4km_parallel.R` | Pending — awaiting 2018 completion |
-| Norms (2013-2025) | `02_doy_looped_norms.R` | Pending aggregation |
+| Aggregation (2013-2025) | `01_aggregate_to_4km_parallel.R` | **RUNNING** — 2013 done, 2014 in progress |
+| Combine timeseries | R snippet (see WORKFLOW.md) | Pending aggregation |
+| Norms (2013-2025) | `02_doy_looped_norms.R` | Pending combine |
 | Year Predictions | `03_doy_looped_year_predictions.R` | Pending norms |
 | Anomalies | `04_calculate_anomalies.R` | Pending year predictions |
 | Derivatives | `06_calculate_change_derivatives.R` | Pending anomalies |
 
 ---
 
-## Next Steps (After 2018 Finishes, ~Apr 23-24)
+## Next Steps (After Aggregation Completes, ~Apr 26-27)
 
-### 1. Re-aggregate 2013-2018 to 4km
-```bash
-# Delete old per-year files so the script re-processes them
-rm /mnt/malexander/datasets/ndvi_monitor/gam_models/aggregated_years/ndvi_4km_201{3,4,5,6,7,8}.rds
-
-docker exec conus-hls-drought-monitor Rscript 01_aggregate_to_4km_parallel.R 2013 2018 --workers=8
-```
-
-### 2. Aggregate 2025 (new year)
-```bash
-docker exec conus-hls-drought-monitor Rscript 01_aggregate_to_4km_parallel.R 2025 --workers=8
-```
-
-### 3. Combine all year files into timeseries
+### 1. Combine all year files into timeseries
 See the combine snippet in [WORKFLOW.md](WORKFLOW.md) — produces `conus_4km_ndvi_timeseries.rds`.
 
-### 4. Check pixel coverage before fitting norms
+### 2. Check pixel coverage before fitting norms
 After combining, check DOY coverage distribution for 2013-2018 to evaluate whether the 33% pixel threshold still needs adjustment (see `TIMESERIES_GAPS_ANALYSIS.md` in repo root).
 
-### 5. Refit baseline norms (2013-2025)
+### 3. Refit baseline norms (2013-2025)
 ```bash
 docker exec conus-hls-drought-monitor Rscript 02_doy_looped_norms.R
 ```
 
-### 6. Refit year predictions and downstream
+### 4. Refit year predictions and downstream
 ```bash
 docker exec conus-hls-drought-monitor Rscript 03_doy_looped_year_predictions.R
 docker exec conus-hls-drought-monitor Rscript 04_calculate_anomalies.R

@@ -4,10 +4,11 @@
 # Purpose: Aggregate HLS NDVI scenes using parallel processing
 #
 # Usage:
-#   Rscript 01_aggregate_to_4km_parallel.R              # All years (2013-2024)
+#   Rscript 01_aggregate_to_4km_parallel.R              # All years (2013-2025)
 #   Rscript 01_aggregate_to_4km_parallel.R 2013         # Single year
 #   Rscript 01_aggregate_to_4km_parallel.R 2013 2015    # Year range
 #   Rscript 01_aggregate_to_4km_parallel.R --workers=4  # Specify worker count
+#   Rscript 01_aggregate_to_4km_parallel.R --tiles=midwest_tiles.txt  # Filter to specific tiles
 #
 # Features:
 #   - Each worker writes to disk incrementally (not holding all in RAM)
@@ -46,15 +47,31 @@ args <- commandArgs(trailingOnly = TRUE)
 # Default values
 requested_years <- 2013:2025
 n_workers <- 8
+tile_filter_file <- NULL
 
 # Parse arguments
 numeric_args <- c()
 for (arg in args) {
   if (grepl("^--workers=", arg)) {
     n_workers <- as.integer(sub("^--workers=", "", arg))
+  } else if (grepl("^--tiles=", arg)) {
+    tile_filter_file <- sub("^--tiles=", "", arg)
   } else if (grepl("^[0-9]+$", arg)) {
     numeric_args <- c(numeric_args, as.integer(arg))
   }
+}
+
+# Load tile filter if provided
+tile_filter <- NULL
+if (!is.null(tile_filter_file)) {
+  if (!file.exists(tile_filter_file)) {
+    stop("Tile filter file not found: ", tile_filter_file)
+  }
+  tile_filter <- trimws(readLines(tile_filter_file))
+  tile_filter <- tile_filter[nchar(tile_filter) > 0]
+  # Add T prefix if missing (tile list uses bare IDs, filenames use T-prefixed)
+  tile_filter <- ifelse(grepl("^T", tile_filter), tile_filter, paste0("T", tile_filter))
+  cat("Tile filter loaded:", length(tile_filter), "tiles from", tile_filter_file, "\n")
 }
 
 # Handle year arguments
@@ -399,6 +416,20 @@ for (current_year in years_to_process) {
     parts <- strsplit(basename(f), "\\.")[[1]]
     parts[3]
   })
+
+  # Apply tile filter if provided
+  if (!is.null(tile_filter)) {
+    keep <- file_tiles %in% tile_filter
+    n_before <- length(year_files)
+    year_files <- year_files[keep]
+    file_tiles <- file_tiles[keep]
+    cat("  Tile filter: kept", length(year_files), "of", n_before, "files",
+        "(", length(unique(file_tiles)), "tiles matched)\n")
+    if (length(year_files) == 0) {
+      cat("  No files match tile filter, skipping year", current_year, "\n")
+      next
+    }
+  }
 
   file_info <- data.frame(
     path = year_files,
