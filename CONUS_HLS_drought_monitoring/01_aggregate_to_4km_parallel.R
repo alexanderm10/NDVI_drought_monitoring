@@ -303,8 +303,9 @@ process_file_chunk_disk <- function(file_chunk, worker_id, config, temp_dir) {
       next
     }
 
-    # Check if already processed (resume)
-    scene_id <- paste(meta$sensor, as.character(meta$date), sep = "_")
+    # Check if already processed (resume) — must include tile so different
+    # tiles on the same sensor+date aren't conflated into one resume key
+    scene_id <- paste(meta$sensor, meta$tile, as.character(meta$date), sep = "_")
     if (scene_id %in% processed_scenes) {
       n_skipped <- n_skipped + 1
       next
