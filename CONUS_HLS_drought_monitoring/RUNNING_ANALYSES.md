@@ -1,14 +1,15 @@
 # Currently Running Analyses
 
-**Updated**: 2026-04-28 MDT
+**Updated**: 2026-04-28 11:30 MDT (end of pipeline-audit + downstream-fix session)
 
-## Status: RUNNING — 4km Aggregation 2019-2025 (filtered, year 1 of 7)
+## Status: RUNNING — 4km Aggregation 2019-2025 (year 1 of 7, ~46% through 2019)
 
 ### Pipeline 1: 4km Aggregation (Script 01)
-- **Status**: RUNNING — 2013-2018 complete, 2019 just started with filtered tile list
+- **Status**: RUNNING — 2013-2018 complete, 2019 in progress
 - **Active script**: `01_aggregate_to_4km_parallel.R 2019 2025 --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt`
 - **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/aggregation_2019_2025.log`
 - **Started**: 2026-04-28 07:28 MDT (replaced unfiltered run from 2026-04-24)
+- **As of 11:30 MDT**: 8/8 workers alive, ~46% through 2019 (212 RDS batches written + 8 worker_processed files), per-worker range 22-30 batches. Worker 04 slowest at 37%. Expected year 2019 completion: ~15:00 MDT today. Expected full 2019-2025 run: ~2026-05-04 to 05-05.
 
 #### Year completion timing (original unfiltered run, 2013-2018)
 | Year | Status | Runtime |
@@ -93,6 +94,85 @@ for yr in 2019 2020 2021 2022 2023 2024 2025; do
   ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l
 done
 ```
+
+---
+
+## Session Summary (Apr 28, 2026 — pipeline-audit + downstream-fix session)
+
+Full pipeline review while aggregation runs. Two new agents added (pipeline-audit, r-reviewer), 23 deprecated scripts archived, 62 GB reclaimed, all four downstream scripts (02, 03, 04, 06) audited and patched. **5 commits pushed to origin/main.**
+
+### Work Completed
+1. **Agents** (`.claude/agents/`):
+   - `pipeline_audit.md`: rewrote from corrupted-import markdown, retargeted from wildfire to NDVI HLS pipeline, scoped to `CONUS_HLS_drought_monitoring/` only
+   - `r-reviewer.md`: added NDVI-specific framework checks (future worker recycling, posterior incremental saving, NLCD 125,798-pixel verification, Docker path duality, sensor handling, year-range hardcoding)
+2. **Pipeline audit** (read-only): identified 23 archive candidates + 6 ambiguous scripts requiring investigation. Cleaned up:
+   - Group 1: 7 test/cloud100 experiment scripts (Jan 2026)
+   - Group 2: 4 sequential predecessors of `_parallel` variants
+   - Group 3: 4 stale orchestration/monitor scripts
+   - Group 4: 4 pre-Docker bulk download artifacts
+   - Group 5: 3 historical state files
+   - Investigation finding: `00_gam_utility_functions.R` (superseded by `00_posterior_functions.R`)
+   - All moved to `.archive/`. **Reclaimed 62 GB** by deleting `year_predictions_posteriors_k50_test/` (k=50 test posteriors no longer needed).
+3. **Promoted combine snippet to script**: `01b_combine_year_files.R` (272 lines) replaces the unversioned R snippet that was living in `WORKFLOW.md`. Adds schema validation, sensor-broken-down duplicate detection, skip-if-up-to-date logic, per-year + combined sanity reports.
+4. **Script 02 patches** (norms): added per-DOY seed (`1034 + day`) so 100 sims across DOYs are independent; resume mode now also verifies posterior file presence (was summary-only); DOY 366 dropping is now logged; new posterior format (see #7); documented sensor-pooling decision (HLS L30/S30 NASA-harmonized, no sensor term needed).
+5. **Script 03 patches** (year predictions): pixel-id ordering fix (was using pixel_coords order with pred_grid-ordered values — silent misalignment risk); per-(year, DOY) seed (`year * 1000 + day`); resume mode now verifies posterior completeness per fitted DOY; 125,798-pixel guard; write-integrity check; **`mclapply` → `future_lapply` with the recycling pattern from MEMORY.md**, plus per-year pre-filter of timeseries to cut multisession worker memory from 15 GB to 250-400 MB.
+6. **Script 04 full rewrite**: replaced naive interval arithmetic on summary CIs with **proper posterior subtraction**. Statistically correct anomaly CIs, internally consistent with script 06. Optional `--save-posteriors` flag. Per-DOY parallelization via future-recycling pattern. Pixel guard + write check.
+7. **POSTERIOR FORMAT CHANGE** (scripts 02 + 03): write `list(pixel_id, sims_matrix)` instead of raw `df.sim`. Fixes a hidden ~3% bias in script 06's `calculate_stats` (X/x/y columns from `post.distns()`'s data-frame format were being averaged alongside the 100 sim columns by `rowMeans`/`quantile`, contaminating means and CIs and producing systematically false-negative significance flags). Pixel_id stored alongside also defends against future ordering drift between scripts.
+8. **Script 06 update**: new `load_posteriors()` reads the list format → bias eliminated; `mclapply` → `future_lapply` with recycling; pre-flight inventory of baseline + year posteriors before launching workers (aborts fast if baseline >5% incomplete); resume mode verifies all per-DOY-window posteriors present; pixel guard; write-integrity check.
+9. **`safe_shutdown.sh` patched**: removed `prefetch_downloads.sh` handling (script archived).
+10. **Renamed `01_HLS_data_acquisition_FINAL.R` → `01_hls_acquisition_core.R`**: still load-bearing (sourced by `01a_midwest_data_acquisition_parallel.R` from 3 sites, all updated). The `_FINAL` suffix was misleading.
+11. **WORKFLOW.md fully refreshed**: Core Scripts list updated with `01b`, `00_validate_ndvi_data`, `07_visualize_derivatives`, `07_classify_drought` (placeholder); 05 vs 05a/b/c clarified as alternative paths; replaced inline combine snippet with pointer to `01b_combine_year_files.R`; corrected script 02 description (no mission term, no temporal smoother — was wrong); added Script 07_visualize_derivatives section; added Planned Future Step section for `07_classify_drought`; updated Data Flow caption to 2013-2025 with leap-day note.
+12. **DOCKER_SETUP.md cleaned up**: removed pre-DOY-looped pseudocode that referenced archived script names; replaced with pointer to WORKFLOW.md as single source of truth.
+13. **Compressed 16 download/prefetch logs** in `bulk_downloads/logs/`: 568 MB → 24 MB (544 MB freed). Logs still readable via `zcat`/`zless`.
+
+### Files Created
+- `01b_combine_year_files.R` — combine per-year aggregation outputs into `conus_4km_ndvi_timeseries.rds` (replaces the inline R snippet in WORKFLOW.md)
+- `.claude/agents/pipeline_audit.md` — NDVI-pipeline-targeted audit agent
+- `.claude/agents/r-reviewer.md` — R code reviewer with NDVI framework checks
+
+### Files Modified (active pipeline)
+- `02_doy_looped_norms.R`
+- `03_doy_looped_year_predictions.R`
+- `04_calculate_anomalies.R` (full rewrite)
+- `06_calculate_change_derivatives.R`
+- `00_posterior_functions.R` (added `seed` parameter)
+- `01a_midwest_data_acquisition_parallel.R` (3 source() calls updated for rename)
+- `safe_shutdown.sh` (removed prefetch handling)
+- `WORKFLOW.md`, `DOCKER_SETUP.md`
+
+### Files Renamed
+- `01_HLS_data_acquisition_FINAL.R` → `01_hls_acquisition_core.R`
+- 23 scripts → `.archive/` (see commit `382da23` for full list)
+
+### Commits Pushed (origin/main)
+1. `382da23` — `[cleanup][fix][agents]` Archive 23 deprecated scripts; add combine script; patch script 02
+2. `6198bf5` — `[rename][docs]` Rename hls_acquisition_core; refresh WORKFLOW + DOCKER_SETUP
+3. `e9725b9` — `[fix]` Complete rename — drop duplicate 01_HLS_data_acquisition_FINAL.R
+4. `0fd9233` — `[fix][03]` Pixel-id ordering, per-(year,DOY) seed, complete-resume check, mclapply→future
+5. `5c7b9b1` — `[fix][04][06]` Posterior-based anomalies + calculate_stats bias fix + future_lapply
+
+### Bugs Caught (severity)
+- **CRITICAL** silent pixel-id misalignment in script 03 (pixel_coords order vs pred_grid order)
+- **CRITICAL** `calculate_stats` bias in script 06 (~3% mean shift, false-negative significance flags) caused by `rowMeans`/`quantile` sweeping the X/x/y columns of the saved `df.sim` data frame
+- **CRITICAL** cross-(year, DOY) posterior correlation (deflated CIs in scripts 04 + 06) — same set.seed reused per call
+- **HIGH** resume modes in scripts 02/03/06 only checked summary stats, not posterior file presence
+- **HIGH** `mclapply` worker memory exhaustion risk on long jobs (per MEMORY.md prior incident)
+- **HIGH** combine logic was an unversioned R snippet in markdown
+- **METHODOLOGICAL** script 04 used naive interval arithmetic on summary CIs instead of posterior subtraction — wider intervals than statistically correct, inconsistent with script 06
+
+### Next Steps (after aggregation completes ~2026-05-04 / 05-05)
+1. Run `01b_combine_year_files.R` (~5 min) — produces `conus_4km_ndvi_timeseries.rds`
+2. Run `02_doy_looped_norms.R` (~6-8 hr serial) — baseline norms + posteriors in NEW format
+3. Run `03_doy_looped_year_predictions.R` (~1.5-2 days, 3 future workers per year) — year predictions + posteriors
+4. Run `04_calculate_anomalies.R` (~4-6 hr with new posterior method) — proper posterior-based anomalies
+5. Run `05_visualize_anomalies.R` OR `05a/05b/05c` (anomaly figures)
+6. Run `06_calculate_change_derivatives.R` (~1.5-2 days) — change derivatives, bias fixed
+7. Run `07_visualize_derivatives.R` (derivative figures)
+
+`07_classify_drought.R` remains a placeholder for future work — needs threshold validation against USDM.
+
+### Files NOT Committed (intentionally left in working tree)
+- `.claude/settings.local.json` and `.vscode/settings.json` — both modified before this session started; left untouched for user to review/commit/discard separately.
 
 ---
 
