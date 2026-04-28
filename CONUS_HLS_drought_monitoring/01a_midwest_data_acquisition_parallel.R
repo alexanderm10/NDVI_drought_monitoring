@@ -12,7 +12,7 @@ library(future)
 library(future.apply)
 
 # Source the main pipeline
-source("01_HLS_data_acquisition_FINAL.R")
+source("01_hls_acquisition_core.R")
 
 ######################
 # CONUS Domain Definition
@@ -229,7 +229,7 @@ acquire_conus_data <- function(start_year = 2013,  # First HLS data available
           # Source required functions in each worker
           # NOTE: process_tile_month_worker is auto-exported by future as a global
           source("00_setup_paths.R")
-          source("01_HLS_data_acquisition_FINAL.R")
+          source("01_hls_acquisition_core.R")
 
           # Get paths in worker environment
           worker_hls_paths <- get_hls_paths()
@@ -251,7 +251,7 @@ acquire_conus_data <- function(start_year = 2013,  # First HLS data available
             library(httr)
             library(terra)
             source("00_setup_paths.R")
-            source("01_HLS_data_acquisition_FINAL.R")
+            source("01_hls_acquisition_core.R")
             source("01a_midwest_data_acquisition_parallel.R")
             worker_hls_paths <- get_hls_paths()
             result <- process_tile_month_worker(tile, year, month_start, month_end,

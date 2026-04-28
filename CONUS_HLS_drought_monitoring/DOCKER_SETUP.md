@@ -13,11 +13,12 @@ docker compose ps
 docker exec -it conus-hls-drought-monitor bash
 R
 
-# Inside R, run the workflow
-source("00_setup_paths.R")
-source("01_aggregate_to_4km.R")
-timeseries_4km <- process_ndvi_to_4km(config)
+# Run the first pipeline step from inside the container
+Rscript 01_aggregate_to_4km_parallel.R 2025 \
+  --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt
 ```
+
+For the full step-by-step workflow (scripts 01 → 01b → 02 → 03 → 04 → 05/05a/b/c → 06 → 07), see [WORKFLOW.md](WORKFLOW.md). This file covers Docker-specific setup only.
 
 ## Overview
 
@@ -95,35 +96,18 @@ The path detection in `00_setup_paths.R` automatically recognizes `/data` on Lin
 
 ## Running the GAM Workflow
 
-Inside the container:
+The full step-by-step workflow lives in [WORKFLOW.md](WORKFLOW.md). It covers, in order:
 
-```r
-# Source paths (auto-detects /data location)
-source("00_setup_paths.R")
-hls_paths <- get_hls_paths()
+1. `01_aggregate_to_4km_parallel.R` — aggregate per-year (tile-filtered, 8 workers)
+2. `01b_combine_year_files.R` — combine per-year RDS files into the timeseries
+3. `02_doy_looped_norms.R` — fit baseline spatial GAMs (~6-8 hr)
+4. `03_doy_looped_year_predictions.R` — fit year-specific GAMs (~1.5-2 days)
+5. `04_calculate_anomalies.R` — year minus baseline
+6. `05_visualize_anomalies.R` (or split via `05a/05b/05c`) — anomaly figures
+7. `06_calculate_change_derivatives.R` — multi-window change anomalies (~1.5-2 days)
+8. `07_visualize_derivatives.R` — derivative figures
 
-# Phase 1: Aggregate to 4km
-source("01_aggregate_to_4km.R")
-timeseries_4km <- process_ndvi_to_4km(config)
-
-# Phase 2: Fit climatology
-source("02_fit_climatology_gams.R")
-timeseries_4km <- read.csv(config$input_file, stringsAsFactors = FALSE)
-timeseries_4km$date <- as.Date(timeseries_4km$date)
-climatology <- fit_all_climatologies(timeseries_4km, config)
-
-# Phase 3: Fit year-specific GAMs
-source("03_fit_year_gams.R")
-year_splines <- fit_all_year_gams(timeseries_4km, config)
-
-# Phase 4: Calculate anomalies
-source("04_calculate_anomalies.R")
-anomaly_df <- process_anomalies(config)
-
-# Phase 5: Classify drought (placeholder)
-source("05_classify_drought.R")
-classified_df <- process_drought_classification(config)
-```
+All scripts are launched via `docker exec conus-hls-drought-monitor Rscript <script>.R [args]`. See WORKFLOW.md for runtime, output sizes, memory expectations, and resume behavior per step.
 
 ## Resource Configuration
 
@@ -169,16 +153,19 @@ UID=1000 GID=1000 docker-compose up
 
 ### Out of Memory
 
-If container runs out of memory during Phase 1:
+If the aggregation step (script 01) hits memory pressure:
 
-```r
-# Process years sequentially instead of all at once
-config$years <- 2013:2014  # Start with subset
-timeseries_4km_partial <- process_ndvi_to_4km(config)
+```bash
+# Process a smaller year range, or reduce worker count
+docker exec conus-hls-drought-monitor Rscript 01_aggregate_to_4km_parallel.R \
+  2013 2018 --workers=4 --tiles=bulk_downloads/midwest_tiles_overlapping.txt
 
-config$years <- 2015:2016  # Continue
-# ... append results
+# Then continue with the next chunk
+docker exec conus-hls-drought-monitor Rscript 01_aggregate_to_4km_parallel.R \
+  2019 2025 --workers=4 --tiles=bulk_downloads/midwest_tiles_overlapping.txt
 ```
+
+The script skips years whose `aggregated_years/ndvi_4km_YYYY.rds` already exists, so partial runs resume cleanly. If memory pressure happens further downstream (scripts 02, 03, 06), reduce the `n_cores` value in the script's `config` block.
 
 ### Data Path Not Found
 
