@@ -25,8 +25,14 @@ Sys.setenv(OPENBLAS_NUM_THREADS = 2)
 library(mgcv)
 library(dplyr)
 library(MASS)
-library(parallel)
+library(future)
+library(future.apply)
 library(lubridate)
+
+# Required for future.apply globals — default 500 MB is too small for the
+# per-year filtered timeseries (~250-400 MB) plus pixel_coords + norms_df.
+# See MEMORY.md "R Parallel Processing Stability" for the full pattern.
+options(future.globals.maxSize = 2 * 1024^3)
 
 # Source utility functions
 source("00_setup_paths.R")
@@ -63,8 +69,13 @@ config <- list(
   # Posterior simulation
   n_posterior_sims = 100,
 
-  # Parallelization (reduced to 3 cores for memory safety with posterior saving)
-  n_cores = 3  # Conservative with posterior saving (was 4 without posteriors)
+  # Parallelization. 3 workers via future_lapply (multisession), with
+  # plan/sequential/gc recycling per year — the stable pattern documented in
+  # MEMORY.md and used by 01_aggregate_to_4km_parallel.R. Each multisession
+  # worker holds its own copy of the per-year-filtered timeseries (~250-400 MB),
+  # plus norms_df (~700 MB), plus pixel_coords. Budget: ~3 × 1.5 GB ≈ 5 GB
+  # workers + parent overhead, well within the 96 GB Docker container.
+  n_cores = 3
 )
 
 # Create output directories
@@ -103,8 +114,14 @@ get_trailing_window <- function(year, target_day, window_size = 16) {
 #' @param pred_grid Prediction grid (with norm values)
 #' @param n_sims Number of posterior simulations
 #' @param spatial_k Basis dimension for spatial smooth (default 50)
+#' @param year Target year (used to derive a unique posterior seed so sims
+#'   across (year, DOY) combinations are statistically independent —
+#'   matters for script 06's change derivatives and script 04's anomaly
+#'   uncertainty propagation).
+#' @param day Target DOY (1-365), same purpose as `year`.
 #' @return List with predictions and model stats
-fit_year_spatial_gam <- function(df_subset, pred_grid, n_sims = 100, spatial_k = 50) {
+fit_year_spatial_gam <- function(df_subset, pred_grid, n_sims = 100, spatial_k = 50,
+                                 year = NA_integer_, day = NA_integer_) {
 
   # Fit spatial GAM with norm as covariate
   # spatial_k controls resolution: higher k = finer spatial detail
@@ -129,13 +146,18 @@ fit_year_spatial_gam <- function(df_subset, pred_grid, n_sims = 100, spatial_k =
 
   # Get predictions with uncertainty AND posteriors
   # IMPORTANT: return.sims=TRUE saves raw posteriors for uncertainty propagation
+  # seed = year * 1000 + day gives each (year, DOY) a unique-but-reproducible
+  # RNG state so the 100 sims are independent across all 13 × 365 fits.
+  # This matters for script 06 (which differences posteriors across DOYs)
+  # and script 04 (which differences year posteriors against baseline norms).
   result <- tryCatch({
     post.distns(
       model.gam = gam_model,
       newdata = pred_grid,
       vars = c("x", "y"),
       n = n_sims,
-      return.sims = TRUE  # Save posteriors for anomaly uncertainty
+      return.sims = TRUE,  # Save posteriors for anomaly uncertainty
+      seed = as.integer(year) * 1000L + as.integer(day)
     )
   }, error = function(e) {
     # Fall back to simple prediction without posteriors
@@ -186,6 +208,22 @@ if (!file.exists(valid_pixels_file)) {
 valid_pixels <- readRDS(valid_pixels_file)
 cat("  Valid pixels from script 02:", nrow(valid_pixels), "\n")
 
+# Sanity check: the NLCD-filtered pixel count is invariant across the pipeline
+# (set in script 02). If this differs from 125,798, it usually means script 02
+# was re-run against a different NLCD reproject — anomalies (script 04) and
+# derivatives (script 06) will fail their pixel-count assertions downstream.
+# We warn rather than stop so a deliberate filter change can proceed.
+EXPECTED_VALID_PIXELS <- 125798L
+if (nrow(valid_pixels) != EXPECTED_VALID_PIXELS) {
+  cat(sprintf(
+    "  WARNING: valid pixel count %s differs from expected %s.\n",
+    format(nrow(valid_pixels), big.mark = ","),
+    format(EXPECTED_VALID_PIXELS, big.mark = ",")
+  ))
+  cat("  This is OK if you intentionally changed the NLCD land-cover filter,\n")
+  cat("  but downstream scripts 04/06 expect 125,798. Verify before proceeding.\n")
+}
+
 # Filter timeseries to only valid (non-water) pixels
 timeseries_df <- timeseries_df %>%
   filter(pixel_id %in% valid_pixels$pixel_id)
@@ -217,26 +255,68 @@ pixel_coords <- timeseries_df %>%
   summarise(x = first(x), y = first(y), .groups = "drop") %>%
   as.data.frame()
 
-# Check for existing year files (resume capability)
+# Check for existing year files (resume capability).
+# A year is "complete" only if BOTH (a) the summary file exists AND (b) every
+# DOY whose summary mean is non-NA has a corresponding non-empty posterior
+# file in posteriors_dir/YYYY/. Catching (b) protects script 06 from missing
+# posteriors hours into its 1.5-2 day run — the same class of bug as the
+# resume fix in script 02.
 existing_years <- character(0)
+incomplete_years <- list()  # year -> count of missing posterior files
+
 for (yr in years) {
-  year_file <- file.path(config$output_dir, sprintf("modeled_ndvi_%d.rds", yr))
-  if (file.exists(year_file)) {
-    existing_years <- c(existing_years, yr)
+  year_file     <- file.path(config$output_dir, sprintf("modeled_ndvi_%d.rds", yr))
+  year_post_dir <- file.path(config$posteriors_dir, as.character(yr))
+
+  if (!file.exists(year_file)) next
+
+  # Identify DOYs the summary file claims were successfully fitted
+  year_summary <- readRDS(year_file)
+  fitted_doys <- sort(unique(year_summary$yday[!is.na(year_summary$mean)]))
+
+  # Tally posterior files actually present
+  if (dir.exists(year_post_dir)) {
+    post_files <- list.files(year_post_dir, pattern = "^doy_\\d{3}\\.rds$",
+                             full.names = TRUE)
+    post_sizes <- file.info(post_files)$size
+    valid_post_files <- post_files[!is.na(post_sizes) & post_sizes > 0]
+    valid_post_doys  <- as.integer(sub("^doy_(\\d{3})\\.rds$", "\\1",
+                                       basename(valid_post_files)))
+  } else {
+    valid_post_doys <- integer(0)
+  }
+
+  missing_post_doys <- setdiff(fitted_doys, valid_post_doys)
+
+  if (length(missing_post_doys) == 0) {
+    existing_years <- c(existing_years, as.character(yr))
+  } else {
+    incomplete_years[[as.character(yr)]] <- length(missing_post_doys)
   }
 }
 
 if (length(existing_years) > 0) {
-  cat("Found existing results for", length(existing_years), "years:", paste(existing_years, collapse=", "), "\n")
-  years_to_process <- setdiff(years, existing_years)
-} else {
-  years_to_process <- years
+  cat("Found complete results for ", length(existing_years), " years: ",
+      paste(existing_years, collapse = ", "), "\n", sep = "")
 }
 
+if (length(incomplete_years) > 0) {
+  cat("Years with summary stats but missing posteriors (will reprocess):\n")
+  for (yr_str in names(incomplete_years)) {
+    cat(sprintf("  %s: %d posterior file(s) missing\n",
+                yr_str, incomplete_years[[yr_str]]))
+  }
+}
+
+years_to_process <- setdiff(as.character(years), existing_years)
+
 if (length(years_to_process) == 0) {
-  cat("All years already processed!\n")
+  cat("All years already processed (with complete posteriors)!\n")
   quit(save = "no")
 }
+
+# Convert back to integer for downstream loop indexing
+years_to_process <- as.integer(years_to_process)
 
 cat("Will process", length(years_to_process), "years:", paste(years_to_process, collapse=", "), "\n\n")
 
@@ -261,13 +341,24 @@ names(timeseries_with_norms)[names(timeseries_with_norms) == "mean"] <- "norm"
 # Initialize overall stats tracking
 all_model_stats <- list()
 
-# Process each year sequentially
+# Process each year sequentially (DOYs within each year run in parallel)
 for (yr in years_to_process) {
 
   cat("\n=== Processing Year", yr, "===\n")
   year_start <- Sys.time()
 
-  # Don't create full year_grid upfront - save memory
+  # Pre-filter timeseries to just the rows needed for this year. Each
+  # multisession worker holds its own copy of the closure environment, so
+  # shipping the full 47M-row timeseries_with_norms to 3 workers would cost
+  # ~15 GB of duplicated state. Filtering to the year + trailing-window
+  # range (~3-4M rows) cuts each worker's footprint to ~250-400 MB.
+  year_min_date <- as.Date(paste0(yr, "-01-01")) - config$window_size
+  year_max_date <- as.Date(paste0(yr, "-12-31"))
+  year_data <- timeseries_with_norms %>%
+    filter(date >= year_min_date & date <= year_max_date)
+  cat(sprintf("  Year-window slice: %s rows (%s to %s)\n",
+              format(nrow(year_data), big.mark = ","),
+              as.character(year_min_date), as.character(year_max_date)))
 
   # Define function to process a single DOY for this year
   process_doy <- function(day) {
@@ -275,8 +366,8 @@ for (yr in years_to_process) {
       # Get trailing window dates
       window_dates <- get_trailing_window(yr, day, config$window_size)
 
-      # Filter data
-      df_subset <- timeseries_with_norms %>%
+      # Filter data (year_data is the per-year slice; smaller than the full timeseries)
+      df_subset <- year_data %>%
         filter(date %in% window_dates) %>%
         filter(!is.na(NDVI) & !is.na(norm))
 
@@ -291,12 +382,18 @@ for (yr in years_to_process) {
       norms_for_doy <- norms_df[norms_df$yday == day, c("pixel_id", "mean")]
       names(norms_for_doy)[names(norms_for_doy) == "mean"] <- "norm"
 
-      # Merge with pixel coords
+      # Merge with pixel coords. Note: base R merge() sorts by the join column
+      # by default, so pred_grid$pixel_id may differ in row order from
+      # pixel_coords$pixel_id. The result data frame below MUST take pixel_id
+      # from pred_grid (the actual prediction order) — never from pixel_coords.
       pred_grid <- merge(pixel_coords, norms_for_doy, by = "pixel_id", all.x = TRUE)
       pred_grid <- pred_grid[, c("pixel_id", "x", "y", "norm")]
 
-      # Fit model
-      fit_result <- fit_year_spatial_gam(df_subset, pred_grid, config$n_posterior_sims, config$spatial_k)
+      # Fit model — pass yr and day to give post.distns a unique-per-(year, DOY)
+      # seed so the 100 sims are statistically independent across all 13 × 365 fits.
+      fit_result <- fit_year_spatial_gam(df_subset, pred_grid,
+                                         config$n_posterior_sims, config$spatial_k,
+                                         year = yr, day = day)
 
       # Save posteriors IMMEDIATELY to avoid memory buildup (like script 02)
       if (!is.null(fit_result$result) && !is.null(fit_result$result$sims)) {
@@ -311,26 +408,60 @@ for (yr in years_to_process) {
         saveRDS(fit_result$result$sims, posterior_file, compress = "xz")
       }
 
-      # Return ONLY summary stats (not posteriors) to avoid memory issues
+      # Return summary stats with pixel_id sourced from pred_grid (the actual
+      # prediction-order vector). Pre-binding the pixel_id here closes the
+      # ordering risk: downstream code can rbind these data frames directly
+      # without separate index alignment.
+      ci_with_id <- if (!is.null(fit_result$result)) {
+        data.frame(
+          pixel_id = pred_grid$pixel_id,
+          mean     = fit_result$result$ci$mean,
+          lwr      = fit_result$result$ci$lwr,
+          upr      = fit_result$result$ci$upr
+        )
+      } else NULL
+
       return(list(
-        yday = day,
-        result = if (!is.null(fit_result$result)) fit_result$result$ci else NULL,
-        stats = fit_result$stats,
-        n_obs = nrow(df_subset)
+        yday   = day,
+        result = ci_with_id,
+        stats  = fit_result$stats,
+        n_obs  = nrow(df_subset)
       ))
     }, error = function(e) {
       return(list(yday = day, result = NULL, stats = NULL, n_obs = 0, error = as.character(e)))
     })
   }
 
-  # Process all DOYs for this year in parallel
-  cat("  Processing 365 DOYs with", config$n_cores, "cores...\n")
+  # Process all DOYs for this year in parallel using the future-recycling
+  # pattern from MEMORY.md: plan(multisession) before, plan(sequential) +
+  # gc() after, with a tryCatch fallback to sequential lapply if a worker
+  # dies. This is the same pattern proven by 01_aggregate_to_4km_parallel.R
+  # over multi-day runs and replaces mclapply (which the project's prior
+  # incident showed could exhaust worker memory on long jobs).
+  cat("  Processing 365 DOYs with", config$n_cores, "future workers...\n")
 
-  results_list <- mclapply(
-    1:365,
-    process_doy,
-    mc.cores = config$n_cores
-  )
+  plan(multisession, workers = config$n_cores)
+
+  results_list <- tryCatch({
+    future_lapply(1:365, function(day) {
+      # Workers are fresh R processes — load packages explicitly. Globals
+      # (year_data, pixel_coords, norms_df, config, n_pixels, fit_year_spatial_gam,
+      # post.distns, get_trailing_window, yr) are auto-detected by future.apply.
+      library(mgcv)
+      library(dplyr)
+      library(MASS)
+      library(lubridate)
+      process_doy(day)
+    }, future.seed = TRUE)
+  }, error = function(e) {
+    cat("WARNING: future_lapply failed for year ", yr, ": ",
+        conditionMessage(e), "\n", sep = "")
+    cat("Falling back to sequential lapply for this year (slower but safer)...\n")
+    lapply(1:365, process_doy)
+  })
+
+  plan(sequential)
+  gc(verbose = FALSE)
 
   # Combine results for this year
   cat("  Combining results...\n")
@@ -360,27 +491,33 @@ for (yr in years_to_process) {
       year_stats$RMSE[i] <- res$stats$RMSE
     }
 
-    # Store results if present
+    # Store results if present. res$result already has (pixel_id, mean, lwr, upr)
+    # with pixel_id sourced from pred_grid — no separate index alignment needed.
     if (!is.null(res$result)) {
-      doy_df <- data.frame(
-        pixel_id = pixel_coords$pixel_id,
-        yday = res$yday,
-        mean = res$result$mean,
-        lwr = res$result$lwr,
-        upr = res$result$upr
-      )
-      year_results_list[[i]] <- doy_df
+      res$result$yday <- res$yday
+      year_results_list[[i]] <- res$result
     }
   }
 
-  # Combine all DOYs into year_grid
-  year_grid <- do.call(rbind, year_results_list)
+  # Combine all DOYs into year_grid (bind_rows is faster than do.call(rbind)
+  # for hundreds of frames; same final result)
+  year_grid <- dplyr::bind_rows(year_results_list)
   year_grid <- merge(year_grid, pixel_coords, by = "pixel_id", all.x = TRUE)
 
   # Save this year's results
   year_file <- file.path(config$output_dir, sprintf("modeled_ndvi_%d.rds", yr))
   cat("  Saving to:", year_file, "\n")
   saveRDS(year_grid, year_file)
+
+  # Verify write succeeded — guards against NFS/CIFS hiccups producing a
+  # truncated file that the resume-mode check would later treat as complete.
+  # Per WORKFLOW.md, year files run ~50-300 MB; anything < 1 MB is broken.
+  written_size_mb <- file.info(year_file)$size / 1024^2
+  if (is.na(written_size_mb) || written_size_mb < 1) {
+    stop(sprintf("Year file write failed or suspiciously small (%.2f MB): %s",
+                 written_size_mb, year_file))
+  }
+  cat(sprintf("  Wrote %.1f MB\n", written_size_mb))
 
   # Track stats
   all_model_stats[[as.character(yr)]] <- year_stats
