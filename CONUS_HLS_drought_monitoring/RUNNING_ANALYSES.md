@@ -1,16 +1,16 @@
 # Currently Running Analyses
 
-**Updated**: 2026-04-27 MDT
+**Updated**: 2026-04-28 MDT
 
-## Status: RUNNING — 4km Aggregation (year 6 of 13, swap pending)
+## Status: RUNNING — 4km Aggregation 2019-2025 (filtered, year 1 of 7)
 
 ### Pipeline 1: 4km Aggregation (Script 01)
-- **Status**: RUNNING — 2013-2017 complete, 2018 in progress (~18% as of 2026-04-27)
-- **Script**: `01_aggregate_to_4km_parallel.R 2013 2025 --workers=8 --tiles=bulk_downloads/midwest_tiles_noprefix.txt`
-- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/aggregation_2013_2025.log`
-- **Started**: 2026-04-24 08:40 MDT
+- **Status**: RUNNING — 2013-2018 complete, 2019 just started with filtered tile list
+- **Active script**: `01_aggregate_to_4km_parallel.R 2019 2025 --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt`
+- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/aggregation_2019_2025.log`
+- **Started**: 2026-04-28 07:28 MDT (replaced unfiltered run from 2026-04-24)
 
-#### Year completion timing
+#### Year completion timing (original unfiltered run, 2013-2018)
 | Year | Status | Runtime |
 |------|--------|---------|
 | 2013 | Complete | 305 min |
@@ -18,29 +18,23 @@
 | 2015 | Complete | 429 min |
 | 2016 | Complete | 736 min |
 | 2017 | Complete | 1062 min |
-| 2018 | RUNNING (~18% after 22 hrs) | est. 5 days |
+| 2018 | Complete | 1862 min (~31 hrs) |
 
-#### ⚠️ Tile filter inefficiency (discovered 2026-04-27)
-The `midwest_tiles_noprefix.txt` filter contains all 1209 CONUS tiles, not just Midwest.
-~75% of compute is wasted reading rasters from tiles outside the 4km grid bbox.
-Confirmed by ~23% success rate across all completed years.
+#### Tile filter swap (2026-04-28)
+The original `midwest_tiles_noprefix.txt` contained all 1209 CONUS tiles, ~75% of which fell outside the Midwest 4km grid bbox. After 2018 completed, swapped to the geographically-filtered list:
 
-**Fix in place** (committed 2026-04-27):
-- New filter: `bulk_downloads/midwest_tiles_overlapping.txt` (308 tiles, only zones 13-17)
-- Generator: `bulk_downloads/generate_midwest_tile_filter.R`
-- Resume bug fixed: `scene_id` now includes tile (was sensor+date only)
+- **Old filter**: 1209 tiles → ~24,000 files/worker for 2019, ~23% success rate
+- **New filter**: 308 tiles → ~5,800 files/worker for 2019, ~100% success rate
+- **Confirmed working**: 46,612 / 191,555 files kept (24.3%) for 2019, matches the predicted overlap
 
-**Pending swap** when 2018 completes (~3 days):
-1. Verify: `ls /mnt/malexander/datasets/ndvi_monitor/gam_models/aggregated_years/ndvi_4km_2018.rds`
-2. Stop current job: kill the parent Rscript (PID ~1285305) inside container
-3. Restart for 2019-2025 with the new filter:
-   ```bash
-   docker exec -d conus-hls-drought-monitor bash -c \
-     "cd /workspace && Rscript 01_aggregate_to_4km_parallel.R 2019 2025 --workers=8 \
-      --tiles=bulk_downloads/midwest_tiles_overlapping.txt \
-      > /data/gam_models/aggregation_2019_2025.log 2>&1"
-   ```
-- **Expected savings**: ~5 weeks → ~7-10 days for 2019-2025
+#### Swap procedure executed
+1. ✓ 2018 completion verified: `ndvi_4km_2018.rds` (72MB, written Apr 27 18:05)
+2. ✓ Killed bash wrapper (1285300), parent Rscript (1285305), and 8 orphaned workers
+3. ✓ Preserved 2019 partial work in `aggregation_temp/2019/` (~80 batch files from overnight; will be deduplicated at combine time)
+4. ✓ Restarted with: `Rscript 01_aggregate_to_4km_parallel.R 2019 2025 --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt`
+5. ✓ Verified healthy: 8 workers active, 610% CPU, 25 GB memory
+
+**Expected completion**: ~7 days for 2019-2025 (was ~5 weeks unfiltered)
 
 ### Pipeline 2: 2013-2018 HLS Re-Download + NDVI Processing — COMPLETE
 - **Status**: COMPLETE (finished Apr 22)
