@@ -31,7 +31,6 @@ Sys.setenv(OPENBLAS_NUM_THREADS = 2)
 library(mgcv)
 library(dplyr)
 library(MASS)
-library(parallel)
 
 # Source utility functions
 source("00_setup_paths.R")
@@ -272,7 +271,12 @@ cat("=== LAND COVER FILTERING COMPLETE ===\n\n")
 
 cat("Creating prediction grid...\n")
 
-# Get unique pixel locations
+# Get unique pixel locations.
+# Sorted by pixel_id so the row order of `result$sims` (which inherits this
+# order from post.distns's `newdata`) is canonical across all DOYs and across
+# scripts 02 and 03. Downstream scripts (04, 06) can then align posteriors
+# from different files purely by checking pixel_id equality (cheap) instead
+# of doing a full merge per DOY.
 pixel_coords <- timeseries_df %>%
   group_by(pixel_id) %>%
   summarise(
@@ -280,6 +284,7 @@ pixel_coords <- timeseries_df %>%
     y = first(y),
     .groups = "drop"
   ) %>%
+  arrange(pixel_id) %>%
   as.data.frame()
 
 cat("  Unique pixel locations:", nrow(pixel_coords), "\n\n")
@@ -382,10 +387,21 @@ if (length(days_to_process) > 0) {
       return(list(day = day, ci = NULL, n_obs = nrow(df_doy)))
     }
 
-    # Save posteriors to individual file IMMEDIATELY (avoid memory buildup)
+    # Save posteriors to individual file IMMEDIATELY (avoid memory buildup).
+    # File format: list(pixel_id = <integer vector>, sims = <numeric matrix>)
+    # where sims has 125,798 rows × 100 columns of NDVI simulations.
+    # post.distns() returns df.sim with X / x / y prepended to the simulation
+    # columns; we strip those here so downstream consumers (scripts 04, 06)
+    # see a clean numeric matrix and rowMeans/quantile sweep ONLY across
+    # the simulation values. Storing pixel_id alongside protects against any
+    # future ordering drift between scripts 02 and 03.
     if (!is.null(result$sims)) {
       posterior_file <- file.path(config$posteriors_dir, sprintf("doy_%03d.rds", day))
-      saveRDS(result$sims, posterior_file, compress = "xz")
+      sims_matrix <- as.matrix(result$sims[, -(1:3)])  # drop X, x, y columns
+      saveRDS(
+        list(pixel_id = pixel_coords$pixel_id, sims = sims_matrix),
+        posterior_file, compress = "xz"
+      )
     }
 
     # Return ONLY summary stats (ci), not the full sims

@@ -395,17 +395,25 @@ for (yr in years_to_process) {
                                          config$n_posterior_sims, config$spatial_k,
                                          year = yr, day = day)
 
-      # Save posteriors IMMEDIATELY to avoid memory buildup (like script 02)
+      # Save posteriors IMMEDIATELY to avoid memory buildup (like script 02).
+      # File format: list(pixel_id = <integer vector>, sims = <numeric matrix>)
+      # post.distns() returns df.sim with X / x / y prepended to the simulation
+      # columns; we strip those here so downstream consumers (scripts 04, 06)
+      # see a clean numeric matrix and rowMeans/quantile sweep ONLY across
+      # the simulation values. Storing pixel_id alongside protects against
+      # any future ordering drift between the per-DOY posterior files.
       if (!is.null(fit_result$result) && !is.null(fit_result$result$sims)) {
-        # Create year subdirectory if needed
         year_post_dir <- file.path(config$posteriors_dir, as.character(yr))
         if (!dir.exists(year_post_dir)) {
           dir.create(year_post_dir, recursive = TRUE)
         }
 
-        # Save posteriors for this year-DOY
         posterior_file <- file.path(year_post_dir, sprintf("doy_%03d.rds", day))
-        saveRDS(fit_result$result$sims, posterior_file, compress = "xz")
+        sims_matrix <- as.matrix(fit_result$result$sims[, -(1:3)])  # drop X, x, y
+        saveRDS(
+          list(pixel_id = pred_grid$pixel_id, sims = sims_matrix),
+          posterior_file, compress = "xz"
+        )
       }
 
       # Return summary stats with pixel_id sourced from pred_grid (the actual

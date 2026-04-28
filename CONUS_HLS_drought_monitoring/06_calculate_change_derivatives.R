@@ -28,8 +28,14 @@ Sys.setenv(OMP_NUM_THREADS = 2)
 Sys.setenv(OPENBLAS_NUM_THREADS = 2)
 
 library(dplyr)
-library(parallel)
+library(future)
+library(future.apply)
 library(data.table)
+
+# Each parallel task loads up to 4 posteriors of ~100 MB each plus produces
+# anomaly_sims of similar size — the default 500 MB future globals cap is
+# too small. See MEMORY.md "R Parallel Processing Stability" for the pattern.
+options(future.globals.maxSize = 2 * 1024^3)
 
 # Source utility functions
 source("00_setup_paths.R")
@@ -56,7 +62,11 @@ config <- list(
   # Posterior simulation count (must match scripts 02/03)
   n_posterior_sims = 100,
 
-  # Parallelization (conservative for memory with posterior saving)
+  # Parallelization. 3 workers via future_lapply (multisession), with
+  # plan/sequential/gc recycling per year — the stable pattern from MEMORY.md
+  # used by 01_aggregate_to_4km_parallel.R and 03_doy_looped_year_predictions.R.
+  # Each worker holds at most ~800 MB at peak (4 posteriors + anomaly_sims)
+  # plus shipped globals. Budget: ~3 × 1 GB worker memory, well under 96 GB.
   n_cores = 3
 )
 
@@ -79,20 +89,40 @@ posterior_exists <- function(year, doy, posteriors_dir, is_baseline = FALSE) {
   return(file.exists(file_path))
 }
 
-#' Load posterior array for a specific DOY
-#' Returns: matrix with pixels as rows, simulations as columns
+#' Load posterior simulations for a specific DOY.
+#'
+#' New posterior file format (set by scripts 02 and 03):
+#'   list(pixel_id = <integer vector>, sims = <numeric matrix>)
+#' where sims has 125,798 rows × 100 columns.
+#'
+#' This replaces the prior data-frame format that stored X / x / y as
+#' simulation-adjacent columns. Returning a clean numeric matrix here is the
+#' root-cause fix for the calculate_stats bias bug: rowMeans/quantile sweeping
+#' across an N × 100 matrix correctly averages exactly the 100 simulations,
+#' not the X/x/y junk that previously inflated column count to 103.
+#'
+#' @return list(pixel_id, sims) or NULL if the file does not exist.
 load_posteriors <- function(year, doy, posteriors_dir, is_baseline = FALSE) {
-  if (is_baseline) {
-    file_path <- file.path(posteriors_dir, sprintf("doy_%03d.rds", doy))
+  file_path <- if (is_baseline) {
+    file.path(posteriors_dir, sprintf("doy_%03d.rds", doy))
   } else {
-    file_path <- file.path(posteriors_dir, as.character(year), sprintf("doy_%03d.rds", doy))
+    file.path(posteriors_dir, as.character(year), sprintf("doy_%03d.rds", doy))
   }
 
-  if (!file.exists(file_path)) {
-    return(NULL)
+  if (!file.exists(file_path)) return(NULL)
+
+  obj <- readRDS(file_path)
+
+  # Defensive: confirm the new format. Anything else means an old-format file
+  # (df.sim with X/x/y) slipped through, which would silently bias the stats.
+  if (!is.list(obj) || !all(c("pixel_id", "sims") %in% names(obj))) {
+    stop("Posterior file ", file_path,
+         " is not in the expected list(pixel_id, sims) format. ",
+         "Was it written by scripts 02 / 03 after the format change? ",
+         "Old df.sim format files must be regenerated.")
   }
 
-  return(readRDS(file_path))
+  obj
 }
 
 #' Calculate summary statistics from posterior simulations
@@ -128,22 +158,40 @@ calculate_change_anomaly <- function(year, yday, window, valid_pixel_ids,
     return(NULL)
   }
 
-  # Load all 4 posterior arrays
-  baseline_t <- load_posteriors(NULL, yday, baseline_post_dir, is_baseline = TRUE)
+  # Load all 4 posterior objects (each is list(pixel_id, sims))
+  baseline_t     <- load_posteriors(NULL, yday,        baseline_post_dir, is_baseline = TRUE)
   baseline_t_lag <- load_posteriors(NULL, yday_lagged, baseline_post_dir, is_baseline = TRUE)
-  year_t <- load_posteriors(year_current, yday, year_post_dir)
-  year_t_lag <- load_posteriors(year_lagged, yday_lagged, year_post_dir)
+  year_t         <- load_posteriors(year_current, yday,        year_post_dir)
+  year_t_lag     <- load_posteriors(year_lagged,  yday_lagged, year_post_dir)
 
-  # Verify dimensions match
   if (is.null(baseline_t) || is.null(baseline_t_lag) ||
       is.null(year_t) || is.null(year_t_lag)) {
     return(NULL)
   }
 
-  # Calculate changes (for each simulation)
-  # Change = current - lagged (positive = increasing, negative = decreasing)
-  baseline_change_sims <- baseline_t - baseline_t_lag
-  year_change_sims <- year_t - year_t_lag
+  # Align all four on the same pixel ordering. Scripts 02 and 03 both sort
+  # pixel_coords by pixel_id before fitting, so under normal operation the
+  # vectors are already identical — this stays cheap. The reorder happens
+  # only if some future change drifts the ordering.
+  ref_pixels <- baseline_t$pixel_id
+  align <- function(post) {
+    if (identical(post$pixel_id, ref_pixels)) return(post$sims)
+    idx <- match(ref_pixels, post$pixel_id)
+    if (anyNA(idx)) {
+      stop("Pixel mismatch in posterior file: ",
+           sum(is.na(idx)), " reference pixels missing.")
+    }
+    post$sims[idx, , drop = FALSE]
+  }
+  baseline_t_sims     <- align(baseline_t)
+  baseline_t_lag_sims <- align(baseline_t_lag)
+  year_t_sims         <- align(year_t)
+  year_t_lag_sims     <- align(year_t_lag)
+
+  # Calculate changes (for each simulation column)
+  # Change = current − lagged (positive = increasing, negative = decreasing)
+  baseline_change_sims <- baseline_t_sims - baseline_t_lag_sims
+  year_change_sims     <- year_t_sims - year_t_lag_sims
 
   # Calculate anomaly (difference of differences)
   # Positive anomaly = year increasing faster than baseline (or decreasing slower)
@@ -222,7 +270,12 @@ process_year_doy <- function(year, yday, window_sizes, valid_pixel_ids,
 
     posterior_file <- file.path(year_post_dir_out,
                                  sprintf("doy_%03d_window_%02d.rds", yday, window))
-    saveRDS(result$posteriors, posterior_file, compress = "xz")
+    # Match the list(pixel_id, sims) format used by scripts 02 and 03 so any
+    # future consumer of these posteriors uses a single, consistent loader.
+    saveRDS(
+      list(pixel_id = valid_pixel_ids, sims = result$posteriors),
+      posterior_file, compress = "xz"
+    )
 
     # Add metadata and store summary
     result$summary$yday <- yday
@@ -261,8 +314,24 @@ if (!file.exists(config$valid_pixels_file)) {
   stop("Valid pixels file not found. Run script 02 first.")
 }
 valid_pixels_df <- readRDS(config$valid_pixels_file)
+# Sort to match the canonical pixel ordering used by scripts 02 and 03
+# (those scripts arrange(pixel_id) before fitting; aligning here means the
+# valid_pixel_ids vector is in the same order as the posterior matrices).
+valid_pixels_df <- valid_pixels_df[order(valid_pixels_df$pixel_id), ]
 valid_pixel_ids <- valid_pixels_df$pixel_id
-cat("  Valid pixels:", length(valid_pixel_ids), "\n\n")
+cat("  Valid pixels:", format(length(valid_pixel_ids), big.mark = ","), "\n")
+
+# Sanity check: NLCD-filtered pixel count is invariant across the pipeline
+EXPECTED_VALID_PIXELS <- 125798L
+if (length(valid_pixel_ids) != EXPECTED_VALID_PIXELS) {
+  cat(sprintf(
+    "  WARNING: valid pixel count %s differs from expected %s.\n",
+    format(length(valid_pixel_ids), big.mark = ","),
+    format(EXPECTED_VALID_PIXELS, big.mark = ",")
+  ))
+  cat("  This is OK if you intentionally changed the NLCD land-cover filter.\n")
+}
+cat("\n")
 
 # Get list of years from year posteriors directory
 year_dirs <- list.dirs(config$year_posteriors_dir, full.names = FALSE, recursive = FALSE)
@@ -275,27 +344,99 @@ if (length(years) == 0) {
 
 cat("Found", length(years), "years:", paste(years, collapse = ", "), "\n\n")
 
-# Check for existing results (resume capability)
+# ==============================================================================
+# PRE-FLIGHT POSTERIOR INVENTORY
+# ==============================================================================
+# Without this, missing posteriors are discovered one-task-at-a-time deep
+# inside the parallel loop, wasting hours of compute. Inventory now, abort
+# loudly if too much is missing.
+
+cat("--- Pre-flight posterior inventory ---\n")
+
+baseline_files <- list.files(config$baseline_posteriors_dir,
+                             pattern = "^doy_\\d{3}\\.rds$",
+                             full.names = FALSE)
+baseline_doys <- as.integer(sub("^doy_(\\d{3})\\.rds$", "\\1", baseline_files))
+baseline_doys <- sort(baseline_doys)
+missing_baseline_doys <- setdiff(1:365, baseline_doys)
+cat(sprintf("  Baseline posteriors: %d / 365 DOYs present\n",
+            length(baseline_doys)))
+if (length(missing_baseline_doys) > 0) {
+  cat(sprintf("    Missing baseline DOYs: %s\n",
+              paste(missing_baseline_doys, collapse = ", ")))
+}
+
+# Per-year DOY count
+year_doy_counts <- integer(length(years)); names(year_doy_counts) <- years
+for (yr in years) {
+  yd_files <- list.files(file.path(config$year_posteriors_dir, as.character(yr)),
+                         pattern = "^doy_\\d{3}\\.rds$",
+                         full.names = FALSE)
+  year_doy_counts[as.character(yr)] <- length(yd_files)
+}
+cat("  Year posteriors per year:\n")
+for (yr_str in names(year_doy_counts)) {
+  cat(sprintf("    %s: %d DOYs\n", yr_str, year_doy_counts[yr_str]))
+}
+
+# Heuristic abort: if baseline is more than 5% incomplete, the change
+# derivatives will be patchy across all years — better to fail fast.
+if (length(missing_baseline_doys) > 18L) {
+  stop("Baseline posteriors are >5% incomplete (",
+       length(missing_baseline_doys), " of 365 missing). ",
+       "Re-run script 02 to backfill before proceeding.")
+}
+cat("\n")
+
+# ==============================================================================
+# RESUME MODE
+# ==============================================================================
+# A year is "complete" only if BOTH (a) the summary derivatives file exists
+# AND is non-trivial in size, AND (b) every DOY-window posterior file the
+# summary describes is present and non-empty.
+
 existing_years <- integer(0)
+incomplete_years <- list()
+
 for (yr in years) {
   output_file <- file.path(config$output_dir, sprintf("derivatives_%d.rds", yr))
-  if (file.exists(output_file)) {
+  if (!file.exists(output_file) || file.info(output_file)$size < 1e5) next
+
+  year_post_dir_out <- file.path(config$posteriors_dir, as.character(yr))
+  derivative_summary <- readRDS(output_file)
+  expected_keys <- unique(derivative_summary[, c("yday", "window")])
+  expected_files <- file.path(year_post_dir_out,
+                              sprintf("doy_%03d_window_%02d.rds",
+                                      expected_keys$yday, expected_keys$window))
+  present_sizes <- file.info(expected_files)$size
+  missing_count <- sum(is.na(present_sizes) | present_sizes == 0)
+
+  if (missing_count == 0) {
     existing_years <- c(existing_years, yr)
+  } else {
+    incomplete_years[[as.character(yr)]] <- missing_count
   }
 }
 
 if (length(existing_years) > 0) {
-  cat("Found existing results for", length(existing_years), "years:",
-      paste(existing_years, collapse = ", "), "\n")
-  years <- setdiff(years, existing_years)
-
-  if (length(years) == 0) {
-    cat("All years already processed!\n")
-    quit(save = "no", status = 0)
-  }
-
-  cat("Will process", length(years), "years:", paste(years, collapse = ", "), "\n\n")
+  cat("Already complete:", paste(existing_years, collapse = ", "), "\n")
 }
+if (length(incomplete_years) > 0) {
+  cat("Years with summary present but posteriors missing (will reprocess):\n")
+  for (yr_str in names(incomplete_years)) {
+    cat(sprintf("  %s: %d posterior file(s) missing\n",
+                yr_str, incomplete_years[[yr_str]]))
+  }
+}
+
+years <- setdiff(years, existing_years)
+
+if (length(years) == 0) {
+  cat("All years already processed (with complete posteriors)!\n")
+  quit(save = "no", status = 0)
+}
+
+cat("Will process", length(years), "years:", paste(years, collapse = ", "), "\n\n")
 
 # ==============================================================================
 # PROCESS EACH YEAR
@@ -323,24 +464,49 @@ for (yr in years) {
   available_doys <- sort(available_doys)
 
   cat(sprintf("  Available DOYs: %d\n", length(available_doys)))
-  cat(sprintf("  Processing with %d cores...\n", config$n_cores))
+  cat(sprintf("  Processing with %d future workers...\n", config$n_cores))
   flush.console()
 
-  # Process all DOYs in parallel
-  doy_results <- mclapply(available_doys, function(yday) {
-    tryCatch({
-      process_year_doy(yr, yday, config$window_sizes, valid_pixel_ids,
-                        config$baseline_posteriors_dir, config$year_posteriors_dir,
-                        config$posteriors_dir)
-    }, error = function(e) {
-      cat(sprintf("ERROR in year %d, DOY %d: %s\n", yr, yday, e$message))
-      return(NULL)
+  # Process all DOYs in parallel using the future-recycling pattern from
+  # MEMORY.md: plan(multisession) before, plan(sequential) + gc() after,
+  # tryCatch fallback to sequential lapply if a worker dies. Replaces
+  # mclapply, which on long runs has hit worker memory exhaustion in this
+  # project (see RUNNING_ANALYSES.md "Session Summary (Feb 16)").
+  plan(multisession, workers = config$n_cores)
+
+  doy_results <- tryCatch({
+    future_lapply(available_doys, function(yday) {
+      tryCatch({
+        process_year_doy(yr, yday, config$window_sizes, valid_pixel_ids,
+                          config$baseline_posteriors_dir, config$year_posteriors_dir,
+                          config$posteriors_dir)
+      }, error = function(e) {
+        cat(sprintf("ERROR in year %d, DOY %d: %s\n", yr, yday, e$message))
+        return(NULL)
+      })
+    }, future.seed = TRUE)
+  }, error = function(e) {
+    cat("WARNING: future_lapply failed for year ", yr, ": ",
+        conditionMessage(e), "\n", sep = "")
+    cat("Falling back to sequential lapply (slower but safer)...\n")
+    lapply(available_doys, function(yday) {
+      tryCatch({
+        process_year_doy(yr, yday, config$window_sizes, valid_pixel_ids,
+                          config$baseline_posteriors_dir, config$year_posteriors_dir,
+                          config$posteriors_dir)
+      }, error = function(e2) {
+        cat(sprintf("ERROR in year %d, DOY %d: %s\n", yr, yday, e2$message))
+        NULL
+      })
     })
-  }, mc.cores = config$n_cores, mc.preschedule = FALSE)
+  })
+
+  plan(sequential)
+  gc(verbose = FALSE)
 
   # Combine results (memory-optimized)
   cat("  Parallel processing complete.\n")
-  cat(sprintf("  Received %d results from mclapply\n", length(doy_results)))
+  cat(sprintf("  Received %d results from future_lapply\n", length(doy_results)))
 
   valid_results <- doy_results[!sapply(doy_results, is.null)]
   cat(sprintf("  Valid results: %d of %d DOYs (%.1f%%)\n",
@@ -388,6 +554,15 @@ for (yr in years) {
   output_file <- file.path(config$output_dir, sprintf("derivatives_%d.rds", yr))
   cat(sprintf("  Saving to: %s\n", output_file))
   saveRDS(year_df, output_file, compress = "xz")
+
+  # Verify the write — guards against NFS/CIFS hiccups producing a truncated
+  # file that the resume-mode check would later treat as complete.
+  written_size_mb <- file.info(output_file)$size / 1024^2
+  if (is.na(written_size_mb) || written_size_mb < 0.1) {
+    stop(sprintf("Year file write failed or suspiciously small (%.2f MB): %s",
+                 written_size_mb, output_file))
+  }
+  cat(sprintf("  Wrote %.1f MB\n", written_size_mb))
 
   # Record statistics
   elapsed_time <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
