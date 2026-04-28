@@ -1,4 +1,4 @@
-##' @param model.gam - a GAM or GAMM object 
+##' @param model.gam - a GAM or GAMM object
 ##' @param newdata - the data to be used for predicting the posterior distributions
 ##' @param vars - the spline predictors to be simulated
 ##' @param n - number of simulations to be generated for the posterior distribution; defaults to 1000
@@ -6,13 +6,20 @@
 ##' @param lwr - lower bound for confidence interval; default = 0.025 (lower end of 2-tailed 95% CI)
 ##' @param upr - upper bound for confidence interval; default = 0.975 (upper end of 2-tailed 95% CI)
 ##' @param return.sims - (logical) store and return the raw posterior simulations? defaults to F
+##' @param seed - integer seed passed to set.seed() before drawing posteriors.
+##'   Defaults to 1034 (legacy reproducible behavior). Pass a unique seed per
+##'   call (e.g. 1034 + DOY) to ensure the 100 simulations are statistically
+##'   INDEPENDENT across calls. This matters when downstream code combines
+##'   posteriors from multiple calls (e.g. script 06's change derivatives,
+##'   which compute baseline[day] - baseline[day-k] across DOYs). Pass NULL
+##'   to leave the global RNG state untouched.
 
-post.distns <- function(model.gam, newdata, vars, n=100, terms=F, lwr=0.025, upr=0.975, return.sims=F){
+post.distns <- function(model.gam, newdata, vars, n=100, terms=F, lwr=0.025, upr=0.975, return.sims=F, seed=1034){
   # Note: this function can be used to generate a 95% CI on the full model.gam OR terms
-  
+
   # -----------
   # Simulating a posterior distribution of Betas to get variance on non-linear functions
-  # This is following Gavin Simpson's post here: 
+  # This is following Gavin Simpson's post here:
   # http://www.fromthebottomoftheheap.net/2011/06/12/additive-modelling-and-the-hadcrut3v-global-mean-temperature-series/
   # His handy-dandy functions can be found here: https://github.com/gavinsimpson/random_code/
   #      Including the derivative funcition that will probably come in handy later
@@ -20,11 +27,11 @@ post.distns <- function(model.gam, newdata, vars, n=100, terms=F, lwr=0.025, upr
   #    http://www.fromthebottomoftheheap.net/2016/12/15/simultaneous-interval-revisited/
   #    http://www.fromthebottomoftheheap.net/2017/03/21/simultaneous-intervals-for-derivatives-of-smooths/
   #  - NOTE: I don't think this makes a difference for me because I've always been working with full simulations, so I
-  #          *think* I've basically been doing the simultaneous interval.  Gavin's way would be less memory intensive, 
+  #          *think* I've basically been doing the simultaneous interval.  Gavin's way would be less memory intensive,
   #          but I like my way.
   # -----------
   library(MASS)
-  set.seed(1034)
+  if (!is.null(seed)) set.seed(seed)
   
   # If the model.gam is a mixed model.gam (gamm) rather than a normal gam, extract just the gam portion
   if(class(model.gam)[[1]]=="gamm") model.gam <- model.gam$gam

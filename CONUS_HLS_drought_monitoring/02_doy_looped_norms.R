@@ -107,8 +107,11 @@ get_doy_window <- function(target_day, window_size = 7) {
 #' @param df_doy Data frame with NDVI, x, y for this DOY window
 #' @param pred_grid Prediction grid (unique pixels)
 #' @param n_sims Number of posterior simulations
+#' @param day Target DOY (1-365). Used to derive a unique posterior seed so
+#'   that the 100 sims for one DOY are independent of those for adjacent DOYs.
+#'   Critical for script 06's change derivatives.
 #' @return Data frame with mean, lwr, upr for each pixel
-fit_doy_spatial_gam <- function(df_doy, pred_grid, n_sims = 100) {
+fit_doy_spatial_gam <- function(df_doy, pred_grid, n_sims = 100, day = NA_integer_) {
 
   # Check minimum data requirements
   if (nrow(df_doy) < 50) {
@@ -117,6 +120,15 @@ fit_doy_spatial_gam <- function(df_doy, pred_grid, n_sims = 100) {
   }
 
   # Fit spatial GAM
+  #
+  # Sensor term intentionally omitted from this formula. HLS L30 and S30 are
+  # NASA-harmonized at processing (Claverie et al. 2018), and an internal
+  # comparison during early CONUS pipeline development confirmed negligible
+  # NDVI offset between sensors. With a +/- 7 day window pooled over 13 years,
+  # any residual sensor-mix imbalance is approximately constant across years
+  # and is absorbed into the baseline; the year - baseline anomaly cancels it.
+  # The `sensor` column is preserved upstream (script 01) for diagnostic /
+  # re-analysis use only.
   gam_model <- tryCatch({
     gam(NDVI ~ s(x, y), data = df_doy)
   }, error = function(e) {
@@ -128,13 +140,16 @@ fit_doy_spatial_gam <- function(df_doy, pred_grid, n_sims = 100) {
 
   # Get predictions with uncertainty using post.distns
   # IMPORTANT: return.sims=TRUE saves raw posteriors for derivative calculations
+  # seed = 1034 + day gives each DOY a unique-but-reproducible RNG state, so
+  # the 100 sims across DOYs are independent (matters for script 06).
   result <- tryCatch({
     post.distns(
       model.gam = gam_model,
       newdata = pred_grid,
       vars = c("x", "y"),
       n = n_sims,
-      return.sims = TRUE  # Save raw posteriors for derivatives
+      return.sims = TRUE,  # Save raw posteriors for derivatives
+      seed = 1034L + as.integer(day)
     )
   }, error = function(e) {
     warning("Posterior calculation failed: ", e$message)
@@ -179,7 +194,21 @@ timeseries_df$year <- as.integer(format(timeseries_df$date, "%Y"))
 
 cat("  Total observations:", nrow(timeseries_df), "\n")
 cat("  Unique pixels:", length(unique(timeseries_df$pixel_id)), "\n")
-cat("  Year range:", min(timeseries_df$year), "-", max(timeseries_df$year), "\n\n")
+cat("  Year range:", min(timeseries_df$year), "-", max(timeseries_df$year), "\n")
+
+# Report leap-year DOY 366 observations that will be silently dropped.
+# The baseline structure is fixed at 1:365 (norms_df, doy_window, etc.), so
+# leap-year Dec 31 observations cannot contribute. Reporting the count makes
+# the data loss visible rather than invisible. Expected magnitude: ~0.08% of
+# rows (one DOY out of ~365 per leap year, in 2016/2020/2024).
+n_doy366 <- sum(timeseries_df$yday == 366, na.rm = TRUE)
+if (n_doy366 > 0) {
+  cat(sprintf("  Note: dropping %s DOY-366 observations (%.3f%% of total) —\n",
+              format(n_doy366, big.mark = ","),
+              100 * n_doy366 / nrow(timeseries_df)))
+  cat("        baseline structure is fixed at DOY 1:365, leap-year Dec 31 excluded.\n")
+}
+cat("\n")
 
 # ==============================================================================
 # LAND COVER FILTERING
@@ -282,17 +311,36 @@ if (file.exists(config$output_file)) {
   cat("Found existing results, checking for missing DOYs...\n")
   existing_norms <- readRDS(config$output_file)
 
-  # Find DOYs with all NAs (failed processing)
-  doy_status <- tapply(existing_norms$mean, existing_norms$yday, function(x) sum(!is.na(x)))
-  missing_doys <- as.integer(names(doy_status[doy_status == 0]))
+  # A DOY needs reprocessing if EITHER:
+  #   (a) its summary stats in `output_file` are all-NA (the GAM never fit), OR
+  #   (b) its posterior file in `posteriors_dir` is missing or zero-byte.
+  # Catching (b) is critical: script 06 (change derivatives) reads the
+  # posterior files directly. If a posterior was deleted or written
+  # incompletely after a crash, the prior resume logic would silently skip
+  # it here and then script 06 would hard-fail hours into its 1.5-2 day run.
+  doy_status <- tapply(existing_norms$mean, existing_norms$yday,
+                       function(x) sum(!is.na(x)))
+  doys_missing_stats <- as.integer(names(doy_status[doy_status == 0]))
+
+  posterior_paths <- file.path(config$posteriors_dir,
+                               sprintf("doy_%03d.rds", 1:365))
+  posterior_size  <- file.info(posterior_paths)$size
+  doys_missing_posteriors <- which(is.na(posterior_size) | posterior_size == 0)
+
+  missing_doys <- sort(unique(c(doys_missing_stats,
+                                doys_missing_posteriors)))
 
   if (length(missing_doys) > 0) {
-    cat("  Found", length(missing_doys), "missing DOYs\n")
-    cat("  Will resume with existing data and process missing DOYs only\n\n")
+    cat("  Missing summary stats for ", length(doys_missing_stats), " DOYs\n",
+        sep = "")
+    cat("  Missing posterior files for ", length(doys_missing_posteriors),
+        " DOYs\n", sep = "")
+    cat("  Total DOYs to process: ", length(missing_doys),
+        " (union of both)\n\n", sep = "")
     norms_df <- existing_norms
     days_to_process <- missing_doys
   } else {
-    cat("  All DOYs complete! Nothing to process.\n")
+    cat("  All DOYs complete (summary stats and posteriors present).\n")
     days_to_process <- integer(0)
   }
 }
@@ -327,7 +375,8 @@ if (length(days_to_process) > 0) {
     }
 
     # Fit spatial GAM and get predictions with posteriors
-    result <- fit_doy_spatial_gam(df_doy, pixel_coords, config$n_posterior_sims)
+    result <- fit_doy_spatial_gam(df_doy, pixel_coords,
+                                  config$n_posterior_sims, day = day)
 
     if (is.null(result)) {
       return(list(day = day, ci = NULL, n_obs = nrow(df_doy)))

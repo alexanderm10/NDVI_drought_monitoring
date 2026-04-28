@@ -1,0 +1,70 @@
+=== Shutdown State ===
+Timestamp: 2026-03-30 14:46:53 CDT
+
+--- NDVI File Counts ---
+  2019: 191555 files
+  2020: 188190 files
+  2021: 208915 files
+  2022: 258101 files
+  2023: 251237 files
+  2024: 254497 files
+  2025: 122196 files
+
+--- Last Processing Log Entries ---
+  (from process_2024_docker.log)
+  Progress: 254000 / 254670 
+  Progress: 254500 / 254670 
+  Chunk 51 complete. 4234 succeeded, 436 skipped, 0 corrupt, 0 errors
+  
+  There were 50 or more warnings (use warnings() to see the first 50)
+  
+  === PROCESSING COMPLETE ===
+  Total granules: 254670 
+  Success: 101627 
+  Skipped (already exists): 152815 
+  Missing bands: 196 
+  Corrupt files: 0 
+  Errors: 32 
+  
+  Error details (first 10):
+    HLS.L30.T11TQM.2024085T181839.v2.0: [readValues] cannot read values
+    HLS.L30.T17TLF.2024106T160954.v2.0: [readValues] cannot read values
+    HLS.L30.T17TLF.2024114T160959.v2.0: [readValues] cannot read values
+    HLS.L30.T17TLF.2024121T161610.v2.0: [readValues] cannot read values
+    HLS.S30.T11SLB.2024066T184229.v2.0: [readValues] cannot read values
+    HLS.S30.T12SWC.2024339T180731.v2.0: [readValues] cannot read values
+    HLS.S30.T12SWC.2024344T180649.v2.0: [readValues] cannot read values
+    HLS.S30.T12SWC.2024349T180751.v2.0: [readValues] cannot read values
+    HLS.S30.T12TVK.2024162T180921.v2.0: [readValues] cannot read values
+    HLS.S30.T12TVK.2024167T180919.v2.0: [readValues] cannot read values
+  
+  Output directory: /data/processed_ndvi/daily/2024 
+  NDVI files created: 254497 
+  
+  ✓ Processing complete for year 2024 
+
+--- Last Bulk Log Entries ---
+  (from bulk_docker.log)
+  === BULK DOWNLOAD (DOCKER): 2019-2025 MIDWEST TILES ===
+  Start time: Fri Mar 27 11:16:55 AM MDT 2026
+  Tiles: 1,209 Midwest MGRS tiles
+  Years: 2019-2025
+  Raw data: /data/bulk_downloads_raw
+  NDVI output: /data/processed_ndvi/daily
+  Running inside Docker container: 4c8a8d8a8044
+  
+  === YEAR 2024 ===
+  Started: Fri Mar 27 11:16:55 AM MDT 2026
+  ⏭ Skipping download for 2024 — 254672 granule dirs already exist (L30: 114152, S30: 140520)
+  Processing NDVI (152865 files exist, processing remaining)...
+  ✓ Processing complete: 254497 NDVI files for 2024
+  Completed 2024: Sun Mar 29 08:00:17 PM MDT 2026
+  
+  === YEAR 2025 ===
+  Started: Sun Mar 29 08:00:17 PM MDT 2026
+  ⏭ Skipping download for 2025 — 285354 granule dirs already exist (L30: 114623, S30: 170731)
+  Processing NDVI (94047 files exist, processing remaining)...
+
+--- Zombie Count at Shutdown ---
+  0
+unknown zombies

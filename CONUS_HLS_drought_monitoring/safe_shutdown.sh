@@ -43,9 +43,11 @@ fi
 # --- Step 1: Signal orchestrators to stop ---
 log "Step 1: Signaling orchestrators to stop..."
 
-# Find PIDs of the orchestrator scripts inside the container
+# Find PID of the bulk-download orchestrator inside the container.
+# Note: prefetch_downloads.sh handling was removed when that script was
+# archived (Apr 2026). It was a one-shot Mar 2026 helper to finish
+# remaining S30 granules; the underlying issue resolved Apr 9.
 BULK_PID=$(docker exec "$CONTAINER" pgrep -f "bulk_download_docker.sh" 2>/dev/null | head -1 || true)
-PREFETCH_PID=$(docker exec "$CONTAINER" pgrep -f "prefetch_downloads.sh" 2>/dev/null | head -1 || true)
 
 if [[ -n "$BULK_PID" ]]; then
     log "  Sending SIGTERM to bulk_download_docker.sh (PID $BULK_PID)"
@@ -54,15 +56,8 @@ else
     log "  bulk_download_docker.sh not running (already stopped)"
 fi
 
-if [[ -n "$PREFETCH_PID" ]]; then
-    log "  Sending SIGTERM to prefetch_downloads.sh (PID $PREFETCH_PID)"
-    docker exec "$CONTAINER" kill -TERM "$PREFETCH_PID" 2>/dev/null || true
-else
-    log "  prefetch_downloads.sh not running (already stopped)"
-fi
-
-# Kill wget workers (prefetch) — these are safe to interrupt
-log "  Stopping wget prefetch workers..."
+# Kill any lingering wget workers — safe to interrupt
+log "  Stopping wget download workers..."
 docker exec "$CONTAINER" pkill -TERM wget 2>/dev/null || true
 
 # --- Step 2: Wait for R workers to finish current chunk ---
@@ -167,4 +162,3 @@ log ""
 log "To restart later:"
 log "  docker start $CONTAINER"
 log "  docker exec -d $CONTAINER bash -c 'cd /workspace/bulk_downloads && nohup ./bulk_download_docker.sh >> logs/bulk_docker.log 2>&1 &'"
-log "  docker exec -d $CONTAINER bash -c 'cd /workspace/bulk_downloads && nohup ./prefetch_downloads.sh >> logs/prefetch.log 2>&1 &'"
