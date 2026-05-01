@@ -3,6 +3,10 @@
 # Processes 40 tiles (8x5 grid) across continental United States
 #
 # PARALLELIZATION: Uses future.apply to process tiles in parallel (4 cores max)
+#
+# Invocation: must be run with cwd = workspace root, e.g.
+#   Rscript acquisition/midwest_data_acquisition_parallel.R 2026 01
+# (00_monthly_update.R sources this file from the workspace root.)
 
 library(httr)
 library(jsonlite)
@@ -11,8 +15,7 @@ library(sf)
 library(future)
 library(future.apply)
 
-# Source the main pipeline
-source("01_hls_acquisition_core.R")
+source("acquisition/hls_acquisition_core.R")
 
 ######################
 # CONUS Domain Definition
@@ -229,7 +232,7 @@ acquire_conus_data <- function(start_year = 2013,  # First HLS data available
           # Source required functions in each worker
           # NOTE: process_tile_month_worker is auto-exported by future as a global
           source("00_setup_paths.R")
-          source("01_hls_acquisition_core.R")
+          source("acquisition/hls_acquisition_core.R")
 
           # Get paths in worker environment
           worker_hls_paths <- get_hls_paths()
@@ -251,8 +254,8 @@ acquire_conus_data <- function(start_year = 2013,  # First HLS data available
             library(httr)
             library(terra)
             source("00_setup_paths.R")
-            source("01_hls_acquisition_core.R")
-            source("01a_midwest_data_acquisition_parallel.R")
+            source("acquisition/hls_acquisition_core.R")
+            source("acquisition/midwest_data_acquisition_parallel.R")
             worker_hls_paths <- get_hls_paths()
             result <- process_tile_month_worker(tile, year, month_start, month_end,
                                       cloud_cover_max, worker_hls_paths)

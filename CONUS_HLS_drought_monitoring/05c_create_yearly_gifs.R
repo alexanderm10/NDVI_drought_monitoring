@@ -5,7 +5,7 @@
 #   - Splits the 446 frames into 12 yearly GIFs
 #   - Much more manageable for ImageMagick (30-40 frames each)
 #
-# Prerequisites: Run 05_visualize_anomalies.R or 05b_animation_maps.R first
+# Prerequisites: Run 05b_animation_maps.R first to generate the frames
 #
 # ==============================================================================
 

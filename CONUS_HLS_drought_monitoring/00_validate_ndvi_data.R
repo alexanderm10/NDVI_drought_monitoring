@@ -26,14 +26,14 @@ in_docker <- file.exists("/.dockerenv") || file.exists("/workspace")
 
 if (in_docker) {
   base_dir       <- "/data/processed_ndvi/daily"
-  tile_list_file <- "/workspace/midwest_tiles.txt"
+  tile_list_file <- "/workspace/bulk_downloads/midwest_tiles_overlapping.txt"
   report_dir     <- "/workspace/validation_reports"
 } else {
   base_dir       <- "/mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily"
-  tile_list_file <- "midwest_tiles.txt"
+  tile_list_file <- "bulk_downloads/midwest_tiles_overlapping.txt"
   if (!file.exists(tile_list_file)) {
     tile_list_file <- file.path(dirname(normalizePath(".")),
-                                "CONUS_HLS_drought_monitoring/midwest_tiles.txt")
+                                "CONUS_HLS_drought_monitoring/bulk_downloads/midwest_tiles_overlapping.txt")
   }
   report_dir <- "validation_reports"
 }

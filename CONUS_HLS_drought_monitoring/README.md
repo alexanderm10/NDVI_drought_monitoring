@@ -44,13 +44,17 @@ See [WORKFLOW.md](WORKFLOW.md) for full execution instructions.
 docker compose up -d
 
 # Run full pipeline (scripts must execute in order)
-docker exec conus-hls-drought-monitor Rscript 01_aggregate_to_4km_parallel.R
-# [combine year files — see WORKFLOW.md]
+docker exec conus-hls-drought-monitor Rscript 01_aggregate_to_4km_parallel.R \
+  --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt
+docker exec conus-hls-drought-monitor Rscript 01b_combine_year_files.R
 docker exec conus-hls-drought-monitor Rscript 02_doy_looped_norms.R
 docker exec conus-hls-drought-monitor Rscript 03_doy_looped_year_predictions.R
 docker exec conus-hls-drought-monitor Rscript 04_calculate_anomalies.R
-docker exec conus-hls-drought-monitor Rscript 05_visualize_anomalies.R
+docker exec conus-hls-drought-monitor Rscript 05a_timeseries_quick.R
+docker exec conus-hls-drought-monitor Rscript 05b_animation_maps.R
+docker exec conus-hls-drought-monitor Rscript 05c_create_yearly_gifs.R
 docker exec conus-hls-drought-monitor Rscript 06_calculate_change_derivatives.R
+docker exec conus-hls-drought-monitor Rscript 07_visualize_derivatives.R
 ```
 
 ## Data

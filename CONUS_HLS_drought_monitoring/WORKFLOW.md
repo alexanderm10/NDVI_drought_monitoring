@@ -13,33 +13,47 @@ The workflow uses a **day-of-year (DOY) looped** approach that processes each DO
 ### Core Scripts
 
 ```
-00_setup_paths.R                       - Cross-platform path configuration
-00_posterior_functions.R               - Posterior simulation utilities (post.distns)
-00_reproject_nlcd.R                    - Land cover reprojection for filtering
-00_validate_ndvi_data.R                - Optional pre-flight: scan processed NDVI for truncated/corrupt files
+Utilities & one-time prep (00_*)
+  00_setup_paths.R                       - Cross-platform path configuration
+  00_posterior_functions.R               - Posterior simulation utilities (post.distns)
+  00_reproject_nlcd.R                    - Land cover reprojection for filtering
+  00_validate_ndvi_data.R                - Optional pre-flight: scan processed NDVI for truncated/corrupt files
 
-01_aggregate_to_4km_parallel.R         - Aggregate 30m HLS → 4km per-year timeseries (--workers, --tiles)
-01b_combine_year_files.R               - Combine per-year RDS files → conus_4km_ndvi_timeseries.rds
-02_doy_looped_norms.R                  - Fit baseline spatial GAMs by DOY (2013-2025 pooled, ±7 day window)
-03_doy_looped_year_predictions.R       - Fit year-specific spatial GAMs by DOY
-04_calculate_anomalies.R               - Calculate NDVI anomalies (year − baseline) with posterior CIs
-05_visualize_anomalies.R               - Anomaly time-series + animation (monolithic, ~45 min)
-05a_timeseries_quick.R                 - Anomaly time-series only (fast variant, ~2-3 min)
-05b_animation_maps.R                   - Anomaly maps + 600-frame animation only (slow variant, ~45 min)
-05c_create_yearly_gifs.R               - Split 05/05b animation frames into 12 yearly GIFs
-06_calculate_change_derivatives.R      - Multi-window rate-of-change anomalies (3/7/14/30 day)
-07_visualize_derivatives.R             - Visualize change-derivative outputs (post-script-06)
-07_classify_drought.R                  - PLACEHOLDER: anomaly → drought-category classification (not validated)
+Operational monthly monitor (top-level entry points)
+  00_monthly_update.R                    - Operational R script: download → aggregate → re-fit current year
+  monthly_update.sh                      - Shell wrapper for cron
+
+Analysis pipeline (run sequentially)
+  01_aggregate_to_4km_parallel.R         - Aggregate 30m HLS → 4km per-year timeseries (--workers, --tiles)
+  01b_combine_year_files.R               - Combine per-year RDS files → conus_4km_ndvi_timeseries.rds
+  02_doy_looped_norms.R                  - Fit baseline spatial GAMs by DOY (2013-2025 pooled, ±7 day window)
+  03_doy_looped_year_predictions.R       - Fit year-specific spatial GAMs by DOY
+  04_calculate_anomalies.R               - Calculate NDVI anomalies (year − baseline) with posterior CIs
+  05a_timeseries_quick.R                 - Anomaly time-series figures (fast, ~2-3 min)
+  05b_animation_maps.R                   - Anomaly maps + 600-frame animation (slow, ~45 min)
+  05c_create_yearly_gifs.R               - Split 05b animation frames into 12 yearly GIFs
+  06_calculate_change_derivatives.R      - Multi-window rate-of-change anomalies (3/7/14/30 day)
+  07_visualize_derivatives.R             - Visualize change-derivative outputs (post-script-06)
+
+Not in main pipeline
+  07_classify_drought_PLACEHOLDER.R      - PLACEHOLDER: anomaly → drought-category classification (not validated)
+
+Acquisition module (sourced by 00_monthly_update.R; also runnable directly)
+  acquisition/hls_acquisition_core.R              - NASA HLS STAC search + download helpers
+  acquisition/midwest_data_acquisition_parallel.R - Parallel acquisition orchestrator (4 workers)
+
+Historical bulk download (one-shot, 2013-2024)
+  bulk_downloads/                                 - Self-contained orchestrator + tile filter
 ```
 
-Pick **either** 05 (monolithic) **or** 05a + 05b + 05c (split fast/slow). Both produce the same final figures; the split lets you do quick TS checks without the 45-min animation cost.
+Script 05 is split into three pieces (5a / 5b / 5c) so you can run a fast time-series sanity check (~3 min) without paying the ~45 min animation cost. Run them in order.
 
 ## Running the Workflow
 
 ### Prerequisites
 - Docker container: `docker compose up -d`
 - NASA Earthdata credentials in `.netrc` (re-copy after container rebuild: `docker cp ~/.netrc conus-hls-drought-monitor:/.netrc`)
-- HLS data downloaded into `/mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/{YYYY}/` (handled by `bulk_downloads/bulk_download_docker.sh` for 2013-2024, or `01a_midwest_data_acquisition_parallel.R` for 2025+)
+- HLS data downloaded into `/mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/{YYYY}/` (handled by `bulk_downloads/bulk_download_docker.sh` for the 2013-2024 historical pull, or `acquisition/midwest_data_acquisition_parallel.R` for 2025+ and ongoing monthly updates)
 - NLCD land cover reprojected via `00_reproject_nlcd.R` (one-time)
 - **Optional pre-flight**: run `00_validate_ndvi_data.R` to scan the processed NDVI tree for truncated/corrupt files before launching multi-day jobs. Writes per-year reports to `validation_reports/`.
 
@@ -122,29 +136,23 @@ docker exec conus-hls-drought-monitor Rscript 04_calculate_anomalies.R
   - Land cover verification (confirms 125,798 valid pixels)
   - Uncertainty propagation (mean ± 95% CI)
 
-#### **Script 05: Visualize Anomalies**
+#### **Script 05: Visualize Anomalies** (split into 5a / 5b / 5c)
 
-Two ways to do this — pick one path:
+Run in order. 5a is fast and gives you a sanity check before paying for the slow animation step.
 
-**Path A: Monolithic (~45 minutes)** — does everything in one go.
 ```bash
-docker exec conus-hls-drought-monitor Rscript 05_visualize_anomalies.R
-```
-- Outputs: time-series plots, faceted-by-year plots, weekly anomaly maps (sample), full-period animated GIF.
-
-**Path B: Split fast/slow** — useful when you only want the time series for a quick sanity check, or when you want to re-run only the slow animation step.
-```bash
-# Quick TS only (~2-3 min)
+# Quick TS only (~2-3 min) — domain-average + faceted-by-year time series
 docker exec conus-hls-drought-monitor Rscript 05a_timeseries_quick.R
 
-# Slow: spatial maps + ~600 animation frames + GIF (~45 min)
+# Slow: spatial maps + ~600 animation frames + full-period GIF (~45 min)
 docker exec conus-hls-drought-monitor Rscript 05b_animation_maps.R
 
-# Optional: split the 600 frames into 12 yearly GIFs (more shareable)
+# Split the 600 frames into 12 yearly GIFs (more shareable)
 docker exec conus-hls-drought-monitor Rscript 05c_create_yearly_gifs.R
 ```
 
-- **Location for all paths**: `/data/figures/MIDWEST/`
+- **Output location**: `/data/figures/MIDWEST/`
+- The previous monolithic `05_visualize_anomalies.R` was archived to `.archive/` on 2026-05-01; the split scripts produce the same final figures.
 
 #### **Script 06: Change Derivatives** (~1.5-2 days, 3 cores)
 ```bash
@@ -178,8 +186,8 @@ docker exec conus-hls-drought-monitor Rscript 07_visualize_derivatives.R
 
 ### Planned future step
 
-#### **Script 07b: Classify Drought** (PLACEHOLDER — not for operational use)
-The script `07_classify_drought.R` defines three candidate classification methods (percentile-based, significance-based, hybrid) for converting NDVI anomalies into drought categories analogous to USDM (D0-D4). The script is annotated as a placeholder throughout: thresholds are not validated against any ground-truth dataset, and USDM agreement metrics are TODOs. Do not use the outputs operationally without method validation. Treat this as a starting point for a future drought-classification subproject.
+#### **Script 07_classify_drought_PLACEHOLDER.R** (NOT for operational use)
+This file defines three candidate classification methods (percentile-based, significance-based, hybrid) for converting NDVI anomalies into drought categories analogous to USDM (D0-D4). The `_PLACEHOLDER` suffix is load-bearing: thresholds are not validated against any ground-truth dataset, and USDM agreement metrics are TODOs. Do not use the outputs operationally without method validation. Treat this as a starting point for a future drought-classification subproject.
 
 ## Data Flow
 
@@ -263,15 +271,18 @@ Change Derivatives (rate of change anomalies)
 
 After the historical pipeline is complete, monthly updates only reprocess the current year — no baseline refit needed.
 
+The `00_monthly_update.R` script (with shell wrapper `monthly_update.sh`) chains the operational steps below. Source it via `monthly_update.sh` in cron, or invoke the underlying steps manually:
+
 ```bash
-# 1. Download new scenes for target month
-docker exec conus-hls-drought-monitor Rscript 01a_midwest_data_acquisition_parallel.R 2026 01
+# 1. Download new scenes for target month (sourced from acquisition/)
+docker exec conus-hls-drought-monitor Rscript acquisition/midwest_data_acquisition_parallel.R 2026 01
 
 # 2. Re-aggregate current year (script skips already-processed scenes)
-docker exec conus-hls-drought-monitor Rscript 01_aggregate_to_4km_parallel.R 2026 --workers=8
+docker exec conus-hls-drought-monitor Rscript 01_aggregate_to_4km_parallel.R 2026 \
+  --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt
 
-# 3. Re-combine timeseries (append new year data, deduplicate)
-# Run the combine snippet above
+# 3. Re-combine timeseries (force overwrite to incorporate new year data)
+docker exec conus-hls-drought-monitor Rscript 01b_combine_year_files.R --force
 
 # 4. Refit current year predictions
 docker exec conus-hls-drought-monitor Rscript 03_doy_looped_year_predictions.R

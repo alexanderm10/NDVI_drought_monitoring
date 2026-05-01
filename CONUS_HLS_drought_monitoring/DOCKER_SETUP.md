@@ -103,7 +103,7 @@ The full step-by-step workflow lives in [WORKFLOW.md](WORKFLOW.md). It covers, i
 3. `02_doy_looped_norms.R` — fit baseline spatial GAMs (~6-8 hr)
 4. `03_doy_looped_year_predictions.R` — fit year-specific GAMs (~1.5-2 days)
 5. `04_calculate_anomalies.R` — year minus baseline
-6. `05_visualize_anomalies.R` (or split via `05a/05b/05c`) — anomaly figures
+6. `05a_timeseries_quick.R` + `05b_animation_maps.R` + `05c_create_yearly_gifs.R` — anomaly figures (timeseries / maps / yearly GIFs)
 7. `06_calculate_change_derivatives.R` — multi-window change anomalies (~1.5-2 days)
 8. `07_visualize_derivatives.R` — derivative figures
 

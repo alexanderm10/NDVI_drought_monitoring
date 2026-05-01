@@ -110,7 +110,7 @@ cat("Downloading HLS scenes from", format(start_date, "%Y-%m-%d"), "to",
     format(end_date, "%Y-%m-%d"), "...\n")
 
 # Source the parallel acquisition script
-source("01a_midwest_data_acquisition_parallel.R")
+source("acquisition/midwest_data_acquisition_parallel.R")
 
 tryCatch({
   download_result <- acquire_conus_data_daterange(

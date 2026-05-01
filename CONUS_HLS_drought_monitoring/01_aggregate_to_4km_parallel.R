@@ -8,7 +8,7 @@
 #   Rscript 01_aggregate_to_4km_parallel.R 2013         # Single year
 #   Rscript 01_aggregate_to_4km_parallel.R 2013 2015    # Year range
 #   Rscript 01_aggregate_to_4km_parallel.R --workers=4  # Specify worker count
-#   Rscript 01_aggregate_to_4km_parallel.R --tiles=midwest_tiles.txt  # Filter to specific tiles
+#   Rscript 01_aggregate_to_4km_parallel.R --tiles=bulk_downloads/midwest_tiles_overlapping.txt  # MGRS tile filter (308 tiles overlapping 4km grid)
 #
 # Features:
 #   - Each worker writes to disk incrementally (not holding all in RAM)
