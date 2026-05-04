@@ -1,15 +1,20 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-04 07:25 MDT (post-rewrite, 2025 resume launched)
+**Updated**: 2026-05-04 EOD (BLOCKED on 2025 — terra::resample segfault on corrupt scene)
 
-## Status: RUNNING — 4km Aggregation 2025 only (year 7 of 7, ~50% resumed after crash + rewrite)
+## Status: BLOCKED — 4km Aggregation 2025 (terra C-level SIGSEGV; needs callr subprocess isolation)
 
 ### Pipeline 1: 4km Aggregation (Script 01)
-- **Status**: RUNNING — 2013-2024 complete, 2025 resumed after May 1 crash + script rewrite
-- **Active script**: `01_aggregate_to_4km_parallel.R 2019 2025 --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt` (skips 2019-2024)
+- **Status**: BLOCKED — 2013-2024 complete, 2025 hit terra::resample SIGSEGV in round 2; parent R died
+- **Last command**: `01_aggregate_to_4km_parallel.R 2019 2025 --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt` (skipped 2019-2024)
 - **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/aggregation_2019_2025.log`
-- **Started**: 2026-05-04 07:22 MDT (resume after rewrite; original 2019-2025 launch 2026-04-28 07:28)
-- **As of 07:25 MDT**: 8/8 workers alive in Round 1 of 4 (sub-chunked 2500 files/worker/round). First ~half of round 1 will be skip-only (resuming per-worker trackers from May 1 partial run; ~4,100-4,600 scenes/worker already in tracker). Expected year 2025 completion: ~14:00-16:00 MDT today.
+- **Timeline today**:
+  - 07:22 MDT — resume launched (per-worker trackers + 357 partial batches preserved)
+  - 07:30 MDT — round 1/4 complete in 7.7 min (resume-skip pass: 0 success, 860 failed-retries, 19,140 skipped)
+  - ~07:38 MDT — round 2/4 parallel attempt died with `FutureInterruptError` (worker 2 segfault propagated as worker death)
+  - tryCatch fell back to sequential lapply → sequential hit the same scene → `*** caught segfault ***` killed the parent R
+- **Resume state**: per-worker `worker_NN_processed.txt` trackers preserved (4,100-4,901 scenes each, ~50% done); 357 RDS batches still in `aggregation_temp/2025/`
+- **NEXT SESSION**: see `project_gam_rerun_plan.md` (auto-memory) — implement `callr::r()` subprocess isolation around `aggregate_scene_to_4km`. R's tryCatch cannot catch SIGSEGV; only a subprocess boundary can.
 
 #### Year completion timing (with tile filter)
 | Year | Status | Runtime |
