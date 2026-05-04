@@ -1,15 +1,26 @@
 # Currently Running Analyses
 
-**Updated**: 2026-04-28 11:30 MDT (end of pipeline-audit + downstream-fix session)
+**Updated**: 2026-05-04 07:25 MDT (post-rewrite, 2025 resume launched)
 
-## Status: RUNNING — 4km Aggregation 2019-2025 (year 1 of 7, ~46% through 2019)
+## Status: RUNNING — 4km Aggregation 2025 only (year 7 of 7, ~50% resumed after crash + rewrite)
 
 ### Pipeline 1: 4km Aggregation (Script 01)
-- **Status**: RUNNING — 2013-2018 complete, 2019 in progress
-- **Active script**: `01_aggregate_to_4km_parallel.R 2019 2025 --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt`
+- **Status**: RUNNING — 2013-2024 complete, 2025 resumed after May 1 crash + script rewrite
+- **Active script**: `01_aggregate_to_4km_parallel.R 2019 2025 --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt` (skips 2019-2024)
 - **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/aggregation_2019_2025.log`
-- **Started**: 2026-04-28 07:28 MDT (replaced unfiltered run from 2026-04-24)
-- **As of 11:30 MDT**: 8/8 workers alive, ~46% through 2019 (212 RDS batches written + 8 worker_processed files), per-worker range 22-30 batches. Worker 04 slowest at 37%. Expected year 2019 completion: ~15:00 MDT today. Expected full 2019-2025 run: ~2026-05-04 to 05-05.
+- **Started**: 2026-05-04 07:22 MDT (resume after rewrite; original 2019-2025 launch 2026-04-28 07:28)
+- **As of 07:25 MDT**: 8/8 workers alive in Round 1 of 4 (sub-chunked 2500 files/worker/round). First ~half of round 1 will be skip-only (resuming per-worker trackers from May 1 partial run; ~4,100-4,600 scenes/worker already in tracker). Expected year 2025 completion: ~14:00-16:00 MDT today.
+
+#### Year completion timing (with tile filter)
+| Year | Status | Runtime |
+|------|--------|---------|
+| 2019 | Complete | ~600 min |
+| 2020 | Complete | ~580 min |
+| 2021 | Complete | ~590 min |
+| 2022 | Complete | ~750 min |
+| 2023 | Complete | ~720 min |
+| 2024 | Complete | 777 min |
+| 2025 | RUNNING | (resume; ~6-8 hr remaining) |
 
 #### Year completion timing (original unfiltered run, 2013-2018)
 | Year | Status | Runtime |
@@ -94,6 +105,47 @@ for yr in 2019 2020 2021 2022 2023 2024 2025; do
   ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l
 done
 ```
+
+---
+
+## Session Summary (May 4, 2026 — 2025 crash diagnosis + script rewrite + resume)
+
+Returning to a stalled aggregation: 2025 crashed on May 1 03:53 with `FutureInterruptError` (worker OOM cascade) at ~50% through, after 2013-2024 had completed cleanly. Workers died simultaneously at 4,100-4,600/9,000 scenes — classic OS OOM kill pattern, not a bad scene.
+
+### Root cause
+The MEMORY.md "stable parallel R" pattern (5 elements) was only **partially** implemented in `01_aggregate_to_4km_parallel.R`:
+
+| # | Pattern element | Pre-rewrite state |
+|---|-----------------|-------------------|
+| 1 | `options(future.globals.maxSize = 2 * 1024^3)` | ❌ Never set |
+| 2 | Recycle workers between iterations | ⚠️ Only between *years*, not within (workers ate ~9.5K files in one shot) |
+| 3 | `tryCatch` around `future_lapply` with sequential fallback | ❌ Missing |
+| 4 | `rm()` + `gc()` for terra rasters inside workers | ❌ `aggregate_scene_to_4km` left `ndvi_30m`, `grid_4km_reproj`, `grid_30m`, large vectors uncleaned |
+| 5 | Chunk large jobs (~5K granules per chunk) | ❌ Whole year per worker per call |
+
+Why 2025 specifically: files-per-worker grew year-over-year (3.7K in 2017 → 7.9K in 2024 → 9.5K in 2025, +20% over previous max). 2024 was already at the unsafe ceiling; 2025 pushed past it.
+
+### Script rewrite — `01_aggregate_to_4km_parallel.R`
+1. `options(future.globals.maxSize = 2 * 1024^3)` set globally
+2. `aggregate_scene_to_4km` drops terra rasters (`ndvi_30m`, `grid_4km_reproj`, `grid_30m`) and large vectors (`pixel_ids`, `ndvi_vals`, `df`) before the dplyr aggregation
+3. `flush_buffer` does `rm(batch_df) + gc(verbose=FALSE)` after each 100-scene RDS write
+4. **Sub-chunked dispatch**: each year is split into rounds of `<= chunk_size` files/worker (default 2500). `plan(multisession)` → `future_lapply` → `plan(sequential) + gc()` between every round. Workers' R subprocesses are torn down and respawned fresh, releasing accumulated terra C++ allocations.
+5. `tryCatch` wraps `future_lapply` with sequential `lapply` fallback if a parallel round dies
+6. New `--chunk-size=N` CLI arg (default 2500); for 2025 (max 9,482 files/worker) → 4 rounds with full recycling between
+
+### Resume launched
+- Container restart 2026-05-04 07:22:41 MDT, command unchanged: `Rscript 01_aggregate_to_4km_parallel.R 2019 2025 --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt`
+- Per-worker `worker_NN_processed.txt` trackers preserved → workers skip ~4,100-4,600 already-processed scenes each, continue with remaining ~4,500-5,000
+- 357 RDS batches in `aggregation_temp/2025/` from May 1 partial run also preserved (combine-time dedup handles overlap)
+- Watcher (`watch_then_combine.sh`, host PID 3629505, running since May 1) still armed → auto-launches `01b_combine_year_files.R 2013 2025` when `ndvi_4km_2025.rds` lands
+
+### Files Modified
+- `CONUS_HLS_drought_monitoring/01_aggregate_to_4km_parallel.R` — full rewrite of memory-management pattern (see above)
+- `CONUS_HLS_drought_monitoring/RUNNING_ANALYSES.md` — this file
+- `CONUS_HLS_drought_monitoring/watch_then_combine.sh` — added (host watcher, written May 1, not previously committed)
+
+### Next Steps
+Same as Apr 28 plan — once 2025 finishes (~14:00-16:00 MDT today) and `01b` auto-runs, proceed: 02 → 03 → 04 → 05 → 06 → 07.
 
 ---
 

@@ -7,8 +7,9 @@
 #   Rscript 01_aggregate_to_4km_parallel.R              # All years (2013-2025)
 #   Rscript 01_aggregate_to_4km_parallel.R 2013         # Single year
 #   Rscript 01_aggregate_to_4km_parallel.R 2013 2015    # Year range
-#   Rscript 01_aggregate_to_4km_parallel.R --workers=4  # Specify worker count
+#   Rscript 01_aggregate_to_4km_parallel.R --workers=4         # Specify worker count
 #   Rscript 01_aggregate_to_4km_parallel.R --tiles=bulk_downloads/midwest_tiles_overlapping.txt  # MGRS tile filter (308 tiles overlapping 4km grid)
+#   Rscript 01_aggregate_to_4km_parallel.R --chunk-size=2500   # Scenes per worker per round (smaller = more recycling, less memory)
 #
 # Features:
 #   - Each worker writes to disk incrementally (not holding all in RAM)
@@ -16,11 +17,16 @@
 #   - Resume capability from partial runs (tracks processed scenes in text file)
 #   - Skips years that already have completed output files
 #   - Year-specific temp directories for parallel year processing
+#   - Sub-chunked dispatch with worker recycling between rounds (memory hygiene)
+#   - tryCatch + sequential fallback if a parallel round dies (e.g., OOM)
 #
 # Strategy:
 #   - Group files by tile for disk cache performance
 #   - Each worker creates its own 4km grid (terra objects don't serialize)
 #   - Workers write numbered RDS batches: worker_01_batch_001.rds, etc.
+#   - Each year is split into rounds of <= chunk_size files per worker;
+#     workers are recycled (plan(sequential) + gc()) between rounds to free
+#     accumulated terra C++ allocations.
 #   - Main process combines and deduplicates at end
 #
 # Storage efficiency:
@@ -33,6 +39,9 @@ library(dplyr)
 library(lubridate)
 library(future)
 library(future.apply)
+
+# Default future export size limit is 500 MB; raster-heavy workers need more.
+options(future.globals.maxSize = 2 * 1024^3)
 
 # Source path configuration
 source("00_setup_paths.R")
@@ -48,6 +57,7 @@ args <- commandArgs(trailingOnly = TRUE)
 requested_years <- 2013:2025
 n_workers <- 8
 tile_filter_file <- NULL
+chunk_size <- 2500  # Per-worker scenes per dispatch round; workers recycle between rounds
 
 # Parse arguments
 numeric_args <- c()
@@ -56,6 +66,8 @@ for (arg in args) {
     n_workers <- as.integer(sub("^--workers=", "", arg))
   } else if (grepl("^--tiles=", arg)) {
     tile_filter_file <- sub("^--tiles=", "", arg)
+  } else if (grepl("^--chunk-size=", arg)) {
+    chunk_size <- as.integer(sub("^--chunk-size=", "", arg))
   } else if (grepl("^[0-9]+$", arg)) {
     numeric_args <- c(numeric_args, as.integer(arg))
   }
@@ -95,7 +107,8 @@ config <- list(
   aggregation_method = "median",
   min_pixels_per_cell = 5,
   n_workers = n_workers,
-  batch_size = 100,  # Write to disk every N scenes per worker
+  batch_size = 100,    # Write to disk every N scenes per worker
+  chunk_size = chunk_size,  # Per-worker scenes per parallel round; recycle between rounds
 
   # Directories (year-specific temp dirs created below)
   output_dir = file.path(hls_paths$gam_models, "aggregated_years"),
@@ -142,6 +155,7 @@ cat("  Workers:", config$n_workers, "\n")
 cat("  Years to process:", paste(years_to_process, collapse = ", "), "\n")
 cat("  min_pixels_per_cell:", config$min_pixels_per_cell, "\n")
 cat("  Batch size:", config$batch_size, "scenes\n")
+cat("  Chunk size:", config$chunk_size, "scenes/worker/round (workers recycle between rounds)\n")
 cat("  Output directory:", config$output_dir, "\n\n")
 
 # ==============================================================================
@@ -214,6 +228,10 @@ aggregate_scene_to_4km <- function(ndvi_path, grid_4km, method = "median", min_p
   df <- data.frame(pixel_id = pixel_ids, ndvi = ndvi_vals)
   df <- df[!is.na(df$pixel_id) & !is.na(df$ndvi), ]
 
+  # terra C++ allocations don't reliably release through R GC alone; drop
+  # raster handles and large temp vectors before the dplyr aggregation.
+  rm(ndvi_30m, grid_4km_reproj, grid_30m, pixel_ids, ndvi_vals)
+
   if (nrow(df) == 0) return(NULL)
 
   if (method == "median") {
@@ -225,6 +243,8 @@ aggregate_scene_to_4km <- function(ndvi_path, grid_4km, method = "median", min_p
       group_by(pixel_id) %>%
       summarise(ndvi_agg = mean(ndvi, na.rm = TRUE), n_pixels = n(), .groups = "drop")
   }
+
+  rm(df)
 
   agg_result <- agg_result %>% filter(n_pixels >= min_pixels)
 
@@ -287,6 +307,11 @@ process_file_chunk_disk <- function(file_chunk, worker_id, config, temp_dir) {
 
       # Append new scene IDs to tracker file
       cat(new_scenes, file = tracker_file, sep = "\n", append = TRUE)
+
+      # Nudge GC after each flush; terra allocations otherwise accumulate
+      # over thousands of scenes and trigger OS OOM kills.
+      rm(batch_df)
+      gc(verbose = FALSE)
     }
   }
 
@@ -461,37 +486,96 @@ for (current_year in years_to_process) {
   # PARALLEL EXECUTION FOR THIS YEAR
   # ==============================================================================
 
+  # Sub-chunk each worker's file list into rounds of <= chunk_size files.
+  # Workers are recycled (plan(sequential) + gc()) between rounds, which frees
+  # accumulated terra C++ allocations that R's GC alone won't reclaim.
+  worker_subchunks <- lapply(file_chunks, function(files) {
+    if (length(files) == 0) return(list())
+    if (length(files) <= config$chunk_size) return(list(files))
+    block_id <- ceiling(seq_along(files) / config$chunk_size)
+    unname(split(files, block_id))
+  })
+
+  n_rounds <- max(sapply(worker_subchunks, length))
+
   cat("\n=== STARTING PARALLEL PROCESSING ===\n")
   cat("Time:", as.character(Sys.time()), "\n")
-  cat("Temp directory:", temp_dir, "\n\n")
-
-  plan(multisession, workers = config$n_workers)
+  cat("Temp directory:", temp_dir, "\n")
+  cat("Sub-chunking:", n_rounds, "round(s) of up to", config$chunk_size, "files/worker\n\n")
 
   proc_start <- Sys.time()
+  total_success <- 0L
+  total_failed  <- 0L
+  total_skipped <- 0L
 
-  # Run workers
-  results <- future_lapply(seq_along(file_chunks), function(worker_id) {
+  for (round_i in seq_len(n_rounds)) {
 
-    library(terra)
-    library(dplyr)
+    # Build round task list (workers that still have files in this round)
+    round_files <- list()
+    round_worker_ids <- integer(0)
+    for (w in seq_along(worker_subchunks)) {
+      if (length(worker_subchunks[[w]]) >= round_i) {
+        round_files <- c(round_files, list(worker_subchunks[[w]][[round_i]]))
+        round_worker_ids <- c(round_worker_ids, w)
+      }
+    }
 
-    process_file_chunk_disk(
-      file_chunk = file_chunks[[worker_id]],
-      worker_id = worker_id,
-      config = config,
-      temp_dir = temp_dir
-    )
+    cat(sprintf("--- Round %d/%d: %d worker tasks (%d files total) ---\n",
+                round_i, n_rounds, length(round_files),
+                sum(lengths(round_files))))
+    round_start <- Sys.time()
 
-  }, future.seed = TRUE)
+    plan(multisession, workers = config$n_workers)
 
-  plan(sequential)
+    round_results <- tryCatch({
+      future_lapply(seq_along(round_files), function(i) {
+
+        library(terra)
+        library(dplyr)
+
+        process_file_chunk_disk(
+          file_chunk = round_files[[i]],
+          worker_id = round_worker_ids[i],
+          config = config,
+          temp_dir = temp_dir
+        )
+
+      }, future.seed = TRUE)
+    }, error = function(e) {
+      cat("\nWARNING: parallel round failed (", conditionMessage(e),
+          "); falling back to sequential lapply for this round.\n", sep = "")
+      plan(sequential)
+      lapply(seq_along(round_files), function(i) {
+        process_file_chunk_disk(
+          file_chunk = round_files[[i]],
+          worker_id = round_worker_ids[i],
+          config = config,
+          temp_dir = temp_dir
+        )
+      })
+    })
+
+    # Recycle workers between rounds: tear down R subprocesses, force GC
+    plan(sequential)
+    gc(verbose = FALSE)
+
+    # Accumulate stats
+    total_success <- total_success + sum(sapply(round_results, function(r) r$n_success))
+    total_failed  <- total_failed  + sum(sapply(round_results, function(r) r$n_failed))
+    total_skipped <- total_skipped + sum(sapply(round_results, function(r) r$n_skipped))
+
+    round_elapsed <- as.numeric(difftime(Sys.time(), round_start, units = "mins"))
+    cat(sprintf("    Round %d done in %.1f min (success=%d failed=%d skipped=%d)\n",
+                round_i, round_elapsed,
+                sum(sapply(round_results, function(r) r$n_success)),
+                sum(sapply(round_results, function(r) r$n_failed)),
+                sum(sapply(round_results, function(r) r$n_skipped))))
+
+    rm(round_results, round_files)
+    gc(verbose = FALSE)
+  }
 
   proc_elapsed <- as.numeric(difftime(Sys.time(), proc_start, units = "mins"))
-
-  # Summarize worker results
-  total_success <- sum(sapply(results, function(r) r$n_success))
-  total_failed <- sum(sapply(results, function(r) r$n_failed))
-  total_skipped <- sum(sapply(results, function(r) r$n_skipped))
 
   cat("\nProcessing complete:\n")
   cat("  Success:", total_success, ", Failed:", total_failed, ", Skipped:", total_skipped, "\n")
@@ -564,7 +648,7 @@ for (current_year in years_to_process) {
 
   # Clean up memory
 
-  rm(combined_df, combined_list, results, file_info, file_chunks)
+  rm(combined_df, combined_list, file_info, file_chunks, worker_subchunks)
   gc()
 }
 
