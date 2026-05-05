@@ -39,6 +39,7 @@ library(dplyr)
 library(lubridate)
 library(future)
 library(future.apply)
+library(callr)
 
 # Default future export size limit is 500 MB; raster-heavy workers need more.
 options(future.globals.maxSize = 2 * 1024^3)
@@ -275,6 +276,27 @@ process_file_chunk_disk <- function(file_chunk, worker_id, config, temp_dir) {
   # Worker tracking file (small text file for fast resume check)
   tracker_file <- file.path(temp_dir, sprintf("worker_%02d_processed.txt", worker_id))
 
+  # Subprocess isolation for terra C-code segfaults. Each scene's aggregation
+  # runs in a persistent r_session subprocess; if terra::resample (or any C
+  # call) crashes on a corrupt scene, only the subprocess dies. The parent
+  # worker logs the file path, respawns the subprocess, and continues.
+  # See May 5 RUNNING_ANALYSES.md for the corrupt-scene incident this fixes.
+  corrupt_log <- file.path(temp_dir, sprintf("worker_%02d_corrupt.txt", worker_id))
+  grid_4km_packed <- terra::wrap(grid_4km)
+
+  spawn_subprocess <- function() {
+    rs <- callr::r_session$new()
+    rs$run(function(g, fn) {
+      library(terra)
+      library(dplyr)
+      .GlobalEnv$grid_4km <- terra::unwrap(g)
+      .GlobalEnv$agg_fn <- fn
+      invisible(NULL)
+    }, args = list(grid_4km_packed, aggregate_scene_to_4km))
+    rs
+  }
+  rs <- spawn_subprocess()
+
   # Check for existing partial results (resume capability)
   if (file.exists(tracker_file)) {
     processed_scenes <- readLines(tracker_file)
@@ -336,12 +358,19 @@ process_file_chunk_disk <- function(file_chunk, worker_id, config, temp_dir) {
       next
     }
 
-    # Aggregate scene
+    # Aggregate scene in isolated subprocess. A SIGSEGV inside terra (corrupt
+    # scene → C-level memory corruption) kills the subprocess, not the parent.
+    # On crash: log the file, kill the dead session, respawn, continue.
     agg_result <- tryCatch({
-      aggregate_scene_to_4km(ndvi_path, grid_4km,
-                            config$aggregation_method,
-                            config$min_pixels_per_cell)
-    }, error = function(e) NULL)
+      rs$run(function(p, method, min_pix) agg_fn(p, grid_4km, method, min_pix),
+             args = list(ndvi_path, config$aggregation_method, config$min_pixels_per_cell))
+    }, error = function(e) {
+      cat(ndvi_path, "\t", conditionMessage(e), "\n",
+          file = corrupt_log, append = TRUE)
+      try(rs$close(), silent = TRUE)
+      rs <<- spawn_subprocess()
+      NULL
+    })
 
     if (is.null(agg_result) || nrow(agg_result) == 0) {
       n_failed <- n_failed + 1
@@ -386,6 +415,9 @@ process_file_chunk_disk <- function(file_chunk, worker_id, config, temp_dir) {
   if (length(batch_buffer) > 0) {
     flush_buffer(batch_buffer, batch_num, new_scenes)
   }
+
+  # Tear down the per-worker subprocess
+  try(rs$close(), silent = TRUE)
 
   cat(sprintf("Worker %d complete: %d success, %d failed, %d skipped\n",
               worker_id, n_success, n_failed, n_skipped))
