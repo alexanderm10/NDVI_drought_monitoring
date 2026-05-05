@@ -1,20 +1,19 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-04 EOD (BLOCKED on 2025 — terra::resample segfault on corrupt scene)
+**Updated**: 2026-05-05 (callr subprocess isolation deployed; 2025 resume in flight)
 
-## Status: BLOCKED — 4km Aggregation 2025 (terra C-level SIGSEGV; needs callr subprocess isolation)
+## Status: RUNNING — 4km Aggregation 2025 (with callr::r_session subprocess isolation)
 
 ### Pipeline 1: 4km Aggregation (Script 01)
-- **Status**: BLOCKED — 2013-2024 complete, 2025 hit terra::resample SIGSEGV in round 2; parent R died
-- **Last command**: `01_aggregate_to_4km_parallel.R 2019 2025 --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt` (skipped 2019-2024)
+- **Status**: RUNNING — 2013-2024 complete, 2025 resumed 07:32 MDT 2026-05-05 with subprocess isolation
+- **Command**: `01_aggregate_to_4km_parallel.R 2019 2025 --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt` (2019-2024 skipped at start)
 - **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/aggregation_2019_2025.log`
-- **Timeline today**:
-  - 07:22 MDT — resume launched (per-worker trackers + 357 partial batches preserved)
-  - 07:30 MDT — round 1/4 complete in 7.7 min (resume-skip pass: 0 success, 860 failed-retries, 19,140 skipped)
-  - ~07:38 MDT — round 2/4 parallel attempt died with `FutureInterruptError` (worker 2 segfault propagated as worker death)
-  - tryCatch fell back to sequential lapply → sequential hit the same scene → `*** caught segfault ***` killed the parent R
-- **Resume state**: per-worker `worker_NN_processed.txt` trackers preserved (4,100-4,901 scenes each, ~50% done); 357 RDS batches still in `aggregation_temp/2025/`
-- **NEXT SESSION**: see `project_gam_rerun_plan.md` (auto-memory) — implement `callr::r()` subprocess isolation around `aggregate_scene_to_4km`. R's tryCatch cannot catch SIGSEGV; only a subprocess boundary can.
+- **Resume state at launch**: per-worker `worker_NN_processed.txt` trackers preserved (4,100-4,901 scenes each, ~50% done); 353 RDS batches in `aggregation_temp/2025/`
+- **Crash protection**: each scene's `aggregate_scene_to_4km` runs in a `callr::r_session` subprocess; SIGSEGV in terra C-code kills only the subprocess. Parent worker logs the file path to `worker_NN_corrupt.txt`, respawns the subprocess, continues.
+- **Watcher**: `watch_then_combine.sh` (host PID 3629505) still polling for `ndvi_4km_2025.rds`; will auto-launch `01b_combine_year_files.R 2013 2025` when 2025 lands.
+
+#### May 4 SIGSEGV (now fixed)
+2025 resume on 2026-05-04 hit `terra::resample → *** caught segfault ***` in round 2 (worker 2's first new scene; address `0xa0`, cause `memory not mapped`). R-level `tryCatch` cannot catch C-level signals; the parent R died. The fix: callr::r_session subprocess isolation (commit `6432c9c`).
 
 #### Year completion timing (with tile filter)
 | Year | Status | Runtime |
@@ -110,6 +109,40 @@ for yr in 2019 2020 2021 2022 2023 2024 2025; do
   ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l
 done
 ```
+
+---
+
+## Session Summary (May 5, 2026 — callr subprocess isolation + 2025 resume)
+
+After May 4's terra::resample SIGSEGV killed the parent R, today's work added the subprocess boundary needed to survive C-level signals. R's `tryCatch` cannot catch SIGSEGV; only an OS process boundary can.
+
+### Diagnosis attempt
+Tried to identify the corrupt scene from worker 2's queue: tracker's last successful entry was `S30_T15SYC_2025-08-15`, so the next scene would be `HLS.S30.T15SYC.2025229T163921.v2.0_NDVI.tif`. Reproduced the exact pipeline call (Albers grid → reproject to UTM → resample to 30m) on this file in a fresh R session — **no crash**. Either the segfault is state-dependent (accumulated terra C++ allocations across thousands of scenes) or my position estimate was off; can't pinpoint without instrumentation. Decided to deploy callr instead: it identifies AND survives the bad scene without needing to know which one in advance.
+
+### Script change — `01_aggregate_to_4km_parallel.R`
+1. Added `library(callr)`
+2. In `process_file_chunk_disk`: each worker spawns a persistent `callr::r_session` subprocess at startup. Grid + agg function sent once via `terra::wrap()`/`unwrap()` for fast IPC thereafter.
+3. Each scene's `aggregate_scene_to_4km` call replaced with `rs$run(...)` (~5-10s per call vs ~5s direct — IPC overhead is small relative to the inherent terra cost on 13M-pixel rasters)
+4. On `tryCatch` error from `rs$run()`: log `<file>\t<error>` to `worker_NN_corrupt.txt`, kill the dead session, respawn, continue. Counts as a normal `n_failed`.
+5. Subprocess closed at end of `process_file_chunk_disk` (clean per-round teardown via existing `plan(sequential)` recycling)
+
+Validated end-to-end: 3 real scenes + 1 fake "corrupt" scene → 3 success, 1 failed, corrupt log created with the underlying error message. Worker continued through the failure.
+
+### Resume launched
+- 2026-05-05 07:32 MDT, command unchanged: `Rscript 01_aggregate_to_4km_parallel.R 2019 2025 --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt`
+- 2019-2024 auto-skipped at start; 2025 resumes with all 8 trackers preserved (4,100-4,901 scenes each) and 353 RDS batches
+- Watcher (`watch_then_combine.sh`, host PID 3629505) still running; will auto-launch `01b_combine_year_files.R 2013 2025` when 2025 finishes
+- Expected: ~12-15 hr wall-clock for the remaining ~50% of 2025
+
+### Files Modified
+- `CONUS_HLS_drought_monitoring/01_aggregate_to_4km_parallel.R` (commit `6432c9c`) — callr::r_session subprocess isolation around `aggregate_scene_to_4km`
+- `CONUS_HLS_drought_monitoring/RUNNING_ANALYSES.md` — this file
+
+### After 2025 lands
+1. Inspect `worker_NN_corrupt.txt` files to identify the actual corrupt scene(s)
+2. If found: re-download from NASA HLS S3 (tile T15SYC + nearby), re-run script 01 for 2025 only (resume logic skips already-processed scenes, retries the failed ones)
+3. Watcher auto-runs `01b_combine_year_files.R` → produces `conus_4km_ndvi_timeseries.rds`
+4. Continue downstream: 02 → 03 → 04 → 06 (all rewritten in Apr 28 session — see below)
 
 ---
 
