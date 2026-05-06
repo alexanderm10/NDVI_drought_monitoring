@@ -671,6 +671,20 @@ for (current_year in years_to_process) {
   cat("\nSaving to:", output_file, "\n")
   saveRDS(combined_df, output_file, compress = "gzip")
 
+  # Preserve any worker corrupt-scene logs before purging temp_dir
+  corrupt_files <- list.files(temp_dir, pattern = "^worker_..\\_corrupt\\.txt$",
+                              full.names = TRUE)
+  if (length(corrupt_files) > 0) {
+    preserved <- file.path(config$output_dir,
+                           sprintf("ndvi_4km_%d_corrupt_scenes.txt", current_year))
+    all_corrupt <- unlist(lapply(corrupt_files, readLines))
+    writeLines(all_corrupt, preserved)
+    cat("Preserved", length(all_corrupt), "corrupt-scene entries from",
+        length(corrupt_files), "worker logs to:\n  ", preserved, "\n")
+  } else {
+    cat("No subprocess crashes during this year (no worker_NN_corrupt.txt files).\n")
+  }
+
   # Clean up temp files for this year
   cat("Cleaning up temp files...\n")
   unlink(temp_dir, recursive = TRUE)
