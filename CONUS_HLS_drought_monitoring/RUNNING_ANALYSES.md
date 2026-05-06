@@ -1,19 +1,15 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-05 (callr subprocess isolation deployed; 2025 resume in flight)
+**Updated**: 2026-05-06 (4km aggregation 2013-2025 complete; combined timeseries written; downstream 02-06 unblocked)
 
-## Status: RUNNING — 4km Aggregation 2025 (with callr::r_session subprocess isolation)
+## Status: READY for downstream pipeline (02 → 03 → 04 → 06)
 
-### Pipeline 1: 4km Aggregation (Script 01)
-- **Status**: RUNNING — 2013-2024 complete, 2025 resumed 07:32 MDT 2026-05-05 with subprocess isolation
-- **Command**: `01_aggregate_to_4km_parallel.R 2019 2025 --workers=8 --tiles=bulk_downloads/midwest_tiles_overlapping.txt` (2019-2024 skipped at start)
-- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/aggregation_2019_2025.log`
-- **Resume state at launch**: per-worker `worker_NN_processed.txt` trackers preserved (4,100-4,901 scenes each, ~50% done); 353 RDS batches in `aggregation_temp/2025/`
-- **Crash protection**: each scene's `aggregate_scene_to_4km` runs in a `callr::r_session` subprocess; SIGSEGV in terra C-code kills only the subprocess. Parent worker logs the file path to `worker_NN_corrupt.txt`, respawns the subprocess, continues.
-- **Watcher**: `watch_then_combine.sh` (host PID 3629505) still polling for `ndvi_4km_2025.rds`; will auto-launch `01b_combine_year_files.R 2013 2025` when 2025 lands.
-
-#### May 4 SIGSEGV (now fixed)
-2025 resume on 2026-05-04 hit `terra::resample → *** caught segfault ***` in round 2 (worker 2's first new scene; address `0xa0`, cause `memory not mapped`). R-level `tryCatch` cannot catch C-level signals; the parent R died. The fix: callr::r_session subprocess isolation (commit `6432c9c`).
+### Pipeline 1: 4km Aggregation (Script 01) — COMPLETE
+- **Status**: COMPLETE — 13 years (2013-2025) aggregated, all RDS files in `gam_models/aggregated_years/`
+- **2025 finished**: 2026-05-05 15:40 MDT (488 min wall-clock with callr subprocess isolation; 0 subprocess crashes)
+- **Per-round on 2025**: R1 8.6 min (resume-skip), R2 69 min (3,561 success / 295 fail), R3 226 min (19,561 / 439), R4 165 min (11,123 / 951). All "fail" counts are NULL-returns from quality filtering (no crashes — see Worker 4 investigation in May 6 session summary).
+- **Combined timeseries**: `gam_models/conus_4km_ndvi_timeseries.rds` (808 MB, 167.1M rows, 147,880 pixels, 2013-04-12 to 2025-12-31, 38% L30 / 62% S30, written 2026-05-06 10:49 MDT)
+- **Watcher**: `watch_then_combine.sh` was running but hit the host-vs-container path bug → 01b never launched on May 5 (fixed in commit `8ede66e`; combine ran manually on May 6).
 
 #### Year completion timing (with tile filter)
 | Year | Status | Runtime |
@@ -109,6 +105,49 @@ for yr in 2019 2020 2021 2022 2023 2024 2025; do
   ls /mnt/malexander/datasets/ndvi_monitor/processed_ndvi/daily/$yr/ 2>/dev/null | wc -l
 done
 ```
+
+---
+
+## Session Summary (May 6, 2026 — 2025 confirmed clean, combined timeseries written, 2 fixes)
+
+Returned to find the May 5 callr-protected 2025 aggregation had finished cleanly overnight, but the watcher launched 01b silently fail. Today: investigated the 2025 results, fixed two bugs, ran 01b manually.
+
+### 2025 aggregation result (May 5 overnight)
+- Finished 2026-05-05 15:40 MDT, 488 min wall-clock
+- All 4 rounds completed (R1 8.6 min skip-pass, R2 69 min, R3 226 min, R4 165 min)
+- **0 callr subprocess crashes** — the May 4 SIGSEGV did NOT recur. Either the May 4 corrupt-scene theory was wrong (it was actually a state-dependent allocation issue resolved by the cleaner subprocess workflow) or there's no truly corrupt scene to find.
+- `aggregation_temp/2025/` was nuked by the year-end cleanup (script flaw — fixed today, see below).
+
+### Worker 4 failure investigation
+Worker 4 has shown 2-4× the failure rate of siblings every year (W4 ~430 fails vs ~130 siblings in 2019, 668 vs ~217 in 2024, 526 vs ~80 in 2025). Investigated and confirmed: **this is by-design quality filtering, not a bug**. Worker 4's round-robin tile assignment (39 tiles incl. T13TDF, T13SED) gets more edge-of-grid tiles. Sample of T13TDF (349 source files): 7/20 scenes returned NULL because they fell below the `min_pixels_per_cell = 5` threshold. Successful scenes only contribute 27-70 of 161,600 cells (thin-overlap edge tile). The script is correctly filtering scenes with insufficient signal.
+
+### Two bugs fixed
+1. **Corrupt-log preservation** (`01_aggregate_to_4km_parallel.R`): The year-end `unlink(temp_dir, recursive=TRUE)` was wiping any `worker_NN_corrupt.txt` audit logs before they could be inspected. Now: before the unlink, copy the contents to `<output_dir>/ndvi_4km_<year>_corrupt_scenes.txt` and print a confirmation line. If no crashes happened, print "no subprocess crashes" so absence is explicit.
+2. **Watcher path bug** (`watch_then_combine.sh`): The May 5 watcher launched `01b` via `docker exec -d ... bash -c "...> /mnt/malexander/.../combine.log 2>&1"` — but `/mnt/malexander/...` doesn't exist inside the container. The redirect failed → the entire `bash -c` errored out → Rscript never started. Fixed by using container path `/data/gam_models/combine_2013_2025.log` for the redirect, keeping host path `/mnt/...` for the user-facing "Tail X to follow" message.
+3. Both fixes in commit `8ede66e`.
+
+### 01b run
+Launched manually at 10:08 MDT, finished 10:49 MDT (41 min). Result:
+- 167,122,092 rows combined (sum of all 13 year files)
+- 147,880 unique pixels (full grid, every year)
+- DOY 1-366 (leap day), 2013-04-12 to 2025-12-31
+- 38.1% L30 / 61.9% S30 (S30 has higher revisit rate)
+- 0 duplicates, 0 NA NDVIs, range -1 to 1
+- Output: 808 MB at `gam_models/conus_4km_ndvi_timeseries.rds`
+
+### Next steps
+Downstream pipeline now fully unblocked:
+1. `02_doy_looped_norms.R` — baseline norms across all years
+2. `03_doy_looped_year_predictions.R` — per-year per-DOY GAM fits
+3. `04_calculate_anomalies.R` — anomaly calculation (posterior subtraction)
+4. `06_calculate_change_derivatives.R` — derivative-based stress detection
+
+All four were rewritten in the Apr 28 session with the new posterior list format and recycling pattern. None have run since the rewrite.
+
+### Files Modified
+- `CONUS_HLS_drought_monitoring/01_aggregate_to_4km_parallel.R` (commit `8ede66e`) — preserve corrupt-scene logs
+- `CONUS_HLS_drought_monitoring/watch_then_combine.sh` (commit `8ede66e`) — fix container-path redirect
+- `CONUS_HLS_drought_monitoring/RUNNING_ANALYSES.md` — this file
 
 ---
 
