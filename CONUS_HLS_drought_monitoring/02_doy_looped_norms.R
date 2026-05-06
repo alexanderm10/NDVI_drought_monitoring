@@ -37,6 +37,17 @@ source("00_setup_paths.R")
 hls_paths <- setup_hls_paths()
 source("00_posterior_functions.R")
 
+# Optional CLI arg: --doy=N restricts processing to a single DOY (smoke
+# test or backfill of a specific day). Resume logic still runs first; this
+# overrides the resulting days_to_process to just `N`.
+test_doy <- NULL
+for (.a in commandArgs(trailingOnly = TRUE)) {
+  if (grepl("^--doy=", .a)) test_doy <- as.integer(sub("^--doy=", "", .a))
+}
+if (!is.null(test_doy) && (is.na(test_doy) || test_doy < 1 || test_doy > 365)) {
+  stop("--doy must be an integer in 1..365; got: ", test_doy)
+}
+
 # ==============================================================================
 # CONFIGURATION
 # ==============================================================================
@@ -348,6 +359,13 @@ if (file.exists(config$output_file)) {
     cat("  All DOYs complete (summary stats and posteriors present).\n")
     days_to_process <- integer(0)
   }
+}
+
+# --doy=N override: process only that DOY (smoke test / single-day backfill)
+if (!is.null(test_doy)) {
+  cat(sprintf("\n*** TEST MODE: --doy=%d, processing only this DOY ***\n",
+              test_doy))
+  days_to_process <- test_doy
 }
 
 # Note: Posteriors are saved incrementally to individual files during processing
