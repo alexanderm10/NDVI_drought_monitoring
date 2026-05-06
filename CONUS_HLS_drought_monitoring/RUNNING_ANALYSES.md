@@ -1,8 +1,22 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-06 (4km aggregation 2013-2025 complete; combined timeseries written; downstream 02-06 unblocked)
+**Updated**: 2026-05-06 EOD (script 02 DOY 180 smoke test in flight)
 
-## Status: READY for downstream pipeline (02 → 03 → 04 → 06)
+## Active Background Process
+
+- **Script**: `02_doy_looped_norms.R --doy=180` (single-DOY smoke test of the Apr 28 rewrite against the 167M-row 2013-2025 timeseries)
+- **Container**: `conus-hls-drought-monitor`
+- **Container PID**: 1309543 (host PID, R subprocess)
+- **Started**: 2026-05-06 ~12:30 MDT
+- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/baseline_norms_test.log`
+- **Status when session ended**: 6 min in, finished NLCD filter (147,880 → 129,310 pixels), 148.4M timeseries rows after filter, building prediction grid; GAM fit + 100 posterior sims still pending. Memory: 17.6 GB resident, 99.8% CPU.
+- **Expected completion**: 15-30 min total wall-clock from launch
+- **Outputs to expect on success**:
+  - `gam_models/baseline_posteriors/doy_180.rds` (single-DOY posterior file, ~30-50 MB xz-compressed)
+  - `gam_models/doy_looped_norms.rds` (summary stats — will be NA-filled for all DOYs except 180)
+- **Monitor on next session**: `tail -50 /mnt/malexander/datasets/ndvi_monitor/gam_models/baseline_norms_test.log`
+
+## Pipeline Status: 4km AGGREGATION + COMBINE COMPLETE; 02 PARALLELIZATION PENDING
 
 ### Pipeline 1: 4km Aggregation (Script 01) — COMPLETE
 - **Status**: COMPLETE — 13 years (2013-2025) aggregated, all RDS files in `gam_models/aggregated_years/`
