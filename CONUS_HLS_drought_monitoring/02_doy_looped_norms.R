@@ -31,21 +31,35 @@ Sys.setenv(OPENBLAS_NUM_THREADS = 2)
 library(mgcv)
 library(dplyr)
 library(MASS)
+library(future)
+library(future.apply)
+
+# Required for future.apply globals — chunk_data slices can hit ~250-400 MB
+# and the default 500 MB cap silently kills the run. See MEMORY.md
+# "R Parallel Processing Stability".
+options(future.globals.maxSize = 2 * 1024^3)
 
 # Source utility functions
 source("00_setup_paths.R")
 hls_paths <- setup_hls_paths()
 source("00_posterior_functions.R")
 
-# Optional CLI arg: --doy=N restricts processing to a single DOY (smoke
-# test or backfill of a specific day). Resume logic still runs first; this
-# overrides the resulting days_to_process to just `N`.
-test_doy <- NULL
+# Optional CLI arg:
+#   --doy=N         : single-DOY backfill / smoke test
+#   --doys=A,B,C    : explicit list of DOYs (parallel smoke test)
+# Resume logic still runs first; either flag overrides days_to_process.
+test_doys <- NULL
 for (.a in commandArgs(trailingOnly = TRUE)) {
-  if (grepl("^--doy=", .a)) test_doy <- as.integer(sub("^--doy=", "", .a))
+  if (grepl("^--doy=", .a)) {
+    test_doys <- as.integer(sub("^--doy=", "", .a))
+  } else if (grepl("^--doys=", .a)) {
+    test_doys <- as.integer(strsplit(sub("^--doys=", "", .a), ",")[[1]])
+  }
 }
-if (!is.null(test_doy) && (is.na(test_doy) || test_doy < 1 || test_doy > 365)) {
-  stop("--doy must be an integer in 1..365; got: ", test_doy)
+if (!is.null(test_doys) &&
+    (any(is.na(test_doys)) || any(test_doys < 1) || any(test_doys > 365))) {
+  stop("--doy/--doys must be integers in 1..365; got: ",
+       paste(test_doys, collapse = ","))
 }
 
 # ==============================================================================
@@ -67,15 +81,36 @@ config <- list(
   # Posterior simulation
   n_posterior_sims = 100,  # Number of simulations for uncertainty
 
-  # Parallelization - SERIAL PROCESSING to avoid mclapply memory issues
-  n_cores = 1  # Serial processing with incremental posterior saving
+  # Parallelization. 4 workers via future_lapply (multisession), with
+  # plan/sequential/gc recycling per chunk — the stable pattern documented in
+  # MEMORY.md and used by 01_aggregate_to_4km_parallel.R / 03. The 2026-05-06
+  # serial smoke test took 9.8 min/DOY against the 148M-row filtered
+  # timeseries; full 365 DOYs serial = ~60 hr. At 4 workers with ~30 DOYs per
+  # recycle round, expected wall-clock is ~14-16 hr.
+  #
+  # Memory budget (empirical, from 2026-05-07 smoke + first OOM):
+  #   - Parent steady-state ≈ 30 GB (timeseries 8.7 GB + norms_df 47M-row
+  #     prediction grid + intermediate copies from expand.grid/merge)
+  #   - Per active worker peak ≈ 11 GB (GAM fit + posterior sims + xz write)
+  #   - 4 workers × 11 GB + 30 GB parent = 74 GB peak in 96 GB container
+  #     (22 GB headroom)
+  # 8 workers OOM-killed the run on 2026-05-07 (peak >96 GB); do NOT raise
+  # n_cores above 4 without first verifying per-worker memory peak.
+  n_cores = 4,
+
+  # DOYs per worker-recycle round. Each round: parent pre-filters chunk_data
+  # for the ±7-day window union of the chunk, plan(multisession) workers,
+  # future_lapply, plan(sequential) + gc(). Smaller chunks = more recycling
+  # overhead; larger = more memory creep risk. 30 DOYs ≈ 12 chunks total.
+  chunk_size = 30
 )
 
 cat("=== DOY-Looped Spatial Norms ===\n")
 cat("Window size: +/-", config$window_size, "days\n")
 cat("Output:", config$output_file, "\n")
 cat("Posteriors:", config$posteriors_dir, "\n")
-cat("Cores:", config$n_cores, "(serial processing)\n\n")
+cat("Cores:", config$n_cores, "(future multisession,",
+    config$chunk_size, "DOYs per recycle round)\n\n")
 
 # Create posteriors directory if it doesn't exist
 if (!dir.exists(config$posteriors_dir)) {
@@ -361,43 +396,41 @@ if (file.exists(config$output_file)) {
   }
 }
 
-# --doy=N override: process only that DOY (smoke test / single-day backfill)
-if (!is.null(test_doy)) {
-  cat(sprintf("\n*** TEST MODE: --doy=%d, processing only this DOY ***\n",
-              test_doy))
-  days_to_process <- test_doy
+# --doy=N / --doys=A,B,C override: process only the listed DOYs (smoke test
+# / explicit backfill). Resume merging into existing norms_df is preserved.
+if (!is.null(test_doys)) {
+  cat(sprintf("\n*** TEST MODE: --doy(s)=%s, processing only these DOYs ***\n",
+              paste(test_doys, collapse = ",")))
+  days_to_process <- test_doys
 }
 
 # Note: Posteriors are saved incrementally to individual files during processing
 cat("Posteriors will be saved to:", config$posteriors_dir, "\n")
 
 # ==============================================================================
-# MAIN PROCESSING - SERIAL (with incremental posterior saving)
+# MAIN PROCESSING - PARALLEL (chunked future_lapply with worker recycling)
 # ==============================================================================
 
 if (length(days_to_process) > 0) {
   cat("Processing DOY-looped spatial norms...\n")
-  cat("Using", config$n_cores, "cores\n")
   cat("======================================\n\n")
 
   start_time <- Sys.time()
 
-  # Define function to process a single DOY
-  process_single_doy <- function(day) {
-    # Get DOY window
+  # Per-DOY worker. Receives `chunk_data` via futures' globals; per-DOY filter
+  # to the ±7-day window happens inside the worker. The function references
+  # `pixel_coords` and `config` from globals as well.
+  process_single_doy <- function(day, chunk_data) {
     doy_window <- get_doy_window(day, config$window_size)
 
-    # Filter data for this window (all years pooled)
-    df_doy <- timeseries_df %>%
+    df_doy <- chunk_data %>%
       filter(yday %in% doy_window) %>%
       filter(!is.na(NDVI))
 
-    # Skip if insufficient data
     if (nrow(df_doy) < 50) {
       return(list(day = day, ci = NULL, n_obs = nrow(df_doy)))
     }
 
-    # Fit spatial GAM and get predictions with posteriors
     result <- fit_doy_spatial_gam(df_doy, pixel_coords,
                                   config$n_posterior_sims, day = day)
 
@@ -405,62 +438,113 @@ if (length(days_to_process) > 0) {
       return(list(day = day, ci = NULL, n_obs = nrow(df_doy)))
     }
 
-    # Save posteriors to individual file IMMEDIATELY (avoid memory buildup).
-    # File format: list(pixel_id = <integer vector>, sims = <numeric matrix>)
-    # where sims has 125,798 rows × 100 columns of NDVI simulations.
-    # post.distns() returns df.sim with X / x / y prepended to the simulation
-    # columns; we strip those here so downstream consumers (scripts 04, 06)
-    # see a clean numeric matrix and rowMeans/quantile sweep ONLY across
-    # the simulation values. Storing pixel_id alongside protects against any
-    # future ordering drift between scripts 02 and 03.
+    # Save posteriors IMMEDIATELY (avoid worker memory buildup). Format:
+    # list(pixel_id = <int vector>, sims = <numeric matrix>) with sims
+    # 129,310 rows × 100 columns. post.distns() prepends X/x/y to the sim
+    # columns; we strip them so downstream scripts see a clean numeric matrix.
+    # pixel_id is sourced from pixel_coords (same canonical order as 03).
     if (!is.null(result$sims)) {
-      posterior_file <- file.path(config$posteriors_dir, sprintf("doy_%03d.rds", day))
-      sims_matrix <- as.matrix(result$sims[, -(1:3)])  # drop X, x, y columns
+      posterior_file <- file.path(config$posteriors_dir,
+                                  sprintf("doy_%03d.rds", day))
+      sims_matrix <- as.matrix(result$sims[, -(1:3)])
       saveRDS(
         list(pixel_id = pixel_coords$pixel_id, sims = sims_matrix),
         posterior_file, compress = "xz"
       )
     }
 
-    # Return ONLY summary stats (ci), not the full sims
     return(list(day = day, ci = result$ci, n_obs = nrow(df_doy)))
   }
 
-  # Run SERIAL processing with progress reporting
-  cat("Processing", length(days_to_process), "DOYs in serial mode...\n")
+  # Split DOYs into chunks for worker recycling
+  day_chunks <- split(
+    days_to_process,
+    ceiling(seq_along(days_to_process) / config$chunk_size)
+  )
+  cat("Processing", length(days_to_process), "DOYs in",
+      length(day_chunks), "chunk(s) of up to", config$chunk_size,
+      "DOYs each, with", config$n_cores, "workers per chunk.\n")
   cat("Posteriors saved incrementally to:", config$posteriors_dir, "\n\n")
 
   n_fitted <- 0
   n_failed <- 0
+  doys_done <- 0
 
-  for (i in seq_along(days_to_process)) {
-    day <- days_to_process[i]
+  for (chunk_i in seq_along(day_chunks)) {
+    chunk_doys <- day_chunks[[chunk_i]]
+    chunk_start <- Sys.time()
 
-    # Progress reporting every 10 DOYs
-    if (i %% 10 == 0 || i == 1) {
-      cat(sprintf("  DOY %d/%d (day %d)...\n", i, length(days_to_process), day))
+    # Pre-filter timeseries to the union of all ±window_size windows in this
+    # chunk, with column projection. This is the per-chunk analogue of script
+    # 03's per-year pre-filter — keeps each worker's serialized global down to
+    # ~150-300 MB rather than the full 7.7 GB filtered timeseries.
+    chunk_window_ydays <- unique(unlist(lapply(chunk_doys, get_doy_window,
+                                               config$window_size)))
+    chunk_data <- timeseries_df %>%
+      filter(yday %in% chunk_window_ydays, !is.na(NDVI)) %>%
+      dplyr::select(yday, x, y, NDVI)
+
+    cat(sprintf("Chunk %d/%d: DOYs %d-%d (%d days), chunk_data %s rows / %.0f MB\n",
+                chunk_i, length(day_chunks),
+                min(chunk_doys), max(chunk_doys), length(chunk_doys),
+                format(nrow(chunk_data), big.mark = ","),
+                as.numeric(object.size(chunk_data)) / 1024^2))
+
+    # Future recycling pattern from MEMORY.md "R Parallel Processing
+    # Stability": plan(multisession) before, plan(sequential) + gc() after,
+    # tryCatch fallback to sequential lapply if a worker dies.
+    plan(multisession, workers = config$n_cores)
+
+    chunk_results <- tryCatch({
+      future_lapply(chunk_doys, function(day) {
+        # Workers are fresh R processes — load packages explicitly. Globals
+        # (chunk_data, pixel_coords, config, get_doy_window,
+        # fit_doy_spatial_gam, post.distns) are auto-detected by future.apply.
+        library(mgcv)
+        library(dplyr)
+        library(MASS)
+        process_single_doy(day, chunk_data)
+      }, future.seed = NULL)
+      # future.seed = NULL : we deterministically seed inside post.distns()
+      # via `1034L + day` (per-DOY, matches serial). future.seed = TRUE would
+      # switch the worker's RNGkind to L'Ecuyer-CMRG before our set.seed()
+      # ran, producing posteriors that correlate at ~0.9999998 with the serial
+      # output but are not bit-identical (smoke test 2026-05-07 showed
+      # max-abs-diff 0.0045). NULL preserves the worker's default
+      # Mersenne-Twister and yields bit-identical sims to the serial path.
+    }, error = function(e) {
+      cat("WARNING: future_lapply failed for chunk ", chunk_i, ": ",
+          conditionMessage(e), "\n", sep = "")
+      cat("Falling back to sequential lapply for this chunk...\n")
+      lapply(chunk_doys, function(day) process_single_doy(day, chunk_data))
+    })
+
+    plan(sequential)
+    rm(chunk_data)
+    gc(verbose = FALSE)
+
+    # Merge chunk results into norms_df
+    for (res in chunk_results) {
+      if (!is.null(res$ci)) {
+        idx <- which(norms_df$yday == res$day)
+        norms_df$mean[idx] <- res$ci$mean
+        norms_df$lwr[idx]  <- res$ci$lwr
+        norms_df$upr[idx]  <- res$ci$upr
+        n_fitted <- n_fitted + 1
+      } else {
+        n_failed <- n_failed + 1
+      }
     }
 
-    # Process this DOY
-    res <- process_single_doy(day)
+    doys_done <- doys_done + length(chunk_doys)
+    chunk_elapsed <- as.numeric(difftime(Sys.time(), chunk_start, units = "mins"))
+    overall_elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
+    cat(sprintf("  Chunk %d done in %.1f min (%d/%d DOYs done, %.1f min total elapsed)\n\n",
+                chunk_i, chunk_elapsed, doys_done, length(days_to_process),
+                overall_elapsed))
 
-    # Update norms_df with summary stats
-    if (!is.null(res$ci)) {
-      idx <- which(norms_df$yday == res$day)
-      norms_df$mean[idx] <- res$ci$mean
-      norms_df$lwr[idx] <- res$ci$lwr
-      norms_df$upr[idx] <- res$ci$upr
-      n_fitted <- n_fitted + 1
-    } else {
-      n_failed <- n_failed + 1
-    }
-
-    # Checkpoint every N DOYs
-    if (i %% config$checkpoint_interval == 0) {
-      cat(sprintf("  Checkpoint at DOY %d/%d... ", i, length(days_to_process)))
-      saveRDS(norms_df, config$checkpoint_file, compress = "gzip")
-      cat("saved\n")
-    }
+    # Checkpoint after each chunk so a mid-run crash doesn't lose chunk-level work
+    saveRDS(norms_df, config$checkpoint_file, compress = "gzip")
   }
 
   cat(sprintf("\nProcessed %d DOYs: %d fitted, %d failed\n",
