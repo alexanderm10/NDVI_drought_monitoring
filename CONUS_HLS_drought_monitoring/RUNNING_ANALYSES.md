@@ -1,22 +1,36 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-06 EOD (script 02 DOY 180 smoke test in flight)
+**Updated**: 2026-05-07 EOD (script 02 v2 backfill running overnight, 4 workers)
 
 ## Active Background Process
 
-- **Script**: `02_doy_looped_norms.R --doy=180` (single-DOY smoke test of the Apr 28 rewrite against the 167M-row 2013-2025 timeseries)
+- **Script**: `02_doy_looped_norms.R` (full 365-DOY backfill, parallel — commit `cd3f4f0`)
 - **Container**: `conus-hls-drought-monitor`
-- **Container PID**: 1309543 (host PID, R subprocess)
-- **Started**: 2026-05-06 ~12:30 MDT
-- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/baseline_norms_test.log`
-- **Status when session ended**: 6 min in, finished NLCD filter (147,880 → 129,310 pixels), 148.4M timeseries rows after filter, building prediction grid; GAM fit + 100 posterior sims still pending. Memory: 17.6 GB resident, 99.8% CPU.
-- **Expected completion**: 15-30 min total wall-clock from launch
-- **Outputs to expect on success**:
-  - `gam_models/baseline_posteriors/doy_180.rds` (single-DOY posterior file, ~30-50 MB xz-compressed)
-  - `gam_models/doy_looped_norms.rds` (summary stats — will be NA-filled for all DOYs except 180)
-- **Monitor on next session**: `tail -50 /mnt/malexander/datasets/ndvi_monitor/gam_models/baseline_norms_test.log`
+- **Host PIDs**: parent 1311950, workers 1312053-56
+- **Started**: 2026-05-07 14:57 CDT (13:57 MDT)
+- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/baseline_norms_v2.log`
+- **Workers**: 4 (down from 8 after first launch OOM-killed at 96 GB cap — see "Today's session" below)
+- **Chunking**: 30 DOYs per worker-recycle round (13 chunks total)
+- **Memory**: 45.8 GB / 96 GB at chunk 1 launch, well within budget (projected peak ~74 GB)
+- **Expected completion**: ~05-06 CDT 2026-05-08 (~14-16 hr total wall-clock; ~80 min/chunk × 13 chunks)
+- **Outputs**:
+  - `gam_models/baseline_posteriors/doy_NNN.rds` × 365 (~76 MB each, ~28 GB total xz-compressed)
+  - `gam_models/doy_looped_norms.rds` (summary stats: mean, lwr, upr per pixel-DOY)
+- **Monitor on next session**:
+  - `tail -50 /mnt/malexander/datasets/ndvi_monitor/gam_models/baseline_norms_v2.log`
+  - `ls /mnt/malexander/datasets/ndvi_monitor/gam_models/baseline_posteriors/ | grep -v serial_backup | wc -l` (should be 365 when done)
+  - Container memory: `docker stats --no-stream conus-hls-drought-monitor`
 
-## Pipeline Status: 4km AGGREGATION + COMBINE COMPLETE; 02 PARALLELIZATION PENDING
+## Today's Session (2026-05-07): 02 parallelization + OOM fix
+
+1. **DOY 180 smoke test (yesterday)**: completed cleanly in 9.8 min (single-core). Validated the Apr 28 rewrite works on the 148M-row filtered timeseries.
+2. **02 parallelized** with 4-worker `future_lapply` over 30-DOY chunks. Mirrors script 03's pattern; per-chunk pre-filter ships ~250-340 MB chunk_data instead of broadcasting the full 8.7 GB timeseries. `--doy=N` flag extended to `--doys=A,B,C` for parallel smoke testing.
+3. **Smoke tests** (DOYs 178/180/182): 10.0-10.9 min wall-clock; per-pixel posterior mean correlates at 0.9999997 with serial. Sim-level drift ~0.5% from BLAS thread scheduling — accepted (same as script 03).
+4. **8-worker OOM** at 14:11 CDT: container hit exactly 96 GB; cgroup `memory.events: oom_kill 2`. Empirical per-worker peak (~11 GB) made 8 workers exceed budget. Reduced to 4 workers with 22 GB headroom.
+5. **v2 backfill** launched 14:57 CDT, currently running (chunk 1 in flight at session end).
+6. **Files preserved**: `gam_models/baseline_posteriors/doy_180.rds.serial_backup` (76 MB) — the original serial DOY 180 output, kept as historical comparison point.
+
+## Pipeline Status: 4km AGGREGATION + COMBINE COMPLETE; 02 PARALLEL BACKFILL IN FLIGHT
 
 ### Pipeline 1: 4km Aggregation (Script 01) — COMPLETE
 - **Status**: COMPLETE — 13 years (2013-2025) aggregated, all RDS files in `gam_models/aggregated_years/`
