@@ -447,6 +447,7 @@ for (yr in years_to_process) {
   # over multi-day runs and replaces mclapply (which the project's prior
   # incident showed could exhaust worker memory on long jobs).
   cat("  Processing 365 DOYs with", config$n_cores, "future workers...\n")
+  flush.console()
 
   plan(multisession, workers = config$n_cores)
 
@@ -460,16 +461,22 @@ for (yr in years_to_process) {
       library(MASS)
       library(lubridate)
       process_doy(day)
-    }, future.seed = TRUE)
+    }, future.seed = NULL)
+    # future.seed = NULL: post.distns() seeds itself deterministically with
+    # year * 1000L + day. TRUE would override the worker RNGkind to L'Ecuyer-CMRG
+    # before that set.seed() runs, breaking bit-equivalence with the serial path.
+    # See script 02's matching rationale at lines 508-514.
   }, error = function(e) {
     cat("WARNING: future_lapply failed for year ", yr, ": ",
         conditionMessage(e), "\n", sep = "")
     cat("Falling back to sequential lapply for this year (slower but safer)...\n")
+    flush.console()  # Without this, the warning is invisible until the (multi-hour) fallback completes.
     lapply(1:365, process_doy)
   })
 
   plan(sequential)
   gc(verbose = FALSE)
+  flush.console()
 
   # Combine results for this year
   cat("  Combining results...\n")

@@ -321,15 +321,18 @@ valid_pixels_df <- valid_pixels_df[order(valid_pixels_df$pixel_id), ]
 valid_pixel_ids <- valid_pixels_df$pixel_id
 cat("  Valid pixels:", format(length(valid_pixel_ids), big.mark = ","), "\n")
 
-# Sanity check: NLCD-filtered pixel count is invariant across the pipeline
+# Sanity check: NLCD-filtered pixel count is invariant across the pipeline.
+# Hard stop rather than warning: a mismatch silently misaligns matrix rows in
+# calculate_change_anomaly and produces wrong derivatives.
 EXPECTED_VALID_PIXELS <- 125798L
 if (length(valid_pixel_ids) != EXPECTED_VALID_PIXELS) {
-  cat(sprintf(
-    "  WARNING: valid pixel count %s differs from expected %s.\n",
+  stop(sprintf(
+    "Valid pixel count %s does not match expected %s. ",
     format(length(valid_pixel_ids), big.mark = ","),
     format(EXPECTED_VALID_PIXELS, big.mark = ",")
-  ))
-  cat("  This is OK if you intentionally changed the NLCD land-cover filter.\n")
+  ),
+  "If the NLCD land-cover filter was intentionally changed, update ",
+  "EXPECTED_VALID_PIXELS in scripts 04 and 06 to match.")
 }
 cat("\n")
 
@@ -481,14 +484,21 @@ for (yr in years) {
                           config$baseline_posteriors_dir, config$year_posteriors_dir,
                           config$posteriors_dir)
       }, error = function(e) {
+        # Note: no flush.console() here — multisession workers' stdout is
+        # captured by future and only ferried to the parent on result resolution,
+        # so flushing from inside the worker is a no-op.
         cat(sprintf("ERROR in year %d, DOY %d: %s\n", yr, yday, e$message))
         return(NULL)
       })
-    }, future.seed = TRUE)
+    }, future.seed = NULL)
+    # future.seed = NULL: process_year_doy loads posterior .rds files and does
+    # deterministic matrix arithmetic — no RNG calls. TRUE would gratuitously
+    # generate L'Ecuyer-CMRG seeds per task.
   }, error = function(e) {
     cat("WARNING: future_lapply failed for year ", yr, ": ",
         conditionMessage(e), "\n", sep = "")
     cat("Falling back to sequential lapply (slower but safer)...\n")
+    flush.console()  # Without this, the warning is invisible until the (multi-hour) fallback completes.
     lapply(available_doys, function(yday) {
       tryCatch({
         process_year_doy(yr, yday, config$window_sizes, valid_pixel_ids,
@@ -496,6 +506,7 @@ for (yr in years) {
                           config$posteriors_dir)
       }, error = function(e2) {
         cat(sprintf("ERROR in year %d, DOY %d: %s\n", yr, yday, e2$message))
+        flush.console()
         NULL
       })
     })
@@ -503,6 +514,7 @@ for (yr in years) {
 
   plan(sequential)
   gc(verbose = FALSE)
+  flush.console()
 
   # Combine results (memory-optimized)
   cat("  Parallel processing complete.\n")

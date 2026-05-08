@@ -1,6 +1,6 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-07 EOD (script 02 v2 backfill running overnight, 4 workers)
+**Updated**: 2026-05-08 morning (chunk-8 forensics complete; downstream scripts 03/04/06 pre-patched; 02 still running, ETA ~10:30 CDT)
 
 ## Active Background Process
 
@@ -20,6 +20,31 @@
   - `tail -50 /mnt/malexander/datasets/ndvi_monitor/gam_models/baseline_norms_v2.log`
   - `ls /mnt/malexander/datasets/ndvi_monitor/gam_models/baseline_posteriors/ | grep -v serial_backup | wc -l` (should be 365 when done)
   - Container memory: `docker stats --no-stream conus-hls-drought-monitor`
+
+## Post-completion TODOs (do AFTER 02 finishes — script edits would disrupt the running process)
+
+1. **Add `flush.console()` to the tryCatch fallback in 02** (lines ~516-520). Chunk 8 of the v2 backfill (DOYs 211-240) ran 334 min vs ~75 min/parallel-chunk because it silently fell back to sequential `lapply`. File mtimes prove it: chunk 8's 30 DOYs landed in strict numerical order ~9.5 min apart (single-process pattern), while chunks 7, 9, 10 show 4-worker scrambled bursts. The `cat("WARNING: future_lapply failed...")` line never appeared in `baseline_norms_v2.log` — almost certainly because R block-buffers stdout to a redirected file and the parent process is still alive. Fix:
+   ```r
+   }, error = function(e) {
+     cat("WARNING: future_lapply failed for chunk ", chunk_i, ": ",
+         conditionMessage(e), "\n", sep = "")
+     cat("Falling back to sequential lapply for this chunk...\n")
+     flush.console()                                          # NEW
+     lapply(chunk_doys, function(day) process_single_doy(day, chunk_data))
+   })
+   ```
+   Optionally also add `flush.console()` after each chunk-done print so progress is visible in real time, not on buffer flush. **No rerun of chunk 8 needed** — serial fallback uses identical `process_single_doy()` with deterministic per-DOY seed (`1034L + day`), so outputs are bit-equivalent.
+
+## Today's Session (2026-05-08): chunk-8 forensics + downstream pipeline patch
+
+1. **Diagnosed chunk-8 hiccup** as a silent sequential fallback (see post-completion TODOs above). Mtimes are conclusive; root cause is missing `flush.console()` in the tryCatch error handler combined with R's default stdout block-buffering when redirected to a file.
+2. **r-reviewer audited 03, 04, 06** and found the same `flush.console()` bug in *all three* downstream scripts (would have produced the same multi-hour silent fallback during the 02→03→04→06 chain).
+3. **Patched 03, 04, 06 pre-emptively** — safe because none are running. Three changes per script:
+   - `flush.console()` added in every `tryCatch` error handler and after each `plan(sequential)`/major progress print
+   - `future.seed = TRUE` → `future.seed = NULL` (03's workers seed deterministically inside `post.distns()`; 04 and 06 workers do pure arithmetic with no RNG calls — `TRUE` was gratuitous CMRG-seed shipping)
+   - Pixel-count invariant (125,798) promoted from `cat("WARNING")` to `stop()` in 04 and 06 (silent mismatch would misalign matrix rows downstream)
+4. **Files changed**: `03_doy_looped_year_predictions.R`, `04_calculate_anomalies.R`, `06_calculate_change_derivatives.R`. Parse-checked clean. Diffs are net +52 / -14 lines, mostly comments explaining the rationale.
+5. **Script 02 fix is queued** in the post-completion TODOs section above; will be applied as soon as PID 1311950 exits.
 
 ## Today's Session (2026-05-07): 02 parallelization + OOM fix
 

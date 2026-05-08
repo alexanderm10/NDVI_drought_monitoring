@@ -109,16 +109,18 @@ if (!file.exists(config$valid_pixels_file)) {
 }
 valid_pixels_df <- readRDS(config$valid_pixels_file)
 
-# Sanity check: NLCD-filtered pixel count is invariant across the pipeline
+# Sanity check: NLCD-filtered pixel count is invariant across the pipeline.
+# Hard stop rather than warning: the count aligns matrix rows across scripts
+# 02/03/04/06; a silent mismatch produces wrong anomalies downstream.
 EXPECTED_VALID_PIXELS <- 125798L
 if (nrow(valid_pixels_df) != EXPECTED_VALID_PIXELS) {
-  cat(sprintf(
-    "  WARNING: valid pixel count %s differs from expected %s.\n",
+  stop(sprintf(
+    "Valid pixel count %s does not match expected %s. ",
     format(nrow(valid_pixels_df), big.mark = ","),
     format(EXPECTED_VALID_PIXELS, big.mark = ",")
-  ))
-  cat("  This is OK if you intentionally changed the NLCD land-cover filter,\n")
-  cat("  but downstream scripts 05/06 expect 125,798. Verify before proceeding.\n")
+  ),
+  "If the NLCD land-cover filter was intentionally changed, update ",
+  "EXPECTED_VALID_PIXELS in scripts 04 and 06 to match.")
 }
 cat("  Valid pixels:", format(nrow(valid_pixels_df), big.mark = ","), "\n\n")
 
@@ -284,21 +286,26 @@ for (yr in years_to_process) {
   # Run DOYs in parallel via the future-recycling pattern (per MEMORY.md)
   # ---------------------------------------------------------------
   cat(sprintf("  Processing with %d future workers...\n", config$n_workers))
+  flush.console()
   plan(multisession, workers = config$n_workers)
 
   results_list <- tryCatch({
     future_lapply(joint_doys, function(doy) {
       library(dplyr)
       process_doy(doy)
-    }, future.seed = TRUE)
+    }, future.seed = NULL)
+    # future.seed = NULL: process_doy is pure arithmetic on posterior matrices —
+    # no RNG calls. TRUE would gratuitously generate L'Ecuyer-CMRG seeds per task.
   }, error = function(e) {
     cat("  WARNING: future_lapply failed: ", conditionMessage(e), "\n", sep = "")
     cat("  Falling back to sequential lapply for year ", yr, "...\n", sep = "")
+    flush.console()  # Without this, the warning is invisible until the fallback completes.
     lapply(joint_doys, process_doy)
   })
 
   plan(sequential)
   gc(verbose = FALSE)
+  flush.console()
 
   # Drop NULL (failed) entries and bind
   results_list <- results_list[!sapply(results_list, is.null)]
@@ -348,6 +355,7 @@ for (yr in years_to_process) {
 
   cat(sprintf("  Year %d: %d DOYs, %.1f%% significant in %.1f min\n\n",
               yr, length(joint_doys), pct_significant, elapsed_min))
+  flush.console()
 
   rm(results_list, year_df); gc(verbose = FALSE)
 }
