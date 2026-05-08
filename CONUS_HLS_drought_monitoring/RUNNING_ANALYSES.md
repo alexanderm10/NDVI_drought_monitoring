@@ -1,10 +1,29 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-08 ~10:13 CDT (script 02 v2 backfill COMPLETE; all 4 scripts patched; ready to launch 03)
+**Updated**: 2026-05-08 ~end of session (script 03 v2 in flight, ~half of year 2013 done; ETA ~3-4 days for full 13-year run)
 
 ## Active Background Process
 
-*None.* Script 02 v2 backfill finished cleanly at 10:12:48 CDT 2026-05-08 (PID 4188067 / 1311950 exited).
+- **Script**: `03_doy_looped_year_predictions.R` v2 — commit `9021c3a` (after the v1 future.globals.maxSize OOM, see "03 v1 → v2" below)
+- **Container**: `conus-hls-drought-monitor`
+- **Container PIDs**: parent bash 1315085, R parent 1315091, 3 multisession workers 1315200/1315201/1315202
+- **Started**: 2026-05-08 11:46 CDT (worker spawn at 12:12 CDT after data-load + first-year warmup)
+- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/year_predictions_v2.log`
+- **Failed v1 log preserved**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/year_predictions_v1_failed_globalsoom.log` (the WARNING text caught by today's flush.console patch — historical record of the silent-fallback failure mode)
+- **Workers**: 3 multisession (per script config)
+- **Memory**: ~55 GB / 96 GB at session-end (steady-state)
+- **Outputs (in flight)**:
+  - `gam_models/year_predictions_posteriors/YYYY/doy_NNN.rds` × ~4,500 (all years × all DOYs, ~70-90 MB each, projected ~200-300 GB total xz-compressed when complete)
+  - `gam_models/modeled_ndvi/modeled_ndvi_YYYY.rds` × 13 (per-year summary stats)
+  - `gam_models/modeled_ndvi_stats.rds` (run-level statistics)
+- **Year 2013 status at session-end**: ~174 / 365 DOYs written (47%); first per-year completion event expected within ~3 hours
+- **Projected total runtime**: ~6 hr/year × 13 years ≈ 3-4 days (slightly slower than WORKFLOW.md's 1.5-2 day estimate; will revise after first few years complete)
+- **Watcher armed**: persistent monitor on year_predictions_v2.log filtering for `=== Processing Year`, per-year completion, save events, and failure modes (`WARNING`, `ERROR`, `Falling back`, `Killed`, `cannot allocate`, `globals.maxSize`)
+- **Monitor on next session**:
+  - `tail -50 /mnt/malexander/datasets/ndvi_monitor/gam_models/year_predictions_v2.log`
+  - `for y in 2013 2014 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025; do echo "$y: $(ls /mnt/malexander/datasets/ndvi_monitor/gam_models/year_predictions_posteriors/$y/ 2>/dev/null | wc -l) DOYs"; done`
+  - `ls -lh /mnt/malexander/datasets/ndvi_monitor/gam_models/modeled_ndvi/` (per-year summary files arrive on year completion)
+  - Container memory: `docker stats --no-stream conus-hls-drought-monitor`
 
 ## Script 02 v2 Backfill — COMPLETE
 
@@ -36,7 +55,36 @@ After 02 exited cleanly, applied matching patches:
 - **02 flush.console() patch**: 4 calls added — after each chunk-start print, in the tryCatch fallback before `lapply`, after each chunk-done print, after the post-loop summary print, and after the "Saving summary statistics..." print just before the multi-minute `saveRDS` gzip step
 - **EXPECTED_VALID_PIXELS = 125798L → 129310L** in scripts 03/04/06: the stale 125,798 constant predated the current NLCD filter; 129,310 is what 02 actually wrote in the v2 backfill (verified via `nrow(valid_pixels_landcover_filtered.rds)` and `nrow(doy_looped_norms.rds) / 365`). Without this update, the just-hardened `stop()` checks in 04 and 06 would have blocked the entire 03→04→06 chain.
 
-## Today's Session (2026-05-08): chunk-8 forensics + full pipeline patch + 02 completion
+## 03 v1 → v2 (the future.globals.maxSize incident, 2026-05-08 PM)
+
+After 02 finished at 10:12 CDT and the matching flush.console + EXPECTED_VALID_PIXELS patches landed (commit `c960a63`), launched `03_doy_looped_year_predictions.R` against the new norms at 10:27 CDT (`year_predictions_v1.log`).
+
+**Within 25 minutes** the per-year watcher fired its first event:
+```
+WARNING: future_lapply failed for year 2013: The total size of the 11 globals
+  exported for future expression is 2.42 GiB. This exceeds the maximum allowed
+  size 2.00 GiB ... The three largest globals are 'norms_df' (2.29 GiB ...),
+  'year_data' (134.27 MiB ...) and 'pixel_coords' (2.96 MiB ...)
+Falling back to sequential lapply for this year (slower but safer)...
+```
+
+The script's tryCatch handler caught the failure cleanly and dropped to sequential `lapply` — but **without today's flush.console patch this would have been silent for hours, then days**. As it was, the WARNING surfaced in the log within seconds of the parent print, and we caught it before significant compute was wasted (5 hr/year sequential × 13 years ≈ 30+ days vs ~3-4 days parallel).
+
+**Diagnosis**: the 2 GB cap dated from when norms_df was a different shape. The v2 backfill made norms_df ~2.3 GB on its own (47.2M pixel-DOY rows × 7 cols), already over the cap before any other globals were added.
+
+**Fix** (commit `9021c3a`): bumped to `4 * 1024^3` with documenting comment block. Memory math at 4 GB: 3 workers × 2.42 GB shipped globals = ~7.3 GB worker overhead + 3 × ~3 GB base R + ~25 GB parent ≈ 42 GB total, well under 96 GB cap.
+
+**Restart sequence**:
+1. Killed v1 (parent + 3 idle workers via `pkill -f`)
+2. Renamed v1 log → `year_predictions_v1_failed_globalsoom.log` (preserves the warning text as historical record)
+3. Applied maxSize fix + parse-checked
+4. Launched v2 at 11:46 CDT (clean restart; 21 partial-2013 DOY files left as-is — deterministic seed = bit-equivalent overwrite on re-run, no data integrity concern)
+5. v2 verified parallel: 3 workers spawned at 12:12 CDT, ~174 DOYs of 2013 written by session-end
+6. Re-armed the per-year watcher on `year_predictions_v2.log`
+
+**Lesson worth keeping**: r-reviewer's earlier 04/06 review correctly assessed *worker active memory* (matrices loaded inside the worker function) but missed *globals serialization size* (data shipped TO the worker by future.apply). These are separate bottlenecks. Worth checking both before launching long parallel jobs against newly-resized data.
+
+## Today's Session (2026-05-08): chunk-8 forensics + full pipeline patch + 02 completion + 03 launch
 
 1. **Diagnosed chunk-8 hiccup** as a silent sequential fallback (see post-completion TODOs above). Mtimes are conclusive; root cause is missing `flush.console()` in the tryCatch error handler combined with R's default stdout block-buffering when redirected to a file.
 2. **r-reviewer audited 03, 04, 06** and found the same `flush.console()` bug in *all three* downstream scripts (would have produced the same multi-hour silent fallback during the 02→03→04→06 chain).
@@ -47,6 +95,9 @@ After 02 exited cleanly, applied matching patches:
 4. **Files changed**: `03_doy_looped_year_predictions.R`, `04_calculate_anomalies.R`, `06_calculate_change_derivatives.R`. Parse-checked clean. Diffs are net +52 / -14 lines, mostly comments explaining the rationale.
 5. **Script 02 fix applied** at 10:13 CDT immediately after PID 1311950 exited cleanly (see `02 v2 Backfill — COMPLETE` section above for the four flush.console() insertion sites).
 6. **Pixel-count constants updated** 125798L → 129310L across 03/04/06 to match the current NLCD filter (deferred-discovery: my hardening to `stop()` would have blocked 04/06 because the constants were stale from a previous filter version).
+7. **Pixel-count invariant documented** in WORKFLOW.md (commit `22eb494`): new "Land Cover Filtering > Maintenance" subsection with 4-trigger checklist + R one-liner for re-checking; in-script comment pointers from 03/04/06; matching `feedback_pixel_count_invariant.md` saved to project memory.
+8. **Script 03 v1 launched and silent-failed** with future.globals.maxSize=2GB (norms_df is 2.3 GB on its own; same root cause class as the chunk-8 incident, caught by the patches landed earlier today). Killed v1, bumped maxSize to 4 GB (commit `9021c3a`), relaunched as v2. v2 verified parallel: 3 workers running.
+9. **All four scripts patched + 02 backfill + 03 launch** committed in 4 commits today: `30ed58e` (03/04/06 pre-patch), `c960a63` (02 patch + EXPECTED_VALID_PIXELS), `22eb494` (WORKFLOW.md docs), `9021c3a` (03 maxSize bump). All pushed to `origin/main`.
 
 ## Today's Session (2026-05-07): 02 parallelization + OOM fix
 
