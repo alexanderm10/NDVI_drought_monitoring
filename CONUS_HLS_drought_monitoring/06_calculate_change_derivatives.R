@@ -326,6 +326,7 @@ cat("  Valid pixels:", format(length(valid_pixel_ids), big.mark = ","), "\n")
 # calculate_change_anomaly and produces wrong derivatives.
 # Constant updated 2026-05-08 from 125798 -> 129310 after the May 7-8 v2 backfill
 # of script 02 (current NLCD filter: !is.na(nlcd_code) & nlcd_code != 1).
+# See WORKFLOW.md "Land Cover Filtering > Maintenance" for the update procedure.
 EXPECTED_VALID_PIXELS <- 129310L
 if (length(valid_pixel_ids) != EXPECTED_VALID_PIXELS) {
   stop(sprintf(

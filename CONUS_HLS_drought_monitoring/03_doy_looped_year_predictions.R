@@ -215,6 +215,7 @@ cat("  Valid pixels from script 02:", nrow(valid_pixels), "\n")
 # downstream. We warn rather than stop so a deliberate filter change can proceed.
 # Constant updated 2026-05-08 from 125798 -> 129310 after the May 7-8 v2 backfill
 # of script 02 (current NLCD filter: !is.na(nlcd_code) & nlcd_code != 1).
+# See WORKFLOW.md "Land Cover Filtering > Maintenance" for the update procedure.
 EXPECTED_VALID_PIXELS <- 129310L
 if (nrow(valid_pixels) != EXPECTED_VALID_PIXELS) {
   cat(sprintf(

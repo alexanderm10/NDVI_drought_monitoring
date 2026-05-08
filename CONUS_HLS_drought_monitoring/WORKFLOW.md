@@ -214,9 +214,31 @@ Change Derivatives (rate of change anomalies)
 
 ### Land Cover Filtering
 - **Applied in**: Scripts 02, 03, 04, 05, 06
-- **Excludes**: Water bodies (NLCD code 1)
-- **Valid pixels**: 125,798 (from 145,686 total 4km pixels)
-- **File**: `valid_pixels_landcover_filtered.rds`
+- **Excludes**: Water bodies (NLCD code 1) — current filter is `!is.na(nlcd_code) & nlcd_code != 1`
+- **Valid pixels**: 129,310 (from 147,880 total 4km CONUS pixels) — *updated 2026-05-08 after the May 6 timeseries rebuild added ~5,000 grid cells from corrected tile coverage*
+- **Source of truth**: Script 02 writes `valid_pixels_landcover_filtered.rds` each baseline run; downstream scripts read it.
+
+#### Maintenance: `EXPECTED_VALID_PIXELS` constant in scripts 03/04/06
+
+Scripts 03, 04, and 06 each hard-code an `EXPECTED_VALID_PIXELS` constant (currently `129310L`) that must match `nrow(valid_pixels_landcover_filtered.rds)`. If they drift, **script 04 and 06 hard-stop** and script 03 prints a warning. This invariant aligns matrix rows across the per-DOY posterior `.rds` files; a silent mismatch would produce wrong anomalies.
+
+**Re-check the constant whenever script 02 is re-run after any change to:**
+1. The 4km grid construction (extent, resolution) in 01_aggregate_to_4km_parallel.R
+2. The NLCD raster `/data/processed_ndvi/land_cover/nlcd_4km_albers.tif` (i.e. 00_reproject_nlcd.R re-ran, or NLCD source changed)
+3. 02's NLCD filter logic
+4. The combined timeseries `conus_4km_ndvi_timeseries.rds` (i.e. 01 → 01b were re-run with different inputs)
+
+**Update procedure** (run inside the container, after script 02 finishes):
+```r
+# Print the new count
+nrow(readRDS("/data/gam_models/valid_pixels_landcover_filtered.rds"))
+# Then update EXPECTED_VALID_PIXELS in 03/04/06 to match — and update the
+# "Valid pixels" line above in WORKFLOW.md.
+```
+
+> **Future refactor option:** have script 02 (or 01b) write the count to a small `valid_pixel_count.txt` and have 03/04/06 source it at startup instead of hard-coding the constant. Removes the maintenance burden at the cost of one extra file read.
+
+### Posterior Distributions
 
 ### Posterior Distributions
 - **Purpose**: Proper uncertainty propagation through all calculations
@@ -322,6 +344,7 @@ docker exec conus-hls-drought-monitor Rscript 04_calculate_anomalies.R
 **Pixel count mismatches**:
 - Verify `valid_pixels_landcover_filtered.rds` exists
 - Check land cover reprojection (script 00_reproject_nlcd.R)
+- If scripts 04 or 06 hard-stop with "Valid pixel count X does not match expected Y": the upstream pixel count drifted (likely after script 01 + 01b were re-run). Update `EXPECTED_VALID_PIXELS` in 03/04/06 — see [Land Cover Filtering > Maintenance](#maintenance-expected_valid_pixels-constant-in-scripts-030406) above.
 
 **Slow performance**:
 - Scripts 03 and 06 are CPU-intensive (expected 1.5-2 days each)
