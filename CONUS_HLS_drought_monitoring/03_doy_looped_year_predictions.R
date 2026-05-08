@@ -209,11 +209,13 @@ valid_pixels <- readRDS(valid_pixels_file)
 cat("  Valid pixels from script 02:", nrow(valid_pixels), "\n")
 
 # Sanity check: the NLCD-filtered pixel count is invariant across the pipeline
-# (set in script 02). If this differs from 125,798, it usually means script 02
-# was re-run against a different NLCD reproject — anomalies (script 04) and
-# derivatives (script 06) will fail their pixel-count assertions downstream.
-# We warn rather than stop so a deliberate filter change can proceed.
-EXPECTED_VALID_PIXELS <- 125798L
+# (set in script 02). If this differs from the expected value, it usually means
+# script 02 was re-run against a different NLCD reproject — anomalies (script
+# 04) and derivatives (script 06) will fail their pixel-count assertions
+# downstream. We warn rather than stop so a deliberate filter change can proceed.
+# Constant updated 2026-05-08 from 125798 -> 129310 after the May 7-8 v2 backfill
+# of script 02 (current NLCD filter: !is.na(nlcd_code) & nlcd_code != 1).
+EXPECTED_VALID_PIXELS <- 129310L
 if (nrow(valid_pixels) != EXPECTED_VALID_PIXELS) {
   cat(sprintf(
     "  WARNING: valid pixel count %s differs from expected %s.\n",
@@ -221,7 +223,7 @@ if (nrow(valid_pixels) != EXPECTED_VALID_PIXELS) {
     format(EXPECTED_VALID_PIXELS, big.mark = ",")
   ))
   cat("  This is OK if you intentionally changed the NLCD land-cover filter,\n")
-  cat("  but downstream scripts 04/06 expect 125,798. Verify before proceeding.\n")
+  cat("  but downstream scripts 04/06 expect the same count. Verify before proceeding.\n")
 }
 
 # Filter timeseries to only valid (non-water) pixels

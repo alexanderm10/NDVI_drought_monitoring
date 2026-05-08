@@ -112,7 +112,9 @@ valid_pixels_df <- readRDS(config$valid_pixels_file)
 # Sanity check: NLCD-filtered pixel count is invariant across the pipeline.
 # Hard stop rather than warning: the count aligns matrix rows across scripts
 # 02/03/04/06; a silent mismatch produces wrong anomalies downstream.
-EXPECTED_VALID_PIXELS <- 125798L
+# Constant updated 2026-05-08 from 125798 -> 129310 after the May 7-8 v2 backfill
+# of script 02 (current NLCD filter: !is.na(nlcd_code) & nlcd_code != 1).
+EXPECTED_VALID_PIXELS <- 129310L
 if (nrow(valid_pixels_df) != EXPECTED_VALID_PIXELS) {
   stop(sprintf(
     "Valid pixel count %s does not match expected %s. ",

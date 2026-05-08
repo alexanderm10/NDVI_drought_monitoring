@@ -1,41 +1,42 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-08 morning (chunk-8 forensics complete; downstream scripts 03/04/06 pre-patched; 02 still running, ETA ~10:30 CDT)
+**Updated**: 2026-05-08 ~10:13 CDT (script 02 v2 backfill COMPLETE; all 4 scripts patched; ready to launch 03)
 
 ## Active Background Process
 
-- **Script**: `02_doy_looped_norms.R` (full 365-DOY backfill, parallel — commit `cd3f4f0`)
-- **Container**: `conus-hls-drought-monitor`
-- **Host PIDs**: parent 1311950, workers 1312053-56
-- **Started**: 2026-05-07 14:57 CDT (13:57 MDT)
-- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/baseline_norms_v2.log`
-- **Workers**: 4 (down from 8 after first launch OOM-killed at 96 GB cap — see "Today's session" below)
-- **Chunking**: 30 DOYs per worker-recycle round (13 chunks total)
-- **Memory**: 45.8 GB / 96 GB at chunk 1 launch, well within budget (projected peak ~74 GB)
-- **Expected completion**: ~05-06 CDT 2026-05-08 (~14-16 hr total wall-clock; ~80 min/chunk × 13 chunks)
+*None.* Script 02 v2 backfill finished cleanly at 10:12:48 CDT 2026-05-08 (PID 4188067 / 1311950 exited).
+
+## Script 02 v2 Backfill — COMPLETE
+
+- **Wall-clock**: 1142.6 min (19.04 hr; started 2026-05-07 14:57 CDT, exited 2026-05-08 10:12:48 CDT)
+- **Fitted**: 365/365 DOYs, 0 failed, 100% pixel-DOY coverage
 - **Outputs**:
-  - `gam_models/baseline_posteriors/doy_NNN.rds` × 365 (~76 MB each, ~28 GB total xz-compressed)
-  - `gam_models/doy_looped_norms.rds` (summary stats: mean, lwr, upr per pixel-DOY)
-- **Monitor on next session**:
-  - `tail -50 /mnt/malexander/datasets/ndvi_monitor/gam_models/baseline_norms_v2.log`
-  - `ls /mnt/malexander/datasets/ndvi_monitor/gam_models/baseline_posteriors/ | grep -v serial_backup | wc -l` (should be 365 when done)
-  - Container memory: `docker stats --no-stream conus-hls-drought-monitor`
+  - `gam_models/doy_looped_norms.rds` — 1.1 GB gzipped, 47,198,150 rows × 7 cols (pixel_id, yday, x, y, mean, lwr, upr); 0 NAs in mean/lwr/upr; mean range -0.026 to 0.810; CI width median 0.0015
+  - `gam_models/baseline_posteriors/doy_NNN.rds` × 365 — 27.6 GB total, contiguous DOY 001-365
+  - `gam_models/valid_pixels_landcover_filtered.rds` — 129,310 pixels (NLCD codes 2-9, water excluded)
+- **Per-chunk timings** (4 workers × 30 DOYs/chunk):
+  - Chunks 1-7: 54-80 min each (normal parallel)
+  - **Chunk 8: 334 min ⚠️** — silent serial fallback (forensics below)
+  - Chunks 9-13: 13-75 min each (returned to normal parallel)
 
-## Post-completion TODOs (do AFTER 02 finishes — script edits would disrupt the running process)
+### Chunk-8 forensics + the cross-pipeline buffering bug
 
-1. **Add `flush.console()` to the tryCatch fallback in 02** (lines ~516-520). Chunk 8 of the v2 backfill (DOYs 211-240) ran 334 min vs ~75 min/parallel-chunk because it silently fell back to sequential `lapply`. File mtimes prove it: chunk 8's 30 DOYs landed in strict numerical order ~9.5 min apart (single-process pattern), while chunks 7, 9, 10 show 4-worker scrambled bursts. The `cat("WARNING: future_lapply failed...")` line never appeared in `baseline_norms_v2.log` — almost certainly because R block-buffers stdout to a redirected file and the parent process is still alive. Fix:
-   ```r
-   }, error = function(e) {
-     cat("WARNING: future_lapply failed for chunk ", chunk_i, ": ",
-         conditionMessage(e), "\n", sep = "")
-     cat("Falling back to sequential lapply for this chunk...\n")
-     flush.console()                                          # NEW
-     lapply(chunk_doys, function(day) process_single_doy(day, chunk_data))
-   })
-   ```
-   Optionally also add `flush.console()` after each chunk-done print so progress is visible in real time, not on buffer flush. **No rerun of chunk 8 needed** — serial fallback uses identical `process_single_doy()` with deterministic per-DOY seed (`1034L + day`), so outputs are bit-equivalent.
+Chunk 8 (DOYs 211-240) ran 334 min vs ~75 min/parallel-chunk because it silently fell back to sequential `lapply` inside the `tryCatch` error handler. File mtimes prove it: chunk 8's 30 DOYs landed in strict numerical order ~9.5 min apart (single-process pattern), while chunks 7, 9, 10 show 4-worker scrambled bursts. The `cat("WARNING: future_lapply failed...")` line never appeared in `baseline_norms_v2.log` because **R block-buffers stdout when redirected to a file** and the parent process was still alive. The serial fallback used identical `process_single_doy()` with deterministic per-DOY seed (`1034L + day`), so chunk 8's outputs are bit-equivalent to what 4 workers would have produced — no rerun needed. Same pattern was visible at end-of-run: the post-chunk-13 `cat("Processing complete!")`, `Saving final output...`, and the multi-minute `saveRDS(... compress="gzip")` all sat in the buffer until script exit (final flush dumped ~30 lines at once at 10:12:48).
 
-## Today's Session (2026-05-08): chunk-8 forensics + downstream pipeline patch
+### Downstream pipeline pre-patch (committed 30ed58e, 2026-05-08)
+
+r-reviewer audit of 03, 04, 06 found the same `flush.console()` blind spot in all three. Fixed pre-emptively while 02 was still running (safe — none were in flight):
+- `flush.console()` added in every `tryCatch` error handler before the long fallback, and after every `plan(sequential)`/major progress print
+- `future.seed = TRUE` → `future.seed = NULL` (03's workers seed deterministically inside `post.distns()`; 04/06 workers do pure arithmetic with no RNG calls)
+- Pixel-count invariant promoted from `cat("WARNING")` to `stop()` in 04/06; kept as soft-warn in 03 per existing design comment
+
+### Script 02 patch + EXPECTED_VALID_PIXELS update (this commit)
+
+After 02 exited cleanly, applied matching patches:
+- **02 flush.console() patch**: 4 calls added — after each chunk-start print, in the tryCatch fallback before `lapply`, after each chunk-done print, after the post-loop summary print, and after the "Saving summary statistics..." print just before the multi-minute `saveRDS` gzip step
+- **EXPECTED_VALID_PIXELS = 125798L → 129310L** in scripts 03/04/06: the stale 125,798 constant predated the current NLCD filter; 129,310 is what 02 actually wrote in the v2 backfill (verified via `nrow(valid_pixels_landcover_filtered.rds)` and `nrow(doy_looped_norms.rds) / 365`). Without this update, the just-hardened `stop()` checks in 04 and 06 would have blocked the entire 03→04→06 chain.
+
+## Today's Session (2026-05-08): chunk-8 forensics + full pipeline patch + 02 completion
 
 1. **Diagnosed chunk-8 hiccup** as a silent sequential fallback (see post-completion TODOs above). Mtimes are conclusive; root cause is missing `flush.console()` in the tryCatch error handler combined with R's default stdout block-buffering when redirected to a file.
 2. **r-reviewer audited 03, 04, 06** and found the same `flush.console()` bug in *all three* downstream scripts (would have produced the same multi-hour silent fallback during the 02→03→04→06 chain).
@@ -44,7 +45,8 @@
    - `future.seed = TRUE` → `future.seed = NULL` (03's workers seed deterministically inside `post.distns()`; 04 and 06 workers do pure arithmetic with no RNG calls — `TRUE` was gratuitous CMRG-seed shipping)
    - Pixel-count invariant (125,798) promoted from `cat("WARNING")` to `stop()` in 04 and 06 (silent mismatch would misalign matrix rows downstream)
 4. **Files changed**: `03_doy_looped_year_predictions.R`, `04_calculate_anomalies.R`, `06_calculate_change_derivatives.R`. Parse-checked clean. Diffs are net +52 / -14 lines, mostly comments explaining the rationale.
-5. **Script 02 fix is queued** in the post-completion TODOs section above; will be applied as soon as PID 1311950 exits.
+5. **Script 02 fix applied** at 10:13 CDT immediately after PID 1311950 exited cleanly (see `02 v2 Backfill — COMPLETE` section above for the four flush.console() insertion sites).
+6. **Pixel-count constants updated** 125798L → 129310L across 03/04/06 to match the current NLCD filter (deferred-discovery: my hardening to `stop()` would have blocked 04/06 because the constants were stale from a previous filter version).
 
 ## Today's Session (2026-05-07): 02 parallelization + OOM fix
 

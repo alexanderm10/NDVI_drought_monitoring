@@ -489,6 +489,7 @@ if (length(days_to_process) > 0) {
                 min(chunk_doys), max(chunk_doys), length(chunk_doys),
                 format(nrow(chunk_data), big.mark = ","),
                 as.numeric(object.size(chunk_data)) / 1024^2))
+    flush.console()
 
     # Future recycling pattern from MEMORY.md "R Parallel Processing
     # Stability": plan(multisession) before, plan(sequential) + gc() after,
@@ -516,6 +517,7 @@ if (length(days_to_process) > 0) {
       cat("WARNING: future_lapply failed for chunk ", chunk_i, ": ",
           conditionMessage(e), "\n", sep = "")
       cat("Falling back to sequential lapply for this chunk...\n")
+      flush.console()  # Without this, the warning is invisible until the (multi-hour) fallback completes — see chunk-8 incident in v2 backfill, RUNNING_ANALYSES.md.
       lapply(chunk_doys, function(day) process_single_doy(day, chunk_data))
     })
 
@@ -542,6 +544,7 @@ if (length(days_to_process) > 0) {
     cat(sprintf("  Chunk %d done in %.1f min (%d/%d DOYs done, %.1f min total elapsed)\n\n",
                 chunk_i, chunk_elapsed, doys_done, length(days_to_process),
                 overall_elapsed))
+    flush.console()
 
     # Checkpoint after each chunk so a mid-run crash doesn't lose chunk-level work
     saveRDS(norms_df, config$checkpoint_file, compress = "gzip")
@@ -549,6 +552,7 @@ if (length(days_to_process) > 0) {
 
   cat(sprintf("\nProcessed %d DOYs: %d fitted, %d failed\n",
               length(days_to_process), n_fitted, n_failed))
+  flush.console()
 
   elapsed_total <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
 } else {
@@ -561,12 +565,14 @@ if (length(days_to_process) > 0) {
 
 cat("\n======================================\n")
 cat("Processing complete!\n\n")
+flush.console()  # The final saveRDS gzip-compresses ~47M rows and takes 5-6 min single-threaded — without flushing here, this header sits in the buffer until script exit.
 
 # Save final output
 cat("Saving final output...\n")
 
 # Save summary stats (backward compatible, fast loading)
 cat("  Saving summary statistics (mean, lwr, upr)...\n")
+flush.console()  # Flush before the multi-minute gzip compression so the user knows what stage we're in.
 saveRDS(norms_df, config$output_file, compress = "gzip")
 
 # Report on posteriors (saved incrementally during processing)

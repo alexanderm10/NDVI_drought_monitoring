@@ -324,7 +324,9 @@ cat("  Valid pixels:", format(length(valid_pixel_ids), big.mark = ","), "\n")
 # Sanity check: NLCD-filtered pixel count is invariant across the pipeline.
 # Hard stop rather than warning: a mismatch silently misaligns matrix rows in
 # calculate_change_anomaly and produces wrong derivatives.
-EXPECTED_VALID_PIXELS <- 125798L
+# Constant updated 2026-05-08 from 125798 -> 129310 after the May 7-8 v2 backfill
+# of script 02 (current NLCD filter: !is.na(nlcd_code) & nlcd_code != 1).
+EXPECTED_VALID_PIXELS <- 129310L
 if (length(valid_pixel_ids) != EXPECTED_VALID_PIXELS) {
   stop(sprintf(
     "Valid pixel count %s does not match expected %s. ",
