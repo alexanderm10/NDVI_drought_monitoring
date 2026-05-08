@@ -29,10 +29,16 @@ library(future)
 library(future.apply)
 library(lubridate)
 
-# Required for future.apply globals — default 500 MB is too small for the
-# per-year filtered timeseries (~250-400 MB) plus pixel_coords + norms_df.
-# See MEMORY.md "R Parallel Processing Stability" for the full pattern.
-options(future.globals.maxSize = 2 * 1024^3)
+# Required for future.apply globals — the per-year filtered timeseries is
+# ~134 MB, but norms_df dominates at ~2.3 GB (47M pixel-DOY rows), and
+# pixel_coords adds ~3 MB. Total auto-detected globals ~2.4 GB per worker.
+# Cap at 4 GB for headroom; with 3 workers that's ~7 GB worker globals overhead
+# vs the 96 GB Docker cap, well within budget.
+# Updated 2026-05-08 from 2 GB after a 2.42 GB future.globals.maxSize hit on
+# year 2013 silently dropped the script into sequential lapply (caught by the
+# flush.console patch in the same commit). See MEMORY.md "R Parallel
+# Processing Stability" for the full pattern.
+options(future.globals.maxSize = 4 * 1024^3)
 
 # Source utility functions
 source("00_setup_paths.R")
