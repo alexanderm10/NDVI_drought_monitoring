@@ -38,7 +38,9 @@ services:
       resources:
         limits:
           cpus: '10.0'  # Limit to 10 CPU cores (shared server - leave capacity for others)
-          memory: 96G   # Increased for script 03 with 4 cores (was 64G)
+          memory: 128G  # Bumped 96G->128G after 2026-05-09 OOM mid-saveRDS for year 2019.
+                        # Host has 251 GiB; 128 G leaves ~120 G for system + other users.
+                        # See RUNNING_ANALYSES.md May 11 session for diagnosis.
         reservations:
           cpus: '4.0'   # Reserve at least 4 cores
           memory: 16G   # Reserve at least 16GB

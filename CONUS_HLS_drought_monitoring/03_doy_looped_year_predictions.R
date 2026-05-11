@@ -449,43 +449,140 @@ for (yr in years_to_process) {
     })
   }
 
-  # Process all DOYs for this year in parallel using the future-recycling
+  # Per-DOY resume: scan posterior dir for already-completed DOYs. If a
+  # posterior file exists and is non-empty, we skip the GAM fit and instead
+  # reload the sims to reconstruct (mean, lwr, upr) from rowMeans/quantile.
+  # This is bit-equivalent to the original ci because post.distns() with
+  # terms=F (the default in this script) defines:
+  #   df.out$mean = apply(sim1, 1, mean,     na.rm=T)
+  #   df.out$lwr  = apply(sim1, 1, quantile, 0.025, na.rm=T)
+  #   df.out$upr  = apply(sim1, 1, quantile, 0.975, na.rm=T)
+  # See 00_posterior_functions.R lines 95-97. Trade-off: per-DOY model stats
+  # (R2, NormCoef, SplineP, RMSE) are not reconstructable from the posteriors
+  # file (those come from gam_summary), so reloaded DOYs get NA stats. This
+  # only affects the modeled_ndvi_stats.rds diagnostics file, not any
+  # downstream analysis. Added 2026-05-11 after the May 9-10 OOM truncated
+  # year 2019's summary RDS while all 365 posteriors remained valid on disk.
+  year_post_dir <- file.path(config$posteriors_dir, as.character(yr))
+  existing_doy_files <- if (dir.exists(year_post_dir)) {
+    files <- list.files(year_post_dir, pattern = "^doy_\\d{3}\\.rds$",
+                        full.names = TRUE)
+    sizes <- file.info(files)$size
+    doys  <- as.integer(sub("^doy_(\\d{3})\\.rds$", "\\1", basename(files)))
+    doys[!is.na(sizes) & sizes > 0]
+  } else integer(0)
+
+  doys_to_process <- setdiff(1:365, existing_doy_files)
+  doys_to_reload  <- intersect(1:365, existing_doy_files)
+
+  cat(sprintf("  DOY plan: %d to fit, %d to reload from posteriors\n",
+              length(doys_to_process), length(doys_to_reload)))
+  flush.console()
+
+  # Process DOYs that need fitting in parallel using the future-recycling
   # pattern from MEMORY.md: plan(multisession) before, plan(sequential) +
   # gc() after, with a tryCatch fallback to sequential lapply if a worker
   # dies. This is the same pattern proven by 01_aggregate_to_4km_parallel.R
   # over multi-day runs and replaces mclapply (which the project's prior
   # incident showed could exhaust worker memory on long jobs).
-  cat("  Processing 365 DOYs with", config$n_cores, "future workers...\n")
-  flush.console()
+  if (length(doys_to_process) > 0) {
+    cat("  Fitting", length(doys_to_process), "DOYs with",
+        config$n_cores, "future workers...\n")
+    flush.console()
 
-  plan(multisession, workers = config$n_cores)
+    plan(multisession, workers = config$n_cores)
 
-  results_list <- tryCatch({
-    future_lapply(1:365, function(day) {
-      # Workers are fresh R processes — load packages explicitly. Globals
-      # (year_data, pixel_coords, norms_df, config, n_pixels, fit_year_spatial_gam,
-      # post.distns, get_trailing_window, yr) are auto-detected by future.apply.
-      library(mgcv)
-      library(dplyr)
-      library(MASS)
-      library(lubridate)
-      process_doy(day)
-    }, future.seed = NULL)
-    # future.seed = NULL: post.distns() seeds itself deterministically with
-    # year * 1000L + day. TRUE would override the worker RNGkind to L'Ecuyer-CMRG
-    # before that set.seed() runs, breaking bit-equivalence with the serial path.
-    # See script 02's matching rationale at lines 508-514.
-  }, error = function(e) {
-    cat("WARNING: future_lapply failed for year ", yr, ": ",
-        conditionMessage(e), "\n", sep = "")
-    cat("Falling back to sequential lapply for this year (slower but safer)...\n")
-    flush.console()  # Without this, the warning is invisible until the (multi-hour) fallback completes.
-    lapply(1:365, process_doy)
-  })
+    processed_results <- tryCatch({
+      future_lapply(doys_to_process, function(day) {
+        # Workers are fresh R processes — load packages explicitly. Globals
+        # (year_data, pixel_coords, norms_df, config, n_pixels, fit_year_spatial_gam,
+        # post.distns, get_trailing_window, yr) are auto-detected by future.apply.
+        library(mgcv)
+        library(dplyr)
+        library(MASS)
+        library(lubridate)
+        process_doy(day)
+      }, future.seed = NULL)
+      # future.seed = NULL: post.distns() seeds itself deterministically with
+      # year * 1000L + day. TRUE would override the worker RNGkind to L'Ecuyer-CMRG
+      # before that set.seed() runs, breaking bit-equivalence with the serial path.
+      # See script 02's matching rationale at lines 508-514.
+    }, error = function(e) {
+      cat("WARNING: future_lapply failed for year ", yr, ": ",
+          conditionMessage(e), "\n", sep = "")
+      cat("Falling back to sequential lapply for this year (slower but safer)...\n")
+      flush.console()  # Without this, the warning is invisible until the (multi-hour) fallback completes.
+      lapply(doys_to_process, process_doy)
+    })
 
-  plan(sequential)
+    plan(sequential)
+    gc(verbose = FALSE)
+    flush.console()
+  } else {
+    processed_results <- list()
+  }
+
+  # Reload existing posteriors (if any) and reconstruct ci. Use multisession
+  # workers because the apply(quantile) step is CPU-bound (~3-5 sec/DOY for
+  # 141K x 100 sims) and dominates over disk read time. With 3 workers, 365
+  # reloads take ~10-15 min vs ~30-60 min sequential.
+  if (length(doys_to_reload) > 0) {
+    cat("  Reloading", length(doys_to_reload),
+        "existing posteriors with", config$n_cores, "workers...\n")
+    flush.console()
+
+    plan(multisession, workers = config$n_cores)
+
+    reloaded_results <- tryCatch({
+      future_lapply(doys_to_reload, function(day) {
+        pf <- readRDS(file.path(year_post_dir, sprintf("doy_%03d.rds", day)))
+        sims <- pf$sims
+        list(
+          yday   = day,
+          result = data.frame(
+            pixel_id = pf$pixel_id,
+            # apply(..., mean, na.rm=TRUE) — NOT rowMeans() — to match
+            # post.distns() line 95 exactly. rowMeans defaults to na.rm=FALSE
+            # which would produce NA for any pixel with even one NA sim,
+            # diverging from the original ci values. Bit-equivalence matters
+            # because the reloaded ci goes into modeled_ndvi_YYYY.rds and
+            # downstream scripts 04/06 compare against the year-2018 ci that
+            # came from the unpatched code path.
+            mean = apply(sims, 1, mean,     na.rm = TRUE),
+            lwr  = apply(sims, 1, quantile, 0.025, na.rm = TRUE),
+            upr  = apply(sims, 1, quantile, 0.975, na.rm = TRUE)
+          ),
+          stats  = NULL,         # not reconstructable without re-fitting
+          n_obs  = NA_integer_   # not stored in posterior file
+        )
+      }, future.seed = NULL)
+    }, error = function(e) {
+      cat("WARNING: reload future_lapply failed for year ", yr, ": ",
+          conditionMessage(e), "\n", sep = "")
+      cat("Falling back to sequential reload...\n")
+      flush.console()
+      lapply(doys_to_reload, function(day) {
+        pf <- readRDS(file.path(year_post_dir, sprintf("doy_%03d.rds", day)))
+        sims <- pf$sims
+        list(yday = day,
+             result = data.frame(pixel_id = pf$pixel_id,
+                                 mean = apply(sims, 1, mean,     na.rm = TRUE),
+                                 lwr  = apply(sims, 1, quantile, 0.025, na.rm = TRUE),
+                                 upr  = apply(sims, 1, quantile, 0.975, na.rm = TRUE)),
+             stats = NULL, n_obs = NA_integer_)
+      })
+    })
+
+    plan(sequential)
+    gc(verbose = FALSE)
+    flush.console()
+  } else {
+    reloaded_results <- list()
+  }
+
+  results_list <- c(processed_results, reloaded_results)
+  rm(processed_results, reloaded_results)
   gc(verbose = FALSE)
-  flush.console()
 
   # Combine results for this year
   cat("  Combining results...\n")
@@ -500,37 +597,62 @@ for (yr in years_to_process) {
     n_obs = NA_integer_
   )
 
-  # Build year_grid from results
-  year_results_list <- list()
+  # Build year_grid from results.
+  # IMPORTANT: index year_stats / year_results_list by res$yday (NOT by
+  # list position i), because results_list may now be in arbitrary order
+  # after the per-DOY skip patch concatenates processed + reloaded results.
+  year_results_list <- vector("list", 365)
 
-  for (i in seq_along(results_list)) {
-    res <- results_list[[i]]
+  for (res in results_list) {
+    d <- res$yday
 
-    # Update stats
-    year_stats$n_obs[i] <- res$n_obs
+    # Guard: a corrupt reload returning yday = NA / 0 / >365 would silently
+    # mis-index year_stats (R allows NA / 0 / out-of-range positional
+    # subscripts) and produce a year file with hidden bad rows. Halt loudly
+    # instead. (Per r-reviewer flag, 2026-05-11.)
+    if (!is.numeric(d) || is.na(d) || d < 1 || d > 365) {
+      stop(sprintf("Invalid yday in results_list: %s (year %d)",
+                   format(d), yr))
+    }
+
+    # Update stats (NA for reloaded DOYs since gam_summary isn't in posteriors)
+    year_stats$n_obs[d] <- res$n_obs
     if (!is.null(res$stats)) {
-      year_stats$R2[i] <- res$stats$R2
-      year_stats$NormCoef[i] <- res$stats$NormCoef
-      year_stats$SplineP[i] <- res$stats$SplineP
-      year_stats$RMSE[i] <- res$stats$RMSE
+      year_stats$R2[d]       <- res$stats$R2
+      year_stats$NormCoef[d] <- res$stats$NormCoef
+      year_stats$SplineP[d]  <- res$stats$SplineP
+      year_stats$RMSE[d]     <- res$stats$RMSE
     }
 
     # Store results if present. res$result already has (pixel_id, mean, lwr, upr)
     # with pixel_id sourced from pred_grid — no separate index alignment needed.
     if (!is.null(res$result)) {
       res$result$yday <- res$yday
-      year_results_list[[i]] <- res$result
+      year_results_list[[d]] <- res$result
     }
   }
+
+  # Free results_list before building year_grid — it's the largest in-parent
+  # object (365 ci data frames + sims metadata) and would otherwise stay
+  # resident through the saveRDS step. Same OOM-prevention hygiene as the
+  # rm/gc between years (see end of loop).
+  rm(results_list)
+  gc(verbose = FALSE)
 
   # Combine all DOYs into year_grid (bind_rows is faster than do.call(rbind)
   # for hundreds of frames; same final result)
   year_grid <- dplyr::bind_rows(year_results_list)
   year_grid <- merge(year_grid, pixel_coords, by = "pixel_id", all.x = TRUE)
 
+  # Free year_results_list now that it's been bound — another ~1 GB recovered
+  # before the saveRDS gzip allocation that triggered the May 9-10 OOM.
+  rm(year_results_list)
+  gc(verbose = FALSE)
+
   # Save this year's results
   year_file <- file.path(config$output_dir, sprintf("modeled_ndvi_%d.rds", yr))
   cat("  Saving to:", year_file, "\n")
+  flush.console()
   saveRDS(year_grid, year_file)
 
   # Verify write succeeded — guards against NFS/CIFS hiccups producing a
@@ -553,6 +675,17 @@ for (yr in years_to_process) {
 
   year_elapsed <- as.numeric(difftime(Sys.time(), year_start, units = "mins"))
   cat(sprintf("  Year %d: %.1f%% complete in %.1f minutes\n", yr, pct_complete, year_elapsed))
+  flush.console()
+
+  # End-of-year cleanup: drop year-local objects to keep parent footprint
+  # flat across years. Without this, year_data + year_grid + closure
+  # references accumulated across 13 years (2013-2025), and the OOM at the
+  # year-2019 saveRDS proved we had no headroom on the 96 GiB cap. With the
+  # 128 GiB cap and these explicit drops, parent stays in the 30-50 GiB band
+  # year-over-year. See RUNNING_ANALYSES.md May 11 session for the OOM
+  # forensics.
+  rm(year_data, year_grid, year_stats)
+  gc(verbose = FALSE)
 }
 
 # ==============================================================================
