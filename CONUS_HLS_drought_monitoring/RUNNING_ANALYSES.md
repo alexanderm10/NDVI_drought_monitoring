@@ -1,29 +1,61 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-08 ~end of session (script 03 v2 in flight, ~half of year 2013 done; ETA ~3-4 days for full 13-year run)
+**Updated**: 2026-05-11 ~08:30 CDT (script 03 v3 in flight; year 2019 reload phase, then 6 years of fitting)
 
 ## Active Background Process
 
-- **Script**: `03_doy_looped_year_predictions.R` v2 — commit `9021c3a` (after the v1 future.globals.maxSize OOM, see "03 v1 → v2" below)
-- **Container**: `conus-hls-drought-monitor`
-- **Container PIDs**: parent bash 1315085, R parent 1315091, 3 multisession workers 1315200/1315201/1315202
-- **Started**: 2026-05-08 11:46 CDT (worker spawn at 12:12 CDT after data-load + first-year warmup)
-- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/year_predictions_v2.log`
-- **Failed v1 log preserved**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/year_predictions_v1_failed_globalsoom.log` (the WARNING text caught by today's flush.console patch — historical record of the silent-fallback failure mode)
+- **Script**: `03_doy_looped_year_predictions.R` v3 — patches in working tree (per-DOY skip + rm/gc hygiene + 128 GiB cap), to be committed after first stable year-2020 fit
+- **Container**: `conus-hls-drought-monitor` (recreated 2026-05-11 07:53 CDT with 128 GiB memory cap)
+- **Container PIDs**: R parent 98, 3 multisession workers 213/214/215
+- **Started**: 2026-05-11 07:55 CDT (worker spawn at ~08:24 CDT after data-load + merge)
+- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/year_predictions_v3.log`
+- **Prior logs preserved**: v2 (May 8-10, OOM-killed mid-2019-saveRDS), v1 (failed at globals.maxSize), in same dir
 - **Workers**: 3 multisession (per script config)
-- **Memory**: ~55 GB / 96 GB at session-end (steady-state)
+- **Memory**: ~55 GB / 128 GB at reload phase (steady-state, no climb)
+- **Resume state**:
+  - Years 2013-2018 detected complete by resume scan (skipped immediately)
+  - Year 2019: 365 DOY posteriors all on disk from v2; per-DOY skip patch fires "0 to fit, 365 to reload" — reconstructs ci from sims via `apply(sims, 1, mean | quantile, na.rm=T)` matching `post.distns()` exactly
+  - Years 2020-2025: full GAM fit ahead, ~6 hr/year × 6 = ~36 hr remaining
+- **Reload phase actuals**: ~50-60 min for 365 DOYs across 3 workers (slower than my optimistic 15-20 min estimate; xz-decompression + per-row apply(quantile) dominate). Acceptable since this is one-shot for 2019 only — much better than the ~6 hr re-fit.
 - **Outputs (in flight)**:
-  - `gam_models/year_predictions_posteriors/YYYY/doy_NNN.rds` × ~4,500 (all years × all DOYs, ~70-90 MB each, projected ~200-300 GB total xz-compressed when complete)
-  - `gam_models/modeled_ndvi/modeled_ndvi_YYYY.rds` × 13 (per-year summary stats)
-  - `gam_models/modeled_ndvi_stats.rds` (run-level statistics)
-- **Year 2013 status at session-end**: ~174 / 365 DOYs written (47%); first per-year completion event expected within ~3 hours
-- **Projected total runtime**: ~6 hr/year × 13 years ≈ 3-4 days (slightly slower than WORKFLOW.md's 1.5-2 day estimate; will revise after first few years complete)
-- **Watcher armed**: persistent monitor on year_predictions_v2.log filtering for `=== Processing Year`, per-year completion, save events, and failure modes (`WARNING`, `ERROR`, `Falling back`, `Killed`, `cannot allocate`, `globals.maxSize`)
+  - `gam_models/modeled_ndvi/modeled_ndvi_YYYY.rds` × 7 remaining (2019-2025)
+  - `gam_models/modeled_ndvi_stats.rds` (final run-level statistics)
+- **Projected ETA**: ~50 min for 2019 reload + ~36 hr for 2020-2025 fitting ≈ **2026-05-12 ~22:00 CDT**
+- **Watcher armed**: monitor on year_predictions_v3.log filtering for `=== Processing Year`, `Saving to`, `Wrote XXX MB`, year completion, and failure modes (`WARNING`, `ERROR`, `Falling back`, `Killed`, `cannot allocate`, `globals.maxSize`, `Invalid yday`)
 - **Monitor on next session**:
-  - `tail -50 /mnt/malexander/datasets/ndvi_monitor/gam_models/year_predictions_v2.log`
+  - `tail -50 /mnt/malexander/datasets/ndvi_monitor/gam_models/year_predictions_v3.log`
   - `for y in 2013 2014 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025; do echo "$y: $(ls /mnt/malexander/datasets/ndvi_monitor/gam_models/year_predictions_posteriors/$y/ 2>/dev/null | wc -l) DOYs"; done`
   - `ls -lh /mnt/malexander/datasets/ndvi_monitor/gam_models/modeled_ndvi/` (per-year summary files arrive on year completion)
   - Container memory: `docker stats --no-stream conus-hls-drought-monitor`
+
+## 03 v2 → v3 (the May 9-10 OOM at midnight + per-DOY skip patch, 2026-05-11 AM)
+
+**v2 outcome**: ran 2026-05-08 11:46 → 2026-05-10 00:00 (~60 hr). Years 2013-2018 saved cleanly. Year 2019 wrote all 365 posterior files but the parent OOM-killed mid-`saveRDS(year_grid, "modeled_ndvi_2019.rds")` at 00:00:00.612 — the summary file is 300 MB (vs ~1.1 GB expected) and `readRDS` errors on it. Years 2020-2025 not started.
+
+**Diagnosis**: `cat /sys/fs/cgroup/memory.events` confirmed `oom_kill 2` and `memory.peak = 96 GiB` (the docker-compose cap). Container itself stayed up because R was a child of the long-running `tail -f` PID 1; only the R subtree died. Host had no reboot, no swap exhaustion. Cause: parent's working set (timeseries_with_norms ~10 GB + norms_df ~2.3 GB + year_data ~700 MB + accumulating year_results_list across 6 prior years + saveRDS gzip buffer) crossed the 96 GiB cap during 2019's saveRDS. 2018 didn't OOM because year_data is smaller for early years; 2019 was the first year with 13.7M-row year_data slice plus 6 years of accumulated leakage.
+
+**Three patches applied 2026-05-11**:
+
+1. **`docker-compose.yml` 96 GiB → 128 GiB** — host has 251 GiB; bumped cap with ~120 GiB headroom for system + other users. Verified via `cat /sys/fs/cgroup/memory.max` = exactly 128 GiB after `docker compose up -d`. Modern Docker compose v2 honors `deploy.resources.limits` in non-swarm mode (not always true historically — check before assuming).
+
+2. **Per-DOY skip in `03_doy_looped_year_predictions.R`** — pre-scan posterior dir; classify DOYs as `to_fit` vs `to_reload`. Run workers only on `to_fit`. Reload `to_reload` in a separate parallel block: `apply(sims, 1, mean | quantile, na.rm=TRUE)` to reconstruct (mean, lwr, upr) — bit-equivalent to `post.distns()` lines 95-97. Trade-off: per-DOY model stats (R2, NormCoef, SplineP, RMSE) not reconstructable from posteriors → reloaded DOYs get NA stats in `modeled_ndvi_stats.rds` (only affects diagnostics, not downstream analysis). For 2019 specifically, all 365 stats will be NA — acceptable given 6-hour speedup. Combine loop changed from `for (i in seq_along(results_list))` (positional, 1:365) to `for (res in results_list)` (DOY-keyed via `res$yday`) since results_list is now `c(processed, reloaded)` in arbitrary order. Added `stopifnot(d ∈ 1:365)` guard.
+
+3. **`rm()` + `gc(verbose=FALSE)` hygiene** — drop `results_list` before `bind_rows`, drop `year_results_list` after, drop `year_data + year_grid + year_stats` at end of each year iteration. Goal: keep parent footprint flat across 7 years instead of accumulating to OOM. Memory has indeed stayed at ~55 GiB through the 2019 reload phase — no climb.
+
+**r-reviewer caught one real bug** during the patch review: my first reload draft used `rowMeans(sims)` (defaults `na.rm=FALSE`) instead of `apply(sims, 1, mean, na.rm=TRUE)`. Would have produced `NA` for any pixel with degenerate sims, diverging from the original ci values. Fixed before launch.
+
+**Restart sequence (2026-05-11)**:
+1. Diagnosed OOM via cgroup memory.events
+2. Edited docker-compose.yml + 03 script (215 lines added/changed)
+3. r-reviewer reviewed patches; fixed na.rm bug + added DOY-range guard
+4. Parse-checked clean
+5. `docker compose down && docker compose up -d` — verified 128 GiB cap live
+6. Deleted corrupt `modeled_ndvi_2019.rds` (would crash resume scan at `readRDS`)
+7. Launched v3 at 07:55 CDT
+8. Verified resume scan correctly identified 2013-2018 as complete and 2019 as needing 365 reloads
+9. Confirmed workers spawned for parallel reload (PIDs 213-215, ~315% combined CPU)
+
+**Lesson worth keeping**: The OOM was preventable if we'd had per-year `gc()` and explicit `rm()` from the start. r-reviewer's earlier 03/04/06 audit (May 8) caught flush.console + future.seed + pixel-count invariant, but did not flag the absence of intermediate-object cleanup — worth adding to the "before-launch checklist for long parallel R jobs" alongside the future.globals.maxSize check.
 
 ## Script 02 v2 Backfill — COMPLETE
 
