@@ -1,32 +1,35 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-11 ~08:30 CDT (script 03 v3 in flight; year 2019 reload phase, then 6 years of fitting)
+**Updated**: 2026-05-12 ~16:00 CDT (script 03 v3 healthy; 5/7 years done, year 2024 in flight at ~50%)
 
 ## Active Background Process
 
-- **Script**: `03_doy_looped_year_predictions.R` v3 — patches in working tree (per-DOY skip + rm/gc hygiene + 128 GiB cap), to be committed after first stable year-2020 fit
-- **Container**: `conus-hls-drought-monitor` (recreated 2026-05-11 07:53 CDT with 128 GiB memory cap)
-- **Container PIDs**: R parent 98, 3 multisession workers 213/214/215
-- **Started**: 2026-05-11 07:55 CDT (worker spawn at ~08:24 CDT after data-load + merge)
+- **Script**: `03_doy_looped_year_predictions.R` v3 (patches committed `c189efd`)
+- **Container**: `conus-hls-drought-monitor` (128 GiB memory cap)
+- **Container PIDs**: R parent 98 (since May 11 07:55), 3 multisession workers 929/930/931 (respawned 04:48 CDT for year 2024)
 - **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/year_predictions_v3.log`
-- **Prior logs preserved**: v2 (May 8-10, OOM-killed mid-2019-saveRDS), v1 (failed at globals.maxSize), in same dir
-- **Workers**: 3 multisession (per script config)
-- **Memory**: ~55 GB / 128 GB at reload phase (steady-state, no climb)
-- **Resume state**:
-  - Years 2013-2018 detected complete by resume scan (skipped immediately)
-  - Year 2019: 365 DOY posteriors all on disk from v2; per-DOY skip patch fires "0 to fit, 365 to reload" — reconstructs ci from sims via `apply(sims, 1, mean | quantile, na.rm=T)` matching `post.distns()` exactly
-  - Years 2020-2025: full GAM fit ahead, ~6 hr/year × 6 = ~36 hr remaining
-- **Reload phase actuals**: ~50-60 min for 365 DOYs across 3 workers (slower than my optimistic 15-20 min estimate; xz-decompression + per-row apply(quantile) dominate). Acceptable since this is one-shot for 2019 only — much better than the ~6 hr re-fit.
-- **Outputs (in flight)**:
-  - `gam_models/modeled_ndvi/modeled_ndvi_YYYY.rds` × 7 remaining (2019-2025)
-  - `gam_models/modeled_ndvi_stats.rds` (final run-level statistics)
-- **Projected ETA**: ~50 min for 2019 reload + ~36 hr for 2020-2025 fitting ≈ **2026-05-12 ~22:00 CDT**
-- **Watcher armed**: monitor on year_predictions_v3.log filtering for `=== Processing Year`, `Saving to`, `Wrote XXX MB`, year completion, and failure modes (`WARNING`, `ERROR`, `Falling back`, `Killed`, `cannot allocate`, `globals.maxSize`, `Invalid yday`)
+- **Workers**: 3 multisession (per script config), ~350-400% combined CPU
+- **Memory**: ~81 GB / 128 GB (climbed ~26 GB from morning baseline; flat across years — gc/rm hygiene holding, no OOM signs)
+- **Progress (this run, 2019-2025 plan)**:
+  - 2019: COMPLETE (reload, 111.2 min, finished May 11 ~10:14 CDT)
+  - 2020: COMPLETE (376.6 min, finished May 11 16:30)
+  - 2021: COMPLETE (382.6 min, finished May 11 22:53)
+  - 2022: COMPLETE (414.9 min, finished May 12 05:48)
+  - 2023: COMPLETE (409.9 min, finished May 12 12:38)
+  - **2024: IN FLIGHT** — started ~12:38 CDT, 183/365 DOYs done as of 15:54 (~50%), ~3.3 hr in, projecting ~6.5 hr total → finish ~19:00 CDT tonight
+  - 2025: pending (last in queue; smaller slice expected since partial year)
+- **Outputs landing**:
+  - `gam_models/modeled_ndvi/modeled_ndvi_YYYY.rds` × 5 done (2019-2023, all ~1.09 GB), 2 pending (2024, 2025)
+  - `gam_models/year_predictions_posteriors/YYYY/doy_NNN.rds` × 365 per year
+  - `gam_models/modeled_ndvi_stats.rds` (final run-level statistics, written after 2025)
+- **Projected ETA**: 2024 finishes ~19:00 CDT tonight, 2025 finishes overnight → **complete by Wed 2026-05-13 ~02:00-04:00 CDT**
+- **Why log mtime can look stale**: parent only prints at year boundaries; per-DOY writes happen worker-side without parent-stdout output. `flush.console` patches are at chunk/year boundaries by design. To check liveness, use `ls /mnt/.../year_predictions_posteriors/YYYY/ | wc -l` and `docker stats --no-stream` rather than the log mtime alone.
 - **Monitor on next session**:
   - `tail -50 /mnt/malexander/datasets/ndvi_monitor/gam_models/year_predictions_v3.log`
   - `for y in 2013 2014 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025; do echo "$y: $(ls /mnt/malexander/datasets/ndvi_monitor/gam_models/year_predictions_posteriors/$y/ 2>/dev/null | wc -l) DOYs"; done`
   - `ls -lh /mnt/malexander/datasets/ndvi_monitor/gam_models/modeled_ndvi/` (per-year summary files arrive on year completion)
   - Container memory: `docker stats --no-stream conus-hls-drought-monitor`
+  - **NB**: `docker exec conus-hls-drought-monitor ps aux | grep "[R]script"` will return EMPTY because R was launched via `--file=` not `Rscript`. Use `docker exec ... ps -ef | grep "[R]"` or check by PID.
 
 ## 03 v2 → v3 (the May 9-10 OOM at midnight + per-DOY skip patch, 2026-05-11 AM)
 
