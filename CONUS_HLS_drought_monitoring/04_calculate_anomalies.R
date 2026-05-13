@@ -163,12 +163,17 @@ if (length(available_years) == 0) {
 # (Per-DOY incompleteness within a year triggers reprocessing of the whole year;
 # matches the pattern in script 03.)
 #
-# Threshold raised from 1e6 to 1e9 (1 GB) on 2026-05-13 after the 03 v2 OOM
-# wrote a truncated 300 MB modeled_ndvi_2019.rds that would have passed a
-# 1 MB check and been silently skipped. Each year's anomalies file is
-# expected to be ~2-3 GB (~47M rows x 9 cols incl. x/y), so 1 GB cleanly
-# distinguishes a complete write from a mid-saveRDS truncation.
-RESUME_MIN_BYTES <- 1e9
+# Threshold history (2026-05-13):
+#   1e6 (1 MB): would have silently passed the 03 v2 truncated 300 MB
+#               modeled_ndvi_2019.rds — too lenient.
+#   1e9 (1 GB): false-tripped on year 2013 (only 253 DOYs since Landsat 8
+#               launched 2013-04-11; produces ~800 MB compressed instead
+#               of the ~1.1 GB full-year output) — too strict.
+#   5e8 (500 MB) [current]: cleanly catches the known 03 v2 truncation
+#               pattern (300 MB) while allowing 2013's legitimate ~800 MB
+#               and full years' ~1.0-1.2 GB output. Cross-checked against
+#               the modeled_ndvi/ size table from 03.
+RESUME_MIN_BYTES <- 5e8
 existing_years <- integer(0)
 for (yr in available_years) {
   out_file <- file.path(config$output_dir, sprintf("anomalies_%d.rds", yr))
@@ -380,15 +385,16 @@ for (yr in years_to_process) {
   saveRDS(year_df, out_file, compress = "gzip")
 
   # Post-write integrity guard. Threshold matches the resume check
-  # (RESUME_MIN_BYTES) so that a truncated mid-saveRDS — exactly the failure
-  # mode that bit 03 v2 — fails LOUDLY at write time rather than silently
-  # passing both the post-write log line ("Wrote 200 MB") and the next-run
-  # resume scan. HIGH 1 in r-reviewer 2026-05-13 audit.
+  # (RESUME_MIN_BYTES = 500 MB) so that a truncated mid-saveRDS — exactly
+  # the failure mode that bit 03 v2 — fails LOUDLY at write time rather
+  # than silently passing both the post-write log line ("Wrote 200 MB")
+  # and the next-run resume scan. HIGH 1 in r-reviewer 2026-05-13 audit.
+  # Expected sizes: 2013 ~800 MB (253 DOYs), 2014-2025 ~1.0-1.2 GB (full year).
   written_size <- file.info(out_file)$size
   written_size_mb <- written_size / 1024^2
   if (is.na(written_size) || written_size < RESUME_MIN_BYTES) {
     stop(sprintf(
-      "Year file write failed or suspiciously small (%.0f MB, expected ~2000+): %s",
+      "Year file write failed or suspiciously small (%.0f MB, expected ~800-1200): %s",
       written_size_mb, out_file
     ))
   }
