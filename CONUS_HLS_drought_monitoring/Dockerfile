@@ -60,6 +60,12 @@ RUN R -e "install.packages(c('httr', 'jsonlite', 'curl'), repos=Sys.getenv('R_RE
 # Batch 7: Additional utilities
 RUN R -e "install.packages(c('arrow', 'RSQLite', 'DBI'), repos=Sys.getenv('R_REPOS'), dependencies=TRUE)"
 
+# Batch 8: Performance utilities
+# matrixStats: rowQuantiles ~1.8x faster than apply(quantile) on N x 100 sims
+# matrices in scripts 04 + 06; bit-equivalent to base R (type 7).
+# callr: subprocess isolation around terra::resample in script 01 (segfault survival)
+RUN R -e "install.packages(c('matrixStats', 'callr'), repos=Sys.getenv('R_REPOS'), dependencies=TRUE)"
+
 # Set proper permissions for the workspace (rstudio user already exists in base image)
 RUN chown -R rstudio:rstudio /workspace
 

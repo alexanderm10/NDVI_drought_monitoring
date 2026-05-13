@@ -42,9 +42,12 @@ Sys.setenv(OPENBLAS_NUM_THREADS = 2)
 library(dplyr)
 library(future)
 library(future.apply)
+library(matrixStats)  # rowQuantiles — ~1.8x faster than apply(quantile, ...)
+                      # at 129K x 100; bit-equivalent to base R's quantile (type 7)
 
-# Required for future.apply globals — loaded posteriors per worker can be
-# 100-200 MB; default 500 MB cap is too tight.
+# Required for future.apply globals. The actual posterior loads happen
+# inside the worker via readRDS, so the only global shipped is the
+# process_doy closure (paths + scalars, ~few KB) — 2 GB is conservative.
 options(future.globals.maxSize = 2 * 1024^3)
 
 source("00_setup_paths.R")
@@ -156,13 +159,20 @@ if (length(available_years) == 0) {
   stop("No years to process after applying CLI filter.")
 }
 
-# Resume: skip years whose anomaly summary file already exists.
+# Resume: skip years whose anomaly summary file already exists at full size.
 # (Per-DOY incompleteness within a year triggers reprocessing of the whole year;
 # matches the pattern in script 03.)
+#
+# Threshold raised from 1e6 to 1e9 (1 GB) on 2026-05-13 after the 03 v2 OOM
+# wrote a truncated 300 MB modeled_ndvi_2019.rds that would have passed a
+# 1 MB check and been silently skipped. Each year's anomalies file is
+# expected to be ~2-3 GB (~47M rows x 9 cols incl. x/y), so 1 GB cleanly
+# distinguishes a complete write from a mid-saveRDS truncation.
+RESUME_MIN_BYTES <- 1e9
 existing_years <- integer(0)
 for (yr in available_years) {
   out_file <- file.path(config$output_dir, sprintf("anomalies_%d.rds", yr))
-  if (file.exists(out_file) && file.info(out_file)$size > 1e6) {
+  if (file.exists(out_file) && file.info(out_file)$size > RESUME_MIN_BYTES) {
     existing_years <- c(existing_years, yr)
   }
 }
@@ -253,9 +263,12 @@ for (yr in years_to_process) {
       anomaly_sims <- year_sims - baseline_sims
 
       # Summary stats — explicit column-only sweep, no df.sim junk.
+      # rowQuantiles returns N x 2 matrix; both probs in one C call.
       anom_mean <- rowMeans(anomaly_sims, na.rm = TRUE)
-      anom_lwr  <- apply(anomaly_sims, 1, quantile, 0.025, na.rm = TRUE)
-      anom_upr  <- apply(anomaly_sims, 1, quantile, 0.975, na.rm = TRUE)
+      anom_qs   <- rowQuantiles(anomaly_sims, probs = c(0.025, 0.975),
+                                na.rm = TRUE)
+      anom_lwr  <- anom_qs[, 1]
+      anom_upr  <- anom_qs[, 2]
       significant <- (anom_lwr > 0) | (anom_upr < 0)
       prob_below_zero <- rowMeans(anomaly_sims < 0, na.rm = TRUE)
 
@@ -279,9 +292,14 @@ for (yr in years_to_process) {
         prob_below_zero = prob_below_zero
       )
     }, error = function(e) {
-      cat(sprintf("    ERROR year %d DOY %d: %s\n", yr, doy,
-                  conditionMessage(e)))
-      NULL
+      # Worker stdout is not forwarded by future.apply, so cat() inside the
+      # worker is invisible from the parent. Return a structured sentinel
+      # the parent can detect after future_lapply completes (HIGH 2 in r-reviewer
+      # 2026-05-13 audit).
+      structure(
+        list(doy = doy, msg = conditionMessage(e)),
+        class = "doy_error"
+      )
     })
   }
 
@@ -295,6 +313,7 @@ for (yr in years_to_process) {
   results_list <- tryCatch({
     future_lapply(joint_doys, function(doy) {
       library(dplyr)
+      library(matrixStats)
       process_doy(doy)
     }, future.seed = NULL)
     # future.seed = NULL: process_doy is pure arithmetic on posterior matrices —
@@ -310,14 +329,43 @@ for (yr in years_to_process) {
   gc(verbose = FALSE)
   flush.console()
 
-  # Drop NULL (failed) entries and bind
-  results_list <- results_list[!sapply(results_list, is.null)]
-  if (length(results_list) == 0) {
+  # Surface per-DOY worker errors that the parallel path swallowed silently.
+  # (Sequential fallback path's cat() prints reach stdout; parallel path's
+  # don't — both produce the same doy_error sentinels here.)
+  doy_errors <- Filter(function(x) inherits(x, "doy_error"), results_list)
+  if (length(doy_errors) > 0) {
+    cat(sprintf("  WARNING: %d DOY(s) failed in year %d:\n",
+                length(doy_errors), yr))
+    for (err in doy_errors) {
+      cat(sprintf("    DOY %d: %s\n", err$doy, err$msg))
+    }
+    flush.console()
+  }
+  results_list <- Filter(
+    Negate(function(x) inherits(x, "doy_error") || is.null(x)),
+    results_list
+  )
+  n_doys_successful <- length(results_list)
+
+  if (n_doys_successful == 0) {
     cat("  WARNING: no successful DOYs for year ", yr, " — skipping save\n", sep = "")
+    flush.console()
+    rm(results_list); gc(verbose = FALSE)
     next
+  }
+  if (n_doys_successful < length(joint_doys)) {
+    cat(sprintf("  %d of %d DOYs succeeded (%d failed)\n",
+                n_doys_successful, length(joint_doys),
+                length(joint_doys) - n_doys_successful))
+    flush.console()
   }
 
   year_df <- bind_rows(results_list)
+  # Free results_list (~1.8 GB at 47M rows) before left_join allocates a
+  # second copy of year_df (~2.7 GB). Cuts parent peak from ~6 GB to ~4 GB.
+  # MEDIUM 2 in r-reviewer 2026-05-13 audit.
+  rm(results_list); gc(verbose = FALSE)
+
   year_df$year <- yr
 
   # Attach x, y from the valid_pixels_df for downstream visualization
@@ -331,10 +379,18 @@ for (yr in years_to_process) {
   cat("  Saving to: ", out_file, "\n", sep = "")
   saveRDS(year_df, out_file, compress = "gzip")
 
-  written_size_mb <- file.info(out_file)$size / 1024^2
-  if (is.na(written_size_mb) || written_size_mb < 1) {
-    stop(sprintf("Year file write failed or suspiciously small (%.2f MB): %s",
-                 written_size_mb, out_file))
+  # Post-write integrity guard. Threshold matches the resume check
+  # (RESUME_MIN_BYTES) so that a truncated mid-saveRDS — exactly the failure
+  # mode that bit 03 v2 — fails LOUDLY at write time rather than silently
+  # passing both the post-write log line ("Wrote 200 MB") and the next-run
+  # resume scan. HIGH 1 in r-reviewer 2026-05-13 audit.
+  written_size <- file.info(out_file)$size
+  written_size_mb <- written_size / 1024^2
+  if (is.na(written_size) || written_size < RESUME_MIN_BYTES) {
+    stop(sprintf(
+      "Year file write failed or suspiciously small (%.0f MB, expected ~2000+): %s",
+      written_size_mb, out_file
+    ))
   }
   cat(sprintf("  Wrote %.1f MB\n", written_size_mb))
 
@@ -347,20 +403,22 @@ for (yr in years_to_process) {
   elapsed_min   <- as.numeric(difftime(Sys.time(), year_start, units = "mins"))
 
   year_stats[[as.character(yr)]] <- data.frame(
-    year            = yr,
-    n_doys          = length(joint_doys),
-    n_pixel_doy     = n_pixel_doy,
-    pct_significant = pct_significant,
-    mean_anom       = mean_anom,
-    sd_anom         = sd_anom,
-    elapsed_mins    = elapsed_min
+    year              = yr,
+    n_doys_expected   = length(joint_doys),
+    n_doys_successful = n_doys_successful,
+    n_pixel_doy       = n_pixel_doy,
+    pct_significant   = pct_significant,
+    mean_anom         = mean_anom,
+    sd_anom           = sd_anom,
+    elapsed_mins      = elapsed_min
   )
 
-  cat(sprintf("  Year %d: %d DOYs, %.1f%% significant in %.1f min\n\n",
-              yr, length(joint_doys), pct_significant, elapsed_min))
+  cat(sprintf("  Year %d: %d/%d DOYs successful, %.1f%% significant in %.1f min\n\n",
+              yr, n_doys_successful, length(joint_doys),
+              pct_significant, elapsed_min))
   flush.console()
 
-  rm(results_list, year_df); gc(verbose = FALSE)
+  rm(year_df); gc(verbose = FALSE)
 }
 
 # ==============================================================================
