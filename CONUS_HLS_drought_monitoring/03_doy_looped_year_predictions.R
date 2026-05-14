@@ -283,12 +283,16 @@ for (yr in years) {
   year_summary <- readRDS(year_file)
   fitted_doys <- sort(unique(year_summary$yday[!is.na(year_summary$mean)]))
 
-  # Tally posterior files actually present
+  # Tally posterior files actually present.
+  # Threshold matches the per-DOY skip scan inside the year loop
+  # (POSTERIOR_MIN_BYTES = 50 MB) so a sub-50 MB corrupt file is treated
+  # as "missing" by both the year-level and per-DOY scans, eliminating the
+  # 2026-05-09/13 silent-skip bug for legacy corrupt files.
   if (dir.exists(year_post_dir)) {
     post_files <- list.files(year_post_dir, pattern = "^doy_\\d{3}\\.rds$",
                              full.names = TRUE)
     post_sizes <- file.info(post_files)$size
-    valid_post_files <- post_files[!is.na(post_sizes) & post_sizes > 0]
+    valid_post_files <- post_files[!is.na(post_sizes) & post_sizes >= 50e6]
     valid_post_doys  <- as.integer(sub("^doy_(\\d{3})\\.rds$", "\\1",
                                        basename(valid_post_files)))
   } else {
