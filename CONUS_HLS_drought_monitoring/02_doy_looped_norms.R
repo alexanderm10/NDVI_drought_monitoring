@@ -376,7 +376,14 @@ if (file.exists(config$output_file)) {
   posterior_paths <- file.path(config$posteriors_dir,
                                sprintf("doy_%03d.rds", 1:365))
   posterior_size  <- file.info(posterior_paths)$size
-  doys_missing_posteriors <- which(is.na(posterior_size) | posterior_size == 0)
+  # Resume guard: legitimate baseline posteriors are 73-80 MB. Three known
+  # midnight-CIFS-corrupt files were 4.2 / 48 / 76 MB. A 50 MB threshold
+  # catches the 4.2 + 48 cases (the 76 MB case is undetectable by size and
+  # relies on saveRDS_validated catching it at write time going forward).
+  # Was `> 0` before 2026-05-14 — would silently skip the 4.2 MB stub.
+  POSTERIOR_MIN_BYTES <- 50e6
+  doys_missing_posteriors <- which(is.na(posterior_size) |
+                                   posterior_size < POSTERIOR_MIN_BYTES)
 
   missing_doys <- sort(unique(c(doys_missing_stats,
                                 doys_missing_posteriors)))
@@ -420,40 +427,56 @@ if (length(days_to_process) > 0) {
   # Per-DOY worker. Receives `chunk_data` via futures' globals; per-DOY filter
   # to the ±7-day window happens inside the worker. The function references
   # `pixel_coords` and `config` from globals as well.
+  #
+  # Outer tryCatch added 2026-05-14 (r-reviewer CRITICAL): without it, a
+  # stop() from saveRDS_validated (CIFS write retries exhausted) would
+  # propagate out of the worker, kill the parallel chunk, hit the same
+  # failure in the sequential lapply fallback, and abort the entire script.
+  # With it, a single sustained-CIFS-outage DOY becomes a soft skip with
+  # a logged error message — matching the pattern in script 03.
   process_single_doy <- function(day, chunk_data) {
-    doy_window <- get_doy_window(day, config$window_size)
+    tryCatch({
+      doy_window <- get_doy_window(day, config$window_size)
 
-    df_doy <- chunk_data %>%
-      filter(yday %in% doy_window) %>%
-      filter(!is.na(NDVI))
+      df_doy <- chunk_data %>%
+        filter(yday %in% doy_window) %>%
+        filter(!is.na(NDVI))
 
-    if (nrow(df_doy) < 50) {
-      return(list(day = day, ci = NULL, n_obs = nrow(df_doy)))
-    }
+      if (nrow(df_doy) < 50) {
+        return(list(day = day, ci = NULL, n_obs = nrow(df_doy)))
+      }
 
-    result <- fit_doy_spatial_gam(df_doy, pixel_coords,
-                                  config$n_posterior_sims, day = day)
+      result <- fit_doy_spatial_gam(df_doy, pixel_coords,
+                                    config$n_posterior_sims, day = day)
 
-    if (is.null(result)) {
-      return(list(day = day, ci = NULL, n_obs = nrow(df_doy)))
-    }
+      if (is.null(result)) {
+        return(list(day = day, ci = NULL, n_obs = nrow(df_doy)))
+      }
 
-    # Save posteriors IMMEDIATELY (avoid worker memory buildup). Format:
-    # list(pixel_id = <int vector>, sims = <numeric matrix>) with sims
-    # 129,310 rows × 100 columns. post.distns() prepends X/x/y to the sim
-    # columns; we strip them so downstream scripts see a clean numeric matrix.
-    # pixel_id is sourced from pixel_coords (same canonical order as 03).
-    if (!is.null(result$sims)) {
-      posterior_file <- file.path(config$posteriors_dir,
-                                  sprintf("doy_%03d.rds", day))
-      sims_matrix <- as.matrix(result$sims[, -(1:3)])
-      saveRDS(
-        list(pixel_id = pixel_coords$pixel_id, sims = sims_matrix),
-        posterior_file, compress = "xz"
-      )
-    }
+      # Save posteriors IMMEDIATELY (avoid worker memory buildup). Format:
+      # list(pixel_id = <int vector>, sims = <numeric matrix>) with sims
+      # 129,310 rows × 100 columns. post.distns() prepends X/x/y to the sim
+      # columns; we strip them so downstream scripts see a clean numeric matrix.
+      # pixel_id is sourced from pixel_coords (same canonical order as 03).
+      if (!is.null(result$sims)) {
+        posterior_file <- file.path(config$posteriors_dir,
+                                    sprintf("doy_%03d.rds", day))
+        sims_matrix <- as.matrix(result$sims[, -(1:3)])
+        # saveRDS_validated: read-back validation defends against silent
+        # midnight-CIFS corruption that produced 3 lzma-corrupt files across
+        # 03 v2/v3 runs. See 00_posterior_functions.R header for full context.
+        saveRDS_validated(
+          list(pixel_id = pixel_coords$pixel_id, sims = sims_matrix),
+          posterior_file, compress = "xz"
+        )
+      }
 
-    return(list(day = day, ci = result$ci, n_obs = nrow(df_doy)))
+      list(day = day, ci = result$ci, n_obs = nrow(df_doy))
+    }, error = function(e) {
+      cat(sprintf("ERROR: DOY %d failed: %s\n", day, conditionMessage(e)))
+      list(day = day, ci = NULL, n_obs = 0L,
+           error = conditionMessage(e))
+    })
   }
 
   # Split DOYs into chunks for worker recycling

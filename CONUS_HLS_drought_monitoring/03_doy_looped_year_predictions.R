@@ -419,7 +419,11 @@ for (yr in years_to_process) {
 
         posterior_file <- file.path(year_post_dir, sprintf("doy_%03d.rds", day))
         sims_matrix <- as.matrix(fit_result$result$sims[, -(1:3)])  # drop X, x, y
-        saveRDS(
+        # saveRDS_validated: read-back validation defends against silent
+        # midnight-CIFS corruption that produced 3 lzma-corrupt files across
+        # 03 v2/v3 runs (2015/205, 2025/86, 2025/322 — all written within a
+        # 1-min window of midnight CDT). See 00_posterior_functions.R header.
+        saveRDS_validated(
           list(pixel_id = pred_grid$pixel_id, sims = sims_matrix),
           posterior_file, compress = "xz"
         )
@@ -464,12 +468,21 @@ for (yr in years_to_process) {
   # downstream analysis. Added 2026-05-11 after the May 9-10 OOM truncated
   # year 2019's summary RDS while all 365 posteriors remained valid on disk.
   year_post_dir <- file.path(config$posteriors_dir, as.character(yr))
+  # Resume guard: legitimate year posteriors are 75-83 MB. Three known
+  # midnight-CIFS-corrupt files were 4.2 / 48 / 76 MB. A 50 MB threshold
+  # catches the 4.2 + 48 cases automatically on resume (the 76 MB case is
+  # undetectable by size and relies on saveRDS_validated catching it at
+  # write time going forward). Was `> 0` before 2026-05-14 — would silently
+  # treat the 4.2 MB stub as "complete" and skip refit, exactly as happened
+  # with year_predictions_posteriors/2015/doy_205.rds (76 MB) and 2025
+  # doy_086.rds (48 MB) until 04 v2/v3 surfaced them via lzma read errors.
+  POSTERIOR_MIN_BYTES <- 50e6
   existing_doy_files <- if (dir.exists(year_post_dir)) {
     files <- list.files(year_post_dir, pattern = "^doy_\\d{3}\\.rds$",
                         full.names = TRUE)
     sizes <- file.info(files)$size
     doys  <- as.integer(sub("^doy_(\\d{3})\\.rds$", "\\1", basename(files)))
-    doys[!is.na(sizes) & sizes > 0]
+    doys[!is.na(sizes) & sizes >= POSTERIOR_MIN_BYTES]
   } else integer(0)
 
   doys_to_process <- setdiff(1:365, existing_doy_files)
