@@ -131,6 +131,38 @@ if (nrow(valid_pixels_df) != EXPECTED_VALID_PIXELS) {
 cat("  Valid pixels:", format(nrow(valid_pixels_df), big.mark = ","), "\n\n")
 
 # ==============================================================================
+# READRDS RETRY HELPER
+#
+# 04 v2 (2026-05-13) hit a transient CIFS hiccup at ~midnight CDT that took
+# out 281 of 365 DOYs in year 2025. Pattern: 3 workers each succeeded on
+# their first ~28 DOYs, then all three failed simultaneously (single
+# wall-clock event). Symptom: "cannot open the connection" / "error reading
+# from connection" from readRDS — typical transient NFS/CIFS failure mode.
+# MEMORY.md flags the //ascend.egs.anl.gov mount as known-flaky.
+#
+# Retry policy: 3 attempts, 5s/15s/30s backoff. Survives a typical CIFS
+# hiccup (10-60s) without slowing down the happy path. Worst-case extra
+# wait per failed DOY: 50s. Catches all readRDS errors (we don't try to
+# enumerate "transient" subclasses — anything that fails twice + waits ~50s
+# is unlikely to recover on a 4th try regardless).
+# ==============================================================================
+
+readRDS_retry <- function(path, max_attempts = 3L,
+                          backoff_secs = c(5, 15, 30)) {
+  last_err <- NULL
+  for (attempt in seq_len(max_attempts)) {
+    result <- tryCatch(readRDS(path), error = function(e) e)
+    if (!inherits(result, "error")) return(result)
+    last_err <- result
+    if (attempt < max_attempts) {
+      Sys.sleep(backoff_secs[attempt])
+    }
+  }
+  stop(sprintf("readRDS(%s) failed after %d attempts. Last error: %s",
+               path, max_attempts, conditionMessage(last_err)))
+}
+
+# ==============================================================================
 # DETERMINE YEARS TO PROCESS
 # ==============================================================================
 
@@ -241,8 +273,8 @@ for (yr in years_to_process) {
       baseline_path <- file.path(config$baseline_posteriors_dir,
                                  sprintf("doy_%03d.rds", doy))
 
-      year_post     <- readRDS(year_path)
-      baseline_post <- readRDS(baseline_path)
+      year_post     <- readRDS_retry(year_path)
+      baseline_post <- readRDS_retry(baseline_path)
 
       # Both files use the new posterior format: list(pixel_id, sims).
       # If pixel_id ordering differs between the two (shouldn't happen given
