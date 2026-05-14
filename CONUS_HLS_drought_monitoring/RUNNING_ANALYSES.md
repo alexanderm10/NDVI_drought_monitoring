@@ -1,10 +1,58 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-13 ~07:00 CDT (script 03 v3 COMPLETE overnight; auditing 04 before launch)
+**Updated**: 2026-05-14 ~07:30 CDT (04 v3 launched after CIFS hiccup wiped 2025 in v2)
 
-## No Active Background Process
+## Active Background Process
 
-Pipeline state on 2026-05-13: **norms (02) + year predictions (03) all complete**. Next step is script 04 (anomalies); audit is in progress before launch.
+- **Script**: `04_calculate_anomalies.R` v3 (commit `e54eaa2` adds readRDS_retry)
+- **Container**: `conus-hls-drought-monitor` (128 GiB cap)
+- **Container PIDs**: R parent 4637, 3 multisession workers 4734/4735/4736
+- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/anomalies_v3.log`
+- **Started**: 2026-05-14 07:25:04 CDT
+- **Queue (this run)**: just 2015 and 2025 (the two years lost/incomplete in v2)
+- **Resume scan**: correctly identified 11 complete years (2013, 2014, 2016-2024); skipped them
+- **Projected ETA**: 2 years × ~55 min = ~110 min → finishes **~09:15 CDT today**
+
+## Script 04 v2 — CIFS hiccup at midnight (2026-05-13 23:50 → 2026-05-14 00:01)
+
+- **Wall-clock**: 10.0 hr (started 13:29 CDT 2026-05-13, halted 00:01 CDT 2026-05-14)
+- **Outcome**: 11 of 13 years saved cleanly. Year 2015 has 1 DOY hole (DOY 205); year 2025 lost 281 of 365 DOYs.
+- **Symptom**: "cannot open the connection" / "error reading from connection" on readRDS, exact pattern that MEMORY.md flags for the //ascend.egs.anl.gov mount.
+- **Diagnosis pattern (smoking gun)**:
+  ```
+  Worker 1 (DOYs 1-122):   succeeded 1-28,    failed 29-122
+  Worker 2 (DOYs 123-244): succeeded 123-149, failed 150-243
+  Worker 3 (DOYs 245-365): succeeded 244-272, failed 273-365
+  ```
+  All three workers succeeded for the first ~28 DOYs of 2025, then failed simultaneously in mid-chunk. Single wall-clock event, almost certainly a midnight CIFS backup window or transient mount drop.
+- **Why r-reviewer's HIGH 2 (structured error sentinel) earned its keep**: without it, the worker `cat()` calls would have been silently dropped by future.apply; we'd have seen "84 of 365 succeeded" with NO indication of which DOYs failed or what the error was. With the sentinel, the diagnosis was 30 seconds of grep.
+- **Per-year results from v2 (preserved on disk)**:
+
+| Year | Status (after v2) | Size | Time |
+|------|--------------|------|------|
+| 2013 | ✅ from v1 | 797 MB | 100 min |
+| 2014 | ✅ | 1.2 GB | 52 min |
+| 2015 | 🗑 deleted (1 DOY hole) | — | — |
+| 2016 | ✅ | 1.2 GB | 50 min |
+| 2017 | ✅ | 1.2 GB | 49 min |
+| 2018 | ✅ | 1.2 GB | 49 min |
+| 2019 | ✅ | 1.2 GB | 49 min |
+| 2020 | ✅ | 1.2 GB | 49 min |
+| 2021 | ✅ | 1.2 GB | 50 min |
+| 2022 | ✅ | 1.2 GB | 49 min |
+| 2023 | ✅ | 1.2 GB | 49 min |
+| 2024 | ✅ | 1.2 GB | 49 min |
+| 2025 | 🗑 deleted (264 MB partial) | — | — |
+
+- **Patch (commit `e54eaa2`)**: `readRDS_retry()` helper at script scope wraps both `readRDS` calls in `process_doy`. 3 attempts, 5s/15s/30s backoff, catches all readRDS errors. Survives a typical CIFS hiccup (10-60s) without slowing down the happy path. Worst-case extra wait per failed DOY: 50s. Defined at script scope so future.apply ships it as a global to workers.
+- **v2 log preserved**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/anomalies_v2_cifshiccup.log` — full forensic record incl. all 281 failed DOYs.
+
+## Script 04 v1 — false-tripped write guard on year 2013 (2026-05-13 morning)
+
+- **Outcome**: completed year 2013 cleanly (32.7M rows = 253 DOYs × 129,310 pixels, 0 NAs) but the new post-write integrity guard tripped because the file was 796 MB vs the 1 GB threshold I'd set during pre-launch audit. Misdiagnosed expected size as 2-3 GB; reality is 0.8-1.2 GB depending on DOY count.
+- **Fix (commit `f68dbc9`)**: lowered `RESUME_MIN_BYTES` from 1 GB → 500 MB. Catches the known 03 v2 truncation pattern (300 MB) while allowing 2013's legitimate ~800 MB and full years' ~1.0-1.2 GB. Cross-checked against `modeled_ndvi/modeled_ndvi_YYYY.rds` sizes from 03.
+- **No data loss**: 2013 file was complete and correct; just the guard threshold was too strict. v2 resume scan correctly skipped 2013 and picked up from 2014.
+- **v1 log preserved**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/anomalies_v1_falsethreshold.log`
 
 ## Script 03 v3 — COMPLETE
 
