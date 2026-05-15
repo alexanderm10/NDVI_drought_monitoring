@@ -1,10 +1,51 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-15 ~14:45 CDT (entire 13-year anomalies pipeline COMPLETE through 04 v4)
+**Updated**: 2026-05-15 ~16:35 CDT (06 v1 launched for weekend run after audit + r-reviewer pass)
 
-## No Active Background Process
+## Active Background Process
 
-Pipeline state on 2026-05-15: **02 (norms) + 03 (year predictions) + 04 (anomalies) all complete for all 13 years (2013-2025)**. Next step is script 06 (change derivatives).
+- **Script**: `06_calculate_change_derivatives.R` v1 (commit `b1d5e57`)
+- **Container**: `conus-hls-drought-monitor` (128 GiB cap)
+- **Container PIDs**: R parent 6312, 3 multisession workers 6409/6410/6411
+- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/change_derivatives_v1.log`
+- **Started**: 2026-05-15 16:33 CDT (Friday)
+- **Pre-flight clean**: 129,310 valid pixels ✓, 365/365 baseline posteriors ✓, all 13 years queued, output dirs empty
+- **Currently on**: year 2013 (253 DOYs), pre-warming workers
+- **Projected ETA**: ~53-72 hr (~3 days). Finishes Sunday night to Monday morning. Will cross ~3 midnight CIFS backup windows.
+- **Outputs landing**:
+  - `gam_models/change_derivatives/derivatives_YYYY.rds` × 13 (~5-10 GB each, written via saveRDS_validated)
+  - `gam_models/change_derivatives_posteriors/YYYY/doy_NNN_window_WW.rds` (~30-80 MB each, ~19,000 total, written via saveRDS_validated)
+  - `gam_models/change_derivatives_stats.rds` (final run-level statistics)
+- **Storage budget**: ~1.3 TB posteriors + ~50-130 GB summaries = ~1.5 TB total (77 TB free on /mnt)
+
+### Patches landed pre-launch (commit `b1d5e57`)
+
+Audit + r-reviewer pass before kicking off the multi-day run:
+
+1. **Shared helpers in `00_posterior_functions.R`**: moved `readRDS_retry` here from inline-in-04 so 04 + 06 share one definition. `saveRDS_validated` (added in `8b67463`) is also here.
+2. **`library(matrixStats)` + `rowQuantiles` in `calculate_stats`**: bit-equivalent to `apply(quantile)`, ~1.8x faster. Saves ~40 hr from the multi-day run since calculate_stats is the dominant compute cost (6 quantile calls per DOY-window × 4 windows × 365 × 13 years).
+3. **`load_posteriors` uses `readRDS_retry`**: defends against ~75,920 readRDS calls during the run hitting transient CIFS hiccups.
+4. **`process_year_doy` refactored to two-phase**: Phase 1 computes all 4 windows for a DOY into in-memory buffer; Phase 2 saves them via `saveRDS_validated`. Eliminates orphan-posterior risk.
+5. **Per-window writes use `saveRDS_validated`**: atomic .tmp+rename + read-back validation. Defends against silent midnight CIFS corruption (the failure mode that wrote 3 lzma-corrupt files in 03 v2/v3).
+6. **Year-summary writes also use `saveRDS_validated`** (r-reviewer CRITICAL — was the one remaining bare saveRDS).
+7. **Resume guards bumped**: per-window `0` → `50e6` (catches the 48 MB corruption class from 03 v2; empirical baseline min is 77 MB so 50 MB has 35% margin); year-summary `1e5` → `5e8` (500 MB; expected ~5-10 GB compressed).
+8. **Drop unnecessary `as.data.frame()` conversion** (r-reviewer HIGH 2): was creating a 3rd 21 GB copy of year_df during rbindlist; data.table inherits from data.frame. Cuts parent peak from ~63 GB to ~42 GB.
+
+### r-reviewer findings
+
+- 1 CRITICAL (year-summary bare saveRDS) — fixed
+- 2 HIGH (PER_WINDOW_MIN_BYTES too low; as.data.frame() peak) — fixed
+- 2 MEDIUM (validation cost commentary; resume scan size-only check) — accepted
+- 2 LOW (bare readRDS on small startup files; bare saveRDS on tiny stats_file) — left as inconsistencies
+
+### Why this run is the highest-stakes so far
+
+06 will make:
+- ~75,920 readRDS calls (16 reads per DOY × 365 DOYs × 13 years)
+- ~19,000 saveRDS calls (4 windows × 365 DOYs × 13 years)
+- Cross ~3 midnight CIFS backup windows
+
+Without `readRDS_retry` and `saveRDS_validated`, a single midnight event could lose hundreds to thousands of DOY-windows (the 04 v2 cascade pattern that wiped 281 of 365 DOYs in year 2025). Both helpers have now survived their first real midnight crossings (03 v5 yesterday).
 
 ## Final pipeline state — 13-year anomalies COMPLETE
 
