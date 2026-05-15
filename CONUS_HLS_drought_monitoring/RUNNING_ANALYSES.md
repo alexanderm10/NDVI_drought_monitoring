@@ -1,17 +1,78 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-14 ~07:30 CDT (04 v3 launched after CIFS hiccup wiped 2025 in v2)
+**Updated**: 2026-05-15 ~14:45 CDT (entire 13-year anomalies pipeline COMPLETE through 04 v4)
 
-## Active Background Process
+## No Active Background Process
 
-- **Script**: `04_calculate_anomalies.R` v3 (commit `e54eaa2` adds readRDS_retry)
-- **Container**: `conus-hls-drought-monitor` (128 GiB cap)
-- **Container PIDs**: R parent 4637, 3 multisession workers 4734/4735/4736
-- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/anomalies_v3.log`
-- **Started**: 2026-05-14 07:25:04 CDT
-- **Queue (this run)**: just 2015 and 2025 (the two years lost/incomplete in v2)
-- **Resume scan**: correctly identified 11 complete years (2013, 2014, 2016-2024); skipped them
-- **Projected ETA**: 2 years × ~55 min = ~110 min → finishes **~09:15 CDT today**
+Pipeline state on 2026-05-15: **02 (norms) + 03 (year predictions) + 04 (anomalies) all complete for all 13 years (2013-2025)**. Next step is script 06 (change derivatives).
+
+## Final pipeline state — 13-year anomalies COMPLETE
+
+- **modeled_ndvi/**: 13 × `modeled_ndvi_YYYY.rds`, ~14 GB total. 2013 = 755 MB (253 DOYs), 2014 = 1085 MB (362 DOYs), 2015 = 1.1 GB (362 DOYs after refit), 2016-2025 = 1.09 GB each (365 DOYs).
+- **year_predictions_posteriors/**: 13 year-dirs of per-DOY posteriors, total 4,748 files. Min 75.2 MB, max 83.2 MB, all ≥ 50 MB threshold.
+- **modeled_ndvi_anomalies/**: 13 × `anomalies_YYYY.rds`, ~15 GB total. 96.1-96.9% significant per year.
+- **All 3 corrupt files refit + present**: 2015/doy_205, 2025/doy_086, 2025/doy_322.
+
+### Cross-layer consistency
+
+For every year, `nrow(anomalies_YYYY.rds) == nrow(modeled_ndvi_YYYY.rds) == n_doys × 129,310`. Posterior file counts match modeled_ndvi DOY counts. Pipeline is internally consistent across all 3 layers.
+
+## Today's recovery (2026-05-14 → 2026-05-15)
+
+The 04 v3 audit on 2026-05-14 morning surfaced 3 lzma-corrupt year posterior files:
+- `2015/doy_205.rds` (76 MB, 03 v2 May 9 00:00)
+- `2025/doy_086.rds` (48 MB, 03 v3 May 13 00:01)
+- `2025/doy_322.rds` (4.2 MB, 03 v3 May 13 00:00)
+
+All three written within 1 minute of midnight CDT. saveRDS itself returned success; corruption only surfaced when downstream readRDS attempted to deserialize the lzma stream days later. The //ascend.egs.anl.gov mount has a midnight backup window (or similar disruption) that silently truncates writes in flight.
+
+### Patches landed
+
+1. **`saveRDS_validated()` helper in `00_posterior_functions.R`** (commit `8b67463`) — two-layer defense:
+   - Layer 1: write to `<file>.tmp`, validate, atomic `file.rename` (SMB2 SET_INFO is atomic). The final filename only ever contains a fully-written, validated payload.
+   - Layer 2: read-back validation via `readRDS` of the `.tmp` before rename. Catches lzma corruption, truncation, etc. Caveat: may be served from page cache (cache=strict) — layer 1 carries the load there.
+   - 3 retries with 5/30/90s backoff. `stopifnot` guard on `backoff_secs` length to prevent NA-poisoning Sys.sleep on misconfiguration.
+2. **CRITICAL fix**: 02's `process_single_doy` had no outer `tryCatch`. A `saveRDS_validated stop()` would have killed parallel + sequential fallback + entire script. Wrapped to match script 03's pattern.
+3. **Resume size guards bumped**: 02 line 379 + 03 lines 291, 476 from `> 0` to `>= 50e6` (50 MB). Catches the 4.2 MB and 48 MB legacy corrupt files automatically on resume. Verified legitimate posteriors are 75-83 MB so 50 MB is conservative (commit `9af53bf` covers the year-level scan that was missed in `8b67463`).
+4. **Per-DOY worker writes** in 02 line 450 + 03 line 422 now use `saveRDS_validated`.
+
+### r-reviewer pass
+
+Round 1: 1 CRITICAL + 1 HIGH + 2 MEDIUM. All addressed in `8b67463`.
+
+The HIGH (page-cache may fool readback) was structurally addressed by upgrading the helper to write-to-tmp + atomic rename (originally just validate-after-write). Even if the readback hits cache, the rename layer ensures the canonical filename never points to a partial file.
+
+### Refit recovery
+
+1. Deleted 3 corrupt year posteriors + 2 affected anomalies files
+2. Launched **03 v4 refit** — exited immediately with "All years already processed" because the resume scan reads `fitted_doys` from `modeled_ndvi_YYYY.rds$mean[!is.na(mean)]`. The corrupt DOYs were already absent from the summary files (their workers had errored mid-write back in 03 v2/v3), so `setdiff(fitted_doys, valid_post_doys) == 0` even after the deletes. **Resume-logic gap discovered**: it can only catch DOYs that ARE in the summary but missing from posteriors; DOYs missing from BOTH are invisible.
+3. Worked around by deleting `modeled_ndvi_2015.rds` + `modeled_ndvi_2025.rds` to force 03 to reprocess those years from scratch.
+4. **03 v5 refit** completed in **267.4 min**: per-DOY skip identified 4 DOYs to fit in 2015 (3 insufficient-data 15/16/17 + 1 deleted 205) and 2 DOYs to fit in 2025 (86, 322). Reloaded 361 + 363 existing posteriors. Wrote new modeled_ndvi summaries. Mean R² = 0.309, RMSE = 0.151.
+   - **All 3 refit posteriors landed at 77-78 MB** — back in normal range, deserialize cleanly.
+   - **0 stray `.tmp` files** — saveRDS_validated happy path worked, no failed-validation cleanup needed.
+   - The new write helper survived its first real run including a midnight crossing.
+5. **04 v4** completed in **107.6 min** (started 11:54 CDT, finished 14:41 CDT): resume scan correctly skipped 11 complete years; processed 2015 (362 DOYs) and 2025 (365 DOYs). Mean % significant: 96.5% across all years.
+
+### Triple-check audit of the 11 untouched years (2013, 2014, 2016-2024)
+
+Done 2026-05-15 morning before launching 03 v5, to confirm those years didn't have other lurking corruption:
+- **Layer 1 — modeled_ndvi summaries**: all present, 754-1095 MB, full DOY coverage (253/362/365×9), all 129,310 pixels, no NA holes inside fitted DOYs.
+- **Layer 2 — per-DOY posteriors (4,015 files across 11 years)**: min 75.2 MB, max 83.2 MB, **0 below 50 MB**.
+- **Layer 3 — anomaly outputs**: all present, 796-1150 MB, full DOY coverage matching modeled_ndvi, 96.1-96.9% significant.
+- **Bonus**: 04 v2/v3 had already done the strongest possible validation by successfully `readRDS`'ing every per-DOY posterior in those 11 years to compute the anomalies — no lzma errors anywhere.
+
+## Logs preserved
+
+- `year_predictions_v4_resumebug.log` — the false "all complete" exit
+- `year_predictions_v5_refit.log` — the actual refit (267 min)
+- `anomalies_v1_falsethreshold.log` — 1 GB write-guard false-trip on year 2013
+- `anomalies_v2_cifshiccup.log` — midnight CIFS hiccup wiped 281 of 365 DOYs in 2025
+- `anomalies_v3.log` — refit 2015 + 2025 with readRDS_retry; surfaced the 3 lzma-corrupt files via "failed after 3 attempts"
+- `anomalies_v4.log` — final clean run (107.6 min, 2 years)
+
+## Next step
+
+Script 06 (`06_calculate_change_derivatives.R`). Per project history (RUNNING_ANALYSES Apr 28 audit), 06 was rewritten to read year + baseline posteriors directly via `load_posteriors()` (which validates the `list(pixel_id, sims)` format). With the saveRDS_validated patch now in place upstream, 06 has the full benefit of validated writes.
 
 ## Script 04 v2 — CIFS hiccup at midnight (2026-05-13 23:50 → 2026-05-14 00:01)
 
