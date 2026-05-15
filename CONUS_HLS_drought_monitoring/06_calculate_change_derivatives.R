@@ -31,6 +31,10 @@ library(dplyr)
 library(future)
 library(future.apply)
 library(data.table)
+library(matrixStats)  # rowQuantiles — ~1.8x faster than apply(quantile, ...)
+                      # at 129K x 100; bit-equivalent to base R (type 7).
+                      # Saves ~40 hr from the multi-day 06 run since
+                      # calculate_stats is the dominant compute cost.
 
 # Each parallel task loads up to 4 posteriors of ~100 MB each plus produces
 # anomaly_sims of similar size — the default 500 MB future globals cap is
@@ -40,6 +44,12 @@ options(future.globals.maxSize = 2 * 1024^3)
 # Source utility functions
 source("00_setup_paths.R")
 hls_paths <- setup_hls_paths()
+# Shared readRDS_retry + saveRDS_validated helpers for CIFS hiccup defense.
+# 06 makes ~75,920 readRDS calls and ~19,000 saveRDS calls across a 1.5-2
+# day run that crosses ~2 midnight backup windows; without these helpers a
+# single transient outage can cascade-fail hundreds of DOY-windows (the
+# 04 v2 failure pattern that wiped 281 of 365 DOYs in year 2025).
+source("00_posterior_functions.R")
 
 # ==============================================================================
 # CONFIGURATION
@@ -111,7 +121,9 @@ load_posteriors <- function(year, doy, posteriors_dir, is_baseline = FALSE) {
 
   if (!file.exists(file_path)) return(NULL)
 
-  obj <- readRDS(file_path)
+  # readRDS_retry: 3x with 5/15/30s backoff. Defends against transient CIFS
+  # hiccups that wiped 281 of 365 DOYs in 04 v2 year 2025.
+  obj <- readRDS_retry(file_path)
 
   # Defensive: confirm the new format. Anything else means an old-format file
   # (df.sim with X/x/y) slipped through, which would silently bias the stats.
@@ -128,10 +140,15 @@ load_posteriors <- function(year, doy, posteriors_dir, is_baseline = FALSE) {
 #' Calculate summary statistics from posterior simulations
 #' @param sims Matrix with pixels as rows, simulations as columns
 calculate_stats <- function(sims) {
+  # rowQuantiles returns N x 2 matrix; both probs in one C call.
+  # Bit-equivalent to base R's apply(quantile, type=7) — verified against
+  # the 04 patch on 2026-05-13 (max abs diff = 0 across edge cases incl.
+  # all-equal, all-NA, Inf, mostly-NA rows).
+  qs <- rowQuantiles(sims, probs = c(0.025, 0.975), na.rm = TRUE)
   data.frame(
     mean = rowMeans(sims, na.rm = TRUE),
-    lwr = apply(sims, 1, quantile, 0.025, na.rm = TRUE),
-    upr = apply(sims, 1, quantile, 0.975, na.rm = TRUE)
+    lwr  = qs[, 1],
+    upr  = qs[, 2]
   )
 }
 
@@ -242,13 +259,26 @@ calculate_change_anomaly <- function(year, yday, window, valid_pixel_ids,
 }
 
 #' Process all windows for a specific year-DOY combination
+#'
+#' Two-phase design (refactored 2026-05-15 from interleaved compute+save):
+#'   Phase 1: compute anomaly for each window. Buffer the (summary, posterior)
+#'            pair in memory; do not write anything to disk yet.
+#'   Phase 2: only AFTER all windows for this DOY succeed, save all per-window
+#'            posteriors via saveRDS_validated and return the combined summary.
+#'
+#' Why two phases: previously, if window 1 saved its posterior successfully but
+#' window 2 errored, we'd be left with an orphan posterior on disk and an empty
+#' summary entry. The resume scan reads expected_keys from the summary, so the
+#' orphan would be invisible to resume but stale on disk. Two-phase ensures
+#' all-or-nothing per DOY: either all 4 posteriors land + summary records them,
+#' or nothing for that DOY is on disk.
 process_year_doy <- function(year, yday, window_sizes, valid_pixel_ids,
                                baseline_post_dir, year_post_dir, posteriors_output_dir) {
 
-  results_list <- list()
+  # PHASE 1 — compute all windows, buffer in memory
+  buffered <- list()  # window-keyed: list(summary, posteriors)
 
   for (window in window_sizes) {
-    # Calculate change anomaly
     result <- tryCatch({
       calculate_change_anomaly(year, yday, window, valid_pixel_ids,
                                 baseline_post_dir, year_post_dir)
@@ -258,37 +288,38 @@ process_year_doy <- function(year, yday, window_sizes, valid_pixel_ids,
       return(NULL)
     })
 
-    if (is.null(result)) {
-      next  # Skip if data missing or error
-    }
+    if (is.null(result)) next  # Skip windows with missing data or compute error
 
-    # Save posteriors immediately to avoid memory buildup
-    year_post_dir_out <- file.path(posteriors_output_dir, as.character(year))
-    if (!dir.exists(year_post_dir_out)) {
-      dir.create(year_post_dir_out, recursive = TRUE)
-    }
-
-    posterior_file <- file.path(year_post_dir_out,
-                                 sprintf("doy_%03d_window_%02d.rds", yday, window))
-    # Match the list(pixel_id, sims) format used by scripts 02 and 03 so any
-    # future consumer of these posteriors uses a single, consistent loader.
-    saveRDS(
-      list(pixel_id = valid_pixel_ids, sims = result$posteriors),
-      posterior_file, compress = "xz"
-    )
-
-    # Add metadata and store summary
-    result$summary$yday <- yday
+    result$summary$yday   <- yday
     result$summary$window <- window
-    results_list[[as.character(window)]] <- result$summary
+    buffered[[as.character(window)]] <- result
   }
 
-  # Combine all windows for this DOY
-  if (length(results_list) > 0) {
-    return(do.call(rbind, results_list))
-  } else {
-    return(NULL)
+  if (length(buffered) == 0L) return(NULL)
+
+  # PHASE 2 — save per-window posteriors (saveRDS_validated handles atomic
+  # .tmp+rename + read-back validation), then return the combined summary.
+  # If any save fails after retries, the saveRDS_validated stop() propagates
+  # and the outer worker tryCatch turns this DOY into a NULL — which is the
+  # right thing (resume scan picks it up later).
+  year_post_dir_out <- file.path(posteriors_output_dir, as.character(year))
+  if (!dir.exists(year_post_dir_out)) {
+    dir.create(year_post_dir_out, recursive = TRUE)
   }
+
+  for (window_key in names(buffered)) {
+    window <- as.integer(window_key)
+    post_file <- file.path(year_post_dir_out,
+                           sprintf("doy_%03d_window_%02d.rds", yday, window))
+    saveRDS_validated(
+      list(pixel_id = valid_pixel_ids,
+           sims     = buffered[[window_key]]$posteriors),
+      post_file, compress = "xz"
+    )
+  }
+
+  # Combine all window summaries for this DOY
+  do.call(rbind, lapply(buffered, function(b) b$summary))
 }
 
 # ==============================================================================
@@ -404,18 +435,37 @@ cat("\n")
 existing_years <- integer(0)
 incomplete_years <- list()
 
+#
+# Resume size guards (set 2026-05-15, refined per r-reviewer 2026-05-15
+# HIGH 1 after the empirical baseline-posterior min was 77 MB):
+#   PER_WINDOW_MIN_BYTES — per-DOY-window posterior is 129K x 100 doubles
+#     xz-compressed. Empirical: baseline posteriors min 77 MB, mean 79 MB,
+#     max 84 MB (verified across all 365 baseline files). 06's per-window
+#     posteriors have identical structure so the same range applies. 50 MB
+#     floor is 35% below the empirical minimum (no false-trip risk) and
+#     catches the 48 MB corruption class observed in 03 v2 on 2026-05-09.
+#     The original 20 MB choice missed the 48 MB and 76 MB corruption
+#     classes — saveRDS_validated catches them at WRITE time, but a
+#     legacy-corrupt file from before this patch could slip through resume.
+#   YEAR_SUMMARY_MIN_BYTES — per-year derivatives summary (~5-10 GB xz).
+PER_WINDOW_MIN_BYTES   <- 50e6   # 50 MB per per-DOY-window posterior
+YEAR_SUMMARY_MIN_BYTES <- 5e8    # 500 MB per per-year derivatives summary
+                                  #   (expected ~5-10 GB compressed)
+
 for (yr in years) {
   output_file <- file.path(config$output_dir, sprintf("derivatives_%d.rds", yr))
-  if (!file.exists(output_file) || file.info(output_file)$size < 1e5) next
+  if (!file.exists(output_file) ||
+      file.info(output_file)$size < YEAR_SUMMARY_MIN_BYTES) next
 
   year_post_dir_out <- file.path(config$posteriors_dir, as.character(yr))
-  derivative_summary <- readRDS(output_file)
+  derivative_summary <- readRDS_retry(output_file)
   expected_keys <- unique(derivative_summary[, c("yday", "window")])
   expected_files <- file.path(year_post_dir_out,
                               sprintf("doy_%03d_window_%02d.rds",
                                       expected_keys$yday, expected_keys$window))
   present_sizes <- file.info(expected_files)$size
-  missing_count <- sum(is.na(present_sizes) | present_sizes == 0)
+  missing_count <- sum(is.na(present_sizes) |
+                       present_sizes < PER_WINDOW_MIN_BYTES)
 
   if (missing_count == 0) {
     existing_years <- c(existing_years, yr)
@@ -539,10 +589,14 @@ for (yr in years) {
 
   cat("  Combining results into data frame...\n")
 
-  # Use data.table for memory-efficient binding
+  # Use data.table for memory-efficient binding. Skip the as.data.frame()
+  # conversion: data.table inherits from data.frame, so all downstream ops
+  # (nrow, $col, saveRDS, mean) work identically. Dropping the conversion
+  # avoids a ~21 GB peak third copy at this site (r-reviewer 2026-05-15
+  # HIGH 2). Parent peak is now ~42 GB instead of ~63 GB, restoring headroom
+  # below the 128 GiB cap.
   year_df <- tryCatch({
     df <- data.table::rbindlist(valid_results)
-    df <- as.data.frame(df)  # Convert back to data.frame
     df$year <- yr
     cat(sprintf("  Combined: %s rows, %d columns\n",
                 format(nrow(df), big.mark = ","), ncol(df)))
@@ -565,17 +619,27 @@ for (yr in years) {
   n_significant <- sum(year_df$significant, na.rm = TRUE)
   pct_significant <- 100 * n_significant / n_complete
 
-  # Save year results
+  # Save year results via saveRDS_validated (atomic .tmp+rename + read-back).
+  # The year-summary write was the one remaining bare saveRDS call after the
+  # 2026-05-15 patch round (r-reviewer CRITICAL). With ~5-10 GB of xz output
+  # and 13 writes per run, the per-write exposure to the midnight CIFS window
+  # is small but non-zero, and a silent partial write here corrupts an entire
+  # year's worth of derivatives downstream.
   output_file <- file.path(config$output_dir, sprintf("derivatives_%d.rds", yr))
   cat(sprintf("  Saving to: %s\n", output_file))
-  saveRDS(year_df, output_file, compress = "xz")
+  saveRDS_validated(year_df, output_file, compress = "xz")
 
-  # Verify the write — guards against NFS/CIFS hiccups producing a truncated
-  # file that the resume-mode check would later treat as complete.
-  written_size_mb <- file.info(output_file)$size / 1024^2
-  if (is.na(written_size_mb) || written_size_mb < 0.1) {
-    stop(sprintf("Year file write failed or suspiciously small (%.2f MB): %s",
-                 written_size_mb, output_file))
+  # Belt-and-suspenders size check (saveRDS_validated already round-trip-read
+  # the file before atomic rename, so a corrupt write would have failed there).
+  # Kept because a writes-too-small case (e.g. valid_results unexpectedly
+  # tiny) wouldn't trigger saveRDS_validated's content check.
+  written_size <- file.info(output_file)$size
+  written_size_mb <- written_size / 1024^2
+  if (is.na(written_size) || written_size < YEAR_SUMMARY_MIN_BYTES) {
+    stop(sprintf(
+      "Year file unexpectedly small (%.0f MB, expected ~5000+): %s",
+      written_size_mb, output_file
+    ))
   }
   cat(sprintf("  Wrote %.1f MB\n", written_size_mb))
 

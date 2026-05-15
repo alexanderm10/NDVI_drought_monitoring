@@ -183,6 +183,42 @@ post.distns <- function(model.gam, newdata, vars, n=100, terms=F, lwr=0.025, upr
 # and stop() loudly so the failure surfaces in the run log.
 # ==============================================================================
 
+# ==============================================================================
+# readRDS_retry — defend against transient CIFS read errors
+#
+# Symmetric to saveRDS_validated but addresses the read side. 04 v2 (2026-05-13)
+# hit a transient CIFS hiccup at ~midnight CDT that took out 281 of 365 DOYs in
+# year 2025: all 3 workers succeeded for their first ~28 DOYs, then failed
+# simultaneously with "cannot open the connection" / "error reading from
+# connection" from readRDS. This helper retries the read with backoff so a
+# typical 10-60s CIFS hiccup doesn't lose work.
+#
+# Defaults: 3 attempts, 5s/15s/30s backoff. Worst-case extra wait per failed
+# read: 50s. Catches all readRDS errors (we don't enumerate "transient"
+# subclasses — anything that fails twice + waits ~50s is unlikely to recover
+# on a 4th try regardless).
+#
+# Originally lived inline in 04_calculate_anomalies.R; moved here 2026-05-15
+# so 04 and 06 share a single definition. See header of saveRDS_validated for
+# the corresponding write-side defense.
+# ==============================================================================
+
+readRDS_retry <- function(path, max_attempts = 3L,
+                          backoff_secs = c(5, 15, 30)) {
+  stopifnot(length(backoff_secs) >= max_attempts - 1L)
+  last_err <- NULL
+  for (attempt in seq_len(max_attempts)) {
+    result <- tryCatch(readRDS(path), error = function(e) e)
+    if (!inherits(result, "error")) return(result)
+    last_err <- result
+    if (attempt < max_attempts) {
+      Sys.sleep(backoff_secs[attempt])
+    }
+  }
+  stop(sprintf("readRDS(%s) failed after %d attempts. Last error: %s",
+               path, max_attempts, conditionMessage(last_err)))
+}
+
 saveRDS_validated <- function(object, file, compress = "xz",
                               max_attempts = 3L,
                               backoff_secs = c(5, 30, 90)) {
