@@ -72,12 +72,17 @@ config <- list(
   # Posterior simulation count (must match scripts 02/03)
   n_posterior_sims = 100,
 
-  # Parallelization. 3 workers via future_lapply (multisession), with
+  # Parallelization. 5 workers via future_lapply (multisession), with
   # plan/sequential/gc recycling per year — the stable pattern from MEMORY.md
   # used by 01_aggregate_to_4km_parallel.R and 03_doy_looped_year_predictions.R.
-  # Each worker holds at most ~800 MB at peak (4 posteriors + anomaly_sims)
-  # plus shipped globals. Budget: ~3 × 1 GB worker memory, well under 96 GB.
-  n_cores = 3
+  # Bumped from 3 to 5 on 2026-05-18 (06 v2 launch). Empirical worker residency
+  # in 06 v1 was 3.3-4.1 GB (not the 800 MB initial estimate; xz buffers +
+  # full posterior matrices). 5 × ~5 GB = 25 GB worker + ~42 GB parent peak
+  # = ~67 GB. Container cap is 128 GiB so ~60 GB headroom. CPU: host has 48
+  # cores; 5 workers × ~95% = 5 cores active. Stays conservative on CIFS
+  # contention vs 6 workers (6 was the next step but bumps simultaneous
+  # saveRDS_validated writes during midnight backup windows).
+  n_cores = 5
 )
 
 # ==============================================================================
@@ -283,8 +288,13 @@ process_year_doy <- function(year, yday, window_sizes, valid_pixel_ids,
       calculate_change_anomaly(year, yday, window, valid_pixel_ids,
                                 baseline_post_dir, year_post_dir)
     }, error = function(e) {
-      warning(sprintf("Error in year %d, DOY %d, window %d: %s",
-                      year, yday, window, e$message))
+      # cat (not warning): multisession workers' warnings are collected into a
+      # condition list that is not ferried to the parent log. cat() goes to the
+      # captured stdout that future relays on resolution. The 06 v1 silent
+      # cascade losses (88 DOYs in 2013, 69 in 2015) were Phase 1 read failures
+      # caught here and emitted as warning() — invisible in the run log.
+      cat(sprintf("ERROR in year %d, DOY %d, window %d (phase 1): %s\n",
+                  year, yday, window, e$message))
       return(NULL)
     })
 

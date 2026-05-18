@@ -232,10 +232,25 @@ saveRDS_validated <- function(object, file, compress = "xz",
   last_err <- NULL
 
   for (attempt in seq_len(max_attempts)) {
-    # Layer (1): write to .tmp, never directly to the final filename.
-    saveRDS(object, tmp_file, compress = compress)
+    # Layer (1a): write to .tmp, never directly to the final filename.
+    # Wrap saveRDS itself in tryCatch — a transient CIFS hiccup commonly
+    # surfaces here as "fwrite error" or "cannot open the connection" from
+    # the C-level connection write. Without this wrapper the error bypasses
+    # the retry loop entirely (the 06 v1 cascade pattern: 1 visible error
+    # + 20-35 silent DOY losses, observed in years 2013/2015/2016).
+    write_err <- tryCatch({
+      saveRDS(object, tmp_file, compress = compress)
+      NULL
+    }, error = function(e) e)
 
-    # Layer (2): read-back validation before promoting via rename.
+    if (inherits(write_err, "error")) {
+      last_err <- write_err
+      suppressWarnings(file.remove(tmp_file))
+      if (attempt < max_attempts) Sys.sleep(backoff_secs[attempt])
+      next
+    }
+
+    # Layer (1b): read-back validation before promoting via rename.
     # Any error (corrupt lzma, truncated stream, transient CIFS read failure,
     # etc.) → treat as a failed write, clean up, and retry.
     test <- tryCatch(readRDS(tmp_file), error = function(e) e)
@@ -264,7 +279,7 @@ saveRDS_validated <- function(object, file, compress = "xz",
   }
 
   stop(sprintf(
-    "saveRDS_validated(%s) failed after %d attempts. Last validation error: %s",
+    "saveRDS_validated(%s) failed after %d attempts. Last error: %s",
     file, max_attempts, conditionMessage(last_err)
   ))
 }
