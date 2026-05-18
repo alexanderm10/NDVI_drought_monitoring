@@ -1,22 +1,35 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-15 ~16:35 CDT (06 v1 launched for weekend run after audit + r-reviewer pass)
+**Updated**: 2026-05-18 ~08:55 CDT (06 v1 stopped after Monday morning audit; v2 launched with retry + visibility patches + 5 workers)
 
 ## Active Background Process
 
-- **Script**: `06_calculate_change_derivatives.R` v1 (commit `b1d5e57`)
+- **Script**: `06_calculate_change_derivatives.R` v2 (commit `511797b`)
 - **Container**: `conus-hls-drought-monitor` (128 GiB cap)
-- **Container PIDs**: R parent 6312, 3 multisession workers 6409/6410/6411
-- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/change_derivatives_v1.log`
-- **Started**: 2026-05-15 16:33 CDT (Friday)
-- **Pre-flight clean**: 129,310 valid pixels ✓, 365/365 baseline posteriors ✓, all 13 years queued, output dirs empty
-- **Currently on**: year 2013 (253 DOYs), pre-warming workers
-- **Projected ETA**: ~53-72 hr (~3 days). Finishes Sunday night to Monday morning. Will cross ~3 midnight CIFS backup windows.
-- **Outputs landing**:
-  - `gam_models/change_derivatives/derivatives_YYYY.rds` × 13 (~5-10 GB each, written via saveRDS_validated)
-  - `gam_models/change_derivatives_posteriors/YYYY/doy_NNN_window_WW.rds` (~30-80 MB each, ~19,000 total, written via saveRDS_validated)
-  - `gam_models/change_derivatives_stats.rds` (final run-level statistics)
-- **Storage budget**: ~1.3 TB posteriors + ~50-130 GB summaries = ~1.5 TB total (77 TB free on /mnt)
+- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/change_derivatives_v2.log`
+- **Started**: 2026-05-18 ~08:55 CDT (Monday)
+- **Resume scan picks up**: 2017–2025 (9 years). 2014 + 2016 + 2013 + 2015 marked "complete" by resume scan because their summaries only reference DOYs that actually wrote — backfill of the v1 silent-loss gaps (88 in 2013, 69 in 2015, 2 in 2016) is a separate targeted run after v2 finishes.
+- **Projected ETA**: ~36–60 hr (~2 days) at 5 workers. Crosses ~2 midnight CIFS backup windows.
+- **Outputs landing**: as in v1.
+
+### Why v2 — two cascade-loss bugs found in v1
+
+The Monday morning audit traced an unexpectedly bad v1 pattern: 1 visible `fwrite error` or `cannot open the connection` was always followed by 20–35 silent DOY losses in the same year. Two bugs combined:
+
+1. **`saveRDS_validated`'s write was outside the retry loop.** The retry only wrapped the readback validation; an actual write-side CIFS hiccup propagated straight past the retry, no backoff applied. **Fix**: wrap `saveRDS()` in tryCatch inside the for-loop, treat write errors the same as validation errors (cleanup .tmp, sleep, retry).
+2. **Phase 1 (calculate_change_anomaly) errors were emitted as `warning()` instead of `cat()`.** Multisession workers' warnings collect into a condition list that does NOT get ferried to the parent stdout that the log captures; `cat()` does get ferried. So when the same CIFS hiccup that broke a write also broke the next 20-30 workers' reads (via `load_posteriors` → `readRDS_retry` exhausted), those losses produced warnings that vanished, then `process_year_doy` returned NULL without error, and the script's outer cat()/ERROR path never fired. **Fix**: replace `warning()` with `cat()` so phase-1 errors land in the log.
+
+Also bumped `n_cores` 3 → 5: empirical worker residency in v1 was 3.3–4.1 GB (not the 800 MB initial estimate). 5 × ~5 GB + ~42 GB parent peak = ~67 GB of the 128 GiB cap. Held to 5 (not 6+) to limit simultaneous CIFS write contention during midnight windows.
+
+### v1 outcomes (carryover state)
+
+| Year | DOYs avail | Valid | Posteriors | Year .rds | Status |
+|------|-----------|-------|------------|-----------|--------|
+| 2013 | 253 | 163 (–88) | 616 | 4.5 GB | Resume scan sees as complete (needs backfill) |
+| 2014 | 362 | 362 ✓ | 1436 | 11 GB | CLEAN |
+| 2015 | 362 | 293 (–69) | 1151 | 8.4 GB | Resume scan sees as complete (needs backfill) |
+| 2016 | 365 | 363 (–2) | 1456 | 11 GB | Resume scan sees as complete (needs backfill) |
+| 2017 | 365 | ~350 partial | 349 partials | none | Will be reprocessed from scratch by v2 |
 
 ### Patches landed pre-launch (commit `b1d5e57`)
 
