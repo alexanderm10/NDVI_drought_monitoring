@@ -1,16 +1,39 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-18 ~08:55 CDT (06 v1 stopped after Monday morning audit; v2 launched with retry + visibility patches + 5 workers)
+**Updated**: 2026-05-26 ~08:00 CDT (06 v2 COMPLETE Sat 2026-05-23 05:02; no active processes; 06b backfill queued)
 
-## Active Background Process
+## No Active Processes
 
-- **Script**: `06_calculate_change_derivatives.R` v2 (commit `511797b`)
-- **Container**: `conus-hls-drought-monitor` (128 GiB cap)
-- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/change_derivatives_v2.log`
-- **Started**: 2026-05-18 ~08:55 CDT (Monday)
-- **Resume scan picks up**: 2017–2025 (9 years). 2014 + 2016 + 2013 + 2015 marked "complete" by resume scan because their summaries only reference DOYs that actually wrote — backfill of the v1 silent-loss gaps (88 in 2013, 69 in 2015, 2 in 2016) is a separate targeted run after v2 finishes.
-- **Projected ETA**: ~36–60 hr (~2 days) at 5 workers. Crosses ~2 midnight CIFS backup windows.
-- **Outputs landing**: as in v1.
+Container `conus-hls-drought-monitor` is up but idle. Next runnable item is `06b_backfill_change_derivatives.R` (draft committed in `d8c4f5f`, never run — targets the v1 cascade-loss DOYs in 2013/2015/2016).
+
+## Session Summary (2026-05-26)
+
+### 06 v2 outcome
+- **Completed**: Sat 2026-05-23 05:02 CDT
+- **Total wall time**: 6919.8 min = 115.3 hr = 4.8 days (beat the ~36–60 hr launch estimate by ~2x — actual per-year was ~12.5 hr, not 4–7 hr; original estimate didn't account for matrixStats compute still dominating at 5 workers)
+- **Years processed**: 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025
+- **DOY completeness**: every year 365/365 valid. v1 cascade pattern (1 visible error → 20-35 silent losses) did NOT recur. The two `511797b` fixes (wrap-the-save retry + `cat()`-not-`warning()`) held end-to-end across ~75,920 readRDS and ~19,000 saveRDS calls.
+- **Mean significant results**: 92.9% (range 92.0–93.6 across the 9 years; very stable)
+- **Pace per year** (min): 762.7, 749.8, 764.1, 765.1, **832.2** (2021 outlier, +9%, not investigated), 761.1, 758.6, 762.0, 763.0
+- **Worker pattern**: 5 future workers, RSS 2.0 → 5.8 GB within a year (expected growth), reset cleanly at every year-boundary recycle. Zero `FutureInterruptError` events.
+
+### Warnings audit gap
+The log ends with `There were 29 warnings (use warnings() to see them)` but the warnings themselves are lost — the script exits without calling `print(warnings())` to flush them. Clean DOY counts suggest they were benign, but unverifiable. **One-line fix queued**: add `if (length(warnings()) > 0) print(warnings())` at the end of script 06 (and 02/03/04) next time any of them is edited. See [[feedback-print-warnings-at-end]] in memory.
+
+### Carryover state for next session
+- **2013/2015/2016 are still v1 outputs** (mtimes May 16-18, smaller files): 4.5 GB / 8.4 GB / 11 GB vs ~10.8 GB for the v2 years. The 159 missing DOYs (88+69+2) need 06b backfill before Phase 6 work is valid for the full 13-year span.
+- **`change_derivatives_stats.rds`** only covers 2017-2025. 06b will need to rebuild this for all 13 years.
+- **06b draft** already had a 1-round r-reviewer pass (CRITICAL + 2 HIGH applied: atomic backup before heavy load, (yday,window)-grain overlap check, tmp+rename + size validation on restart). Slated for launch this week.
+
+### Next session priorities
+1. Read `06b_backfill_change_derivatives.R`, sanity-check, dry-run DOY-diff phase
+2. Launch 06b (~2-3 hr expected for 159 DOYs at v2's rate)
+3. Verify 3 target years' window-file inventories match year summaries
+4. Rebuild `change_derivatives_stats.rds` for full 13 years
+5. Start Phase 6 (visualization / drought classification — script 07+, not yet written)
+6. When editing any of 02/03/04/06: add the `print(warnings())` line
+
+## Prior Active Process (now complete) — 06 v2 launch context
 
 ### Why v2 — two cascade-loss bugs found in v1
 
