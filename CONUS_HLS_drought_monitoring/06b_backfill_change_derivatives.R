@@ -1,12 +1,17 @@
 # ==============================================================================
 # 06b_backfill_change_derivatives.R
 #
-# Purpose: Backfill the 159 DOYs that were silently lost in 06 v1 cascades
-#          for years 2013 (88 missing), 2015 (69 missing), 2016 (2 missing).
-#          See RUNNING_ANALYSES.md "Why v2" section for the v1 failure
-#          mechanism. v2's resume scan marks these years "complete" because
-#          their summaries only reference the DOYs that actually wrote, so
-#          the gaps need a targeted patch.
+# Purpose: Backfill the ~202 DOYs that were lost or left partial in 06 v1
+#          cascades for years 2013 (117 missing), 2015 (83 missing), 2016
+#          (2 missing). See RUNNING_ANALYSES.md "Why v2" section for the v1
+#          failure mechanism.
+#
+#          The original 159 estimate (88 + 69 + 2) counted summary-DOY
+#          presence as "complete." A 2026-05-26 dry-run with the stricter
+#          "all 4 windows >= 50 MB on disk" rule found 43 additional
+#          partial-state DOYs (29 in 2013, 13 in 2015, 2 in 2016) where v1
+#          wrote 1-3 window summary rows alongside 1-3 partial window files
+#          before crashing. Those need to be redone too.
 #
 # Approach:
 #   1. For each target year, list per-window posteriors in
@@ -14,10 +19,13 @@
 #      windows (i.e. not complete), and target those.
 #   2. For each missing DOY, run the same calculate_change_anomaly +
 #      saveRDS_validated 4-window write as script 06.
-#   3. Load the existing derivatives_YYYY.rds, schema- and key-check the
-#      new rows, rbind, re-save via saveRDS_validated. Backup the original
-#      to derivatives_YYYY.rds.v1-pre-backfill.bak so the pre-backfill
-#      year_df is recoverable.
+#   3. Load the existing derivatives_YYYY.rds, drop any partial v1 rows
+#      for DOYs being backfilled (this is the merge fix for the partial-
+#      DOY case discovered 2026-05-26 — see the merge block below for the
+#      bit-equivalence justification), schema- and key-check the remaining
+#      rows, rbind the new rows, re-save via saveRDS_validated. Backup
+#      the original to derivatives_YYYY.rds.v1-pre-backfill.bak so the
+#      pre-backfill year_df is recoverable.
 #
 # Coordination with 06 v2:
 #   - v2 (commit 511797b) processes years 2017-2025; this script processes
@@ -486,11 +494,39 @@ for (yr in config$target_years) {
     ))
   }
 
-  # Key defense at the (yday, window) grain (r-reviewer 2026-05-18 HIGH 1).
-  # Per-row paste0 across ~143 M rows of `existing` allocates ~5 GB of
-  # transient character strings; unique pairs are ~1500 integers and the
-  # check is effectively free. Either v1's resume scan was wrong, or our
-  # diff missed a partially-written DOY — halt rather than silently dup.
+  # Pre-clean: drop any existing rows whose DOY is being backfilled.
+  # ----------------------------------------------------------------------
+  # Context (discovered 2026-05-26 dry-run): v1 wrote partial-DOY summary
+  # entries — DOYs with 1-3 window rows in the summary, matching the 1-3
+  # window posteriors that landed on disk before the Phase 2 crash. The
+  # diff phase rightly classifies these DOYs as missing (their disk
+  # inventory is < 4 valid windows), so we recompute all 4 windows. The
+  # recomputed rows are bit-identical to what v1 would have produced:
+  # calculate_change_anomaly does deterministic matrix arithmetic on
+  # frozen posterior inputs from scripts 02/03 (no RNG), and
+  # matrixStats::rowQuantiles was verified bit-equivalent to v1's
+  # apply(quantile, type=7) on 2026-05-13 (max abs diff = 0 across
+  # all-equal, all-NA, Inf, mostly-NA rows). Replacing partial v1 rows
+  # with full recomputed rows is therefore a no-op for the (yday, window)
+  # keys v1 already had — and fills in the missing keys.
+  # Counts from the 2026-05-26 dry-run: 27 such DOYs in 2013, 12 in 2015,
+  # 0 in 2016 (39 total). Without this drop, 06b's overlap check halts
+  # on every one.
+  backfill_doys <- unique(new_rows$yday)
+  n_before <- nrow(existing)
+  existing <- existing[!(yday %in% backfill_doys)]
+  n_dropped <- n_before - nrow(existing)
+  if (n_dropped > 0) {
+    cat(sprintf("  Dropped %s partial v1 rows for %d DOY(s) being backfilled\n",
+                format(n_dropped, big.mark = ","), length(backfill_doys)))
+  }
+
+  # Defensive overlap check (r-reviewer 2026-05-18 HIGH 1). After the
+  # pre-clean above this should always be empty: partial rows for
+  # backfill DOYs are gone, and complete-DOY rows for non-backfill DOYs
+  # can't overlap because the diff classified those DOYs as complete.
+  # If this fires, either the diff misclassified a complete-DOY as
+  # missing, or the drop logic above missed a row. Halt rather than dup.
   # data.table .() syntax (not c(...)) is required: existing[, c("a","b")]
   # returns the character vector, not a subsetted table.
   existing_pairs <- unique(existing[, .(yday, window)])
@@ -499,15 +535,15 @@ for (yr in config$target_years) {
                           by = c("yday", "window"))
   if (nrow(overlap_pairs) > 0) {
     stop(sprintf(
-      "Overlap on (yday, window) in year %d: %d pair(s). First 5: %s. ",
+      "Overlap on (yday, window) in year %d after backfill-DOY pre-clean: %d pair(s). First 5: %s. ",
       yr, nrow(overlap_pairs),
       paste(sprintf("(%d,%d)",
                     head(overlap_pairs$yday, 5),
                     head(overlap_pairs$window, 5)),
             collapse = ", ")
     ),
-    "This indicates the diff under-counted complete DOYs OR v1 wrote ",
-    "partial DOYs that the resume scan missed. Investigate before merge.")
+    "This is a bug — either the diff classified a complete-DOY as missing, ",
+    "or the drop logic missed a row. Investigate before merge.")
   }
   rm(existing_pairs, new_pairs, overlap_pairs)
 
@@ -634,6 +670,7 @@ for (yr in config$target_years) {
 
 if (any_inconsistent) {
   cat("\nIntegrity audit FAILED for at least one year. See messages above.\n")
+  if (length(warnings()) > 0) print(warnings())
   quit(save = "no", status = 1)
 } else {
   cat("\nIntegrity audit PASSED.\n")
@@ -641,3 +678,8 @@ if (any_inconsistent) {
 
 cat("\nNext: re-audit by running 04 (if downstream anomalies need refresh) or\n")
 cat("inspect derivatives_YYYY.rds for the previously missing DOYs.\n")
+
+# Flush any accumulated warnings so they're visible in the run log.
+# Without this, a quiet exit discards them silently. See MEMORY.md
+# feedback_print_warnings_at_end for the 06 v2 incident that lost 29.
+if (length(warnings()) > 0) print(warnings())
