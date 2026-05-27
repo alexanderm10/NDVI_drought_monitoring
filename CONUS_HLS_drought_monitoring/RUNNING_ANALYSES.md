@@ -1,42 +1,57 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-27 ~09:30 CDT (06b tri-year backfill done; derivatives_2016.rds CIFS post-rename corruption recovered; 2016-only recovery re-run IN FLIGHT)
+**Updated**: 2026-05-27 ~14:00 CDT (06b tri-year backfill + 2016 corruption recovery COMPLETE; 06c stats rebuild done; change_derivatives now covers all 13 years 2013-2025)
 
-## Active Process — 06b 2016-only recovery run
+## No active processes
 
-Following a 2026-05-27 post-rename CIFS corruption that ate the 2016 year summary written by the first 06b pass, the file was restored from `.bak`, the 8 affected window files for DOYs 102/345 were deleted to force diff re-detection, and `06b_backfill_change_derivatives.R 2016` was relaunched via the new CLI year-override path.
-
-- **Log**: `/mnt/malexander/datasets/ndvi_monitor/gam_models/change_derivatives_06b_2016_recovery.log`
-- **Diff at launch**: 2 missing DOYs (102, 345); 363/365 complete
-- **Expected runtime**: ~30-40 min (2 DOYs × 4 windows compute + full year-summary merge & write)
-- **Persistent monitor**: armed on the log for milestone lines (DOY done, save complete) plus any reappearance of "Host is down" / "post-rename readback" diagnostics
-
-## Session Summary (2026-05-27) — 06b first pass + corruption recovery
+## Session Summary (2026-05-27) — 06b first pass + 2016 recovery + stats rebuild
 
 ### What ran
 - **First 06b pass** completed Wed 2026-05-27 ~02:30 CDT, all three years (2013/2015/2016) targeted. Per-DOY compute worked end-to-end; the script's drop-partial-rows merge patch resolved 39 overlap-halt cases without surprise.
-- **derivatives_2016.rds corruption** discovered during post-run integrity audit: file readable up to ~95% then `cannot open compressed file ... probable reason 'Host is down'`. saveRDS_validated's pre-rename readback had passed during the run, so the corruption happened AFTER `file.rename` returned success — server-side CIFS write completion lost buffered bytes during the next backup window. **Recovery**: quarantined corrupt file as `.post-rename-corruption-evidence-2026-05-27`, restored from `.v1-pre-backfill.bak`, deleted the 8 window files for DOYs 102/345 so the diff would re-flag them.
+- **derivatives_2016.rds corruption** discovered during post-run integrity audit: file readable up to ~95% then `cannot open compressed file ... probable reason 'Host is down'`. saveRDS_validated's pre-rename readback had passed during the run, so the corruption happened AFTER `file.rename` returned success — server-side CIFS write completion lost buffered bytes during the next backup window. **Recovery**: quarantined corrupt file as `.post-rename-corruption-evidence-2026-05-27`, restored from `.v1-pre-backfill.bak` (md5-confirmed bit-identical), deleted the 8 affected window files for DOYs 102/345 so the diff would re-flag them.
+- **06b 2016-only re-run** (`Rscript 06b_backfill_change_derivatives.R 2016`): launched 08:52 CDT, completed 12:13 CDT in **200.9 min**. 2 DOYs (102, 345) recomputed, merged into restored .bak summary → 188,792,600 rows (= 365 DOYs × 4 windows × 129,310 pixels — full coverage). **Layer 1c post-rename readback passed silently** (the corruption mode would now have surfaced as a loud error). **Integrity audit PASSED** (365/365 DOYs in summary match window file inventory).
+- **06c stats rebuild** via NEW script [06c_rebuild_change_derivatives_stats.R](06c_rebuild_change_derivatives_stats.R): recomputed rows for 2013/2014/2015/2016 from on-disk derivatives_YYYY.rds (4 sequential reads, no parallel — load + sum is single-pass). 67.0 min wall time. Merged with existing 2017-2025 rows → 13-year stats_df, saved via saveRDS_validated.
 
 ### Patches landed today (commit `e3c8af1`)
 1. **`saveRDS_validated` Layer 1c post-rename readback** (00_posterior_functions.R) — size-gated at 500 MB by default so year-summary writes are verified but per-window (~80 MB) writes don't pay xz-decompression overhead. On failure, leaves the corrupt file in place and retries the full save via a new .tmp + rename cycle. If all attempts fail, errors loudly with "post-rename readback failed after rename succeeded" so the source of corruption is unambiguous.
 2. **06b CLI year-override** (06b_backfill_change_derivatives.R) — `Rscript 06b... 2016` now restricts target_years to just 2016, letting single-year recovery avoid the ~3 hr full tri-year merge I/O.
 
-### Carryover from first 06b pass — partial DOYs in 2013/2015 NOT re-attempted
-After 06b's first pass:
-- **2013**: 30 still-missing DOYs (out of original 117)
-- **2015**: 12 still-missing DOYs (out of original 83)
-- **2016**: 2 still-missing DOYs (102, 345) — being recovered now via the active run above
+### Final stats — `change_derivatives_stats.rds` (13 rows, 2013-2025)
+
+| year | n_results   | n_significant | pct_significant | mean_anomaly  | elapsed_mins |
+|------|-------------|---------------|-----------------|---------------|--------------|
+| 2013 | 123,878,980 | 111,308,480   | 89.85%          | -2.219e-03    | NA (06b)     |
+| 2014 | 185,689,160 | 169,021,072   | 91.02%          |  1.703e-03    | NA (v1)      |
+| 2015 | 185,689,160 | 168,272,004   | 90.62%          | -2.417e-03    | NA (06b)     |
+| 2016 | 188,792,600 | 172,332,219   | 91.28%          | -6.800e-05    | NA (06b)     |
+| 2017 | 188,792,600 | 173,703,576   | 92.01%          |  1.666e-04    | 762.7        |
+| 2018 | 188,663,290 | 175,442,770   | 92.99%          |  8.286e-04    | 749.8        |
+| 2019 | 188,792,600 | 175,341,602   | 92.88%          | -2.051e-03    | 764.1        |
+| 2020 | 188,792,600 | 174,560,761   | 92.46%          |  1.908e-03    | 765.1        |
+| 2021 | 188,792,600 | 174,802,540   | 92.59%          | -3.781e-04    | 832.2        |
+| 2022 | 188,792,600 | 176,065,576   | 93.26%          | -2.862e-03    | 761.1        |
+| 2023 | 188,663,290 | 175,647,234   | 93.10%          |  3.397e-03    | 758.6        |
+| 2024 | 188,792,600 | 175,777,785   | 93.11%          | -1.368e-03    | 762.0        |
+| 2025 | 188,792,600 | 176,637,530   | 93.56%          | -1.057e-03    | 763.0        |
+
+- **Mean significant across 13 years: 92.21%** (v2-only mean was 92.93%; 2013-2016 sit in the 89.9–91.3% range, pulling the overall mean down by ~0.7 pp).
+- `elapsed_mins` is NA for the four years rebuilt via 06c (no single timed run — composite of v1 + 06b). The 2017-2025 elapsed values come from the 06 v2 run.
+
+### Carryover state — partial DOYs in 2013/2014/2015 NOT re-attempted
+- **2013**: 30 still-missing DOYs (out of original 117). Summary row count → 239.4 DOY-equivalents (some DOYs in-summary have <4 windows).
+- **2014**: NOT a 06b target. Summary row count → 358.9 DOY-equivalents. **NEW SURPRISE**: 2014 likely has its own v1 silent losses that were never audited. Pre-Phase-6 task: run the 06b diff against 2014 to enumerate the gap before deciding whether to backfill.
+- **2015**: 12 still-missing DOYs (out of original 83). Summary row count → 358.9 DOY-equivalents.
+- **2016**: 0 still-missing DOYs (recovered 2026-05-27). Summary row count → 365.0 DOY-equivalents (clean).
 
 The 2013/2015 residuals are upstream year-prediction posterior gaps for lagged DOYs (process_year_doy succeeded for some windows of a DOY, returned silent NULL for others because their lag-DOY year-prediction posterior is missing). Decision: NOT re-process those — root cause is upstream data, not 06's compute. Phase 6 work can proceed with these gaps documented.
 
 ### Open question for Phase 6
-The 30/12 partial-window DOYs in 2013/2015 affect derived stats but only on the affected DOYs; the year summaries are otherwise correct. Phase 6 should either (a) treat those DOYs as missing in visualizations, or (b) backfill via a script 03/04 re-run for the specific lag DOYs. (b) is much heavier; defer the call until Phase 6 starts.
+The 30/12 partial-window DOYs in 2013/2015 (and any uncounted 2014 gaps) affect derived stats but only on the affected DOYs; the year summaries are otherwise correct. Phase 6 should either (a) treat those DOYs as missing in visualizations, or (b) backfill via a script 03/04 re-run for the specific lag DOYs. (b) is much heavier; defer the call until Phase 6 starts.
 
 ### Next session priorities
-1. Confirm 2016-only recovery run finishes clean (Layer 1c readback should now catch any reappearance of the corruption mode)
-2. Rebuild `change_derivatives_stats.rds` for full 13 years (covers 2013-2025)
-3. Start Phase 6 (visualization / drought classification — script 07+, not yet written)
-4. When editing any of 02/03/04/06: add the `print(warnings())` line
+1. **Audit 2014** for v1 silent losses (run 06b diff against 2014 only, no compute — just enumerate)
+2. Start Phase 6 (visualization / drought classification — script 07+, not yet written)
+3. When editing any of 02/03/04/06: add the `print(warnings())` line
 
 ## Session Summary (2026-05-26)
 
