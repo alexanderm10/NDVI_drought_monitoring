@@ -83,6 +83,15 @@ source("00_setup_paths.R")
 hls_paths <- setup_hls_paths()
 source("00_posterior_functions.R")
 
+# CLI override: any args are parsed as integer target years. Useful for
+# re-running a single year after a recovery (e.g. 2026-05-27 derivatives_2016
+# CIFS post-rename corruption — restore .bak, delete the affected window
+# files, run `Rscript 06b... 2016` to redo just that year instead of paying
+# the ~3 hr full-tri-year merge I/O). Empty args → default tri-year set.
+.cli_years <- suppressWarnings(as.integer(commandArgs(trailingOnly = TRUE)))
+.cli_years <- .cli_years[!is.na(.cli_years)]
+.default_target_years <- c(2013L, 2015L, 2016L)
+
 # ==============================================================================
 # CONFIGURATION
 # ==============================================================================
@@ -94,7 +103,7 @@ config <- list(
   output_dir              = file.path(hls_paths$gam_models, "change_derivatives"),
   posteriors_dir          = file.path(hls_paths$gam_models, "change_derivatives_posteriors"),
   window_sizes            = c(3, 7, 14, 30),
-  target_years            = c(2013L, 2015L, 2016L),
+  target_years            = if (length(.cli_years) > 0) .cli_years else .default_target_years,
 
   # Conservative worker count. Backfill total is only ~159 DOYs (vs 06's
   # ~4,250 DOYs across 13 years); the speedup gradient is modest and

@@ -221,12 +221,21 @@ readRDS_retry <- function(path, max_attempts = 3L,
 
 saveRDS_validated <- function(object, file, compress = "xz",
                               max_attempts = 3L,
-                              backoff_secs = c(5, 30, 90)) {
+                              backoff_secs = c(5, 30, 90),
+                              verify_after_rename_min_bytes = 500e6) {
   # Defensive: ensure caller passed enough backoff entries for max_attempts-1
   # sleeps (sleep happens between attempts, not after the last). Without this,
   # bumping max_attempts without extending backoff_secs would NA-poison
   # Sys.sleep at runtime.
   stopifnot(length(backoff_secs) >= max_attempts - 1L)
+
+  # Post-rename readback (Layer 1c, see below) is gated on file size: enabled
+  # by default for files >= 500 MB (catches year-summary writes), skipped for
+  # smaller writes (per-window posteriors at ~80 MB) where the
+  # readback overhead — full xz decompression of every published file — would
+  # add many hours to a multi-day script's runtime and the failure mode has
+  # not been observed (slow large writes correlate with mid-write CIFS
+  # hiccups; second-scale writes don't). Set to Inf to disable, 0 to force on.
 
   tmp_file <- paste0(file, ".tmp")
   last_err <- NULL
@@ -265,6 +274,37 @@ saveRDS_validated <- function(object, file, compress = "xz",
         stop(sprintf(
           "saveRDS_validated(%s): file.rename from .tmp failed", file
         ))
+      }
+
+      # Layer (1c): post-rename readback (size-gated). The pre-rename readback
+      # above proves the .tmp contents were intact and decompressable on the
+      # local FS view. On CIFS, server-side write completion can still drop
+      # buffered bytes AFTER the rename if the connection flaps — observed
+      # 2026-05-27 with 06b's derivatives_2016.rds: .tmp validation passed,
+      # rename succeeded, warning("cannot open compressed file ... probable
+      # reason 'Host is down'") fired during the save, and the final file
+      # ended up lzma-corrupt by the time the integrity audit re-read it
+      # ~hours later. The .tmp is gone after rename, so this layer cannot
+      # recover the data; it can only fail loudly at the source of corruption
+      # rather than letting an unusable file propagate downstream.
+      final_size <- file.info(file)$size
+      if (!is.na(final_size) && final_size >= verify_after_rename_min_bytes) {
+        final_test <- tryCatch(readRDS(file), error = function(e) e)
+        if (inherits(final_test, "error")) {
+          last_err <- final_test
+          # Cannot undo rename. Leave the corrupt file in place — caller can
+          # rename/delete after diagnosing. Retry the WHOLE save on next loop
+          # iteration (the next saveRDS will overwrite this corrupt file via
+          # a fresh .tmp + rename).
+          if (attempt < max_attempts) {
+            Sys.sleep(backoff_secs[attempt])
+            next
+          }
+          stop(sprintf(
+            "saveRDS_validated(%s): post-rename readback failed after rename succeeded. Last error: %s. The final file is on disk but corrupt; investigate CIFS / server-side write completion.",
+            file, conditionMessage(last_err)
+          ))
+        }
       }
       return(invisible(NULL))
     }
