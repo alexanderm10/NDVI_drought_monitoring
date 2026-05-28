@@ -1,4 +1,6 @@
 {
     "claudeCode.disableLoginPrompt": true,
-    "claudeCode.environmentVariables": []
+    "claudeCode.environmentVariables": [
+        
+    ]
 }

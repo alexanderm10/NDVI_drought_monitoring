@@ -1,8 +1,35 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-27 ~14:00 CDT (06b tri-year backfill + 2016 corruption recovery COMPLETE; 06c stats rebuild done; change_derivatives now covers all 13 years 2013-2025)
+**Updated**: 2026-05-28 ~13:00 CDT (2014 audit complete — no v1 losses, upstream posterior gap only)
 
 ## No active processes
+
+## Session Summary (2026-05-28) — 2014 audit
+
+### 2014 DOY audit result — CLEAN (no v1 cascade losses)
+
+Ran 06b diff logic against 2014 (enumeration only, no compute). Result:
+
+- **362 expected DOYs** (from year_predictions_posteriors/2014/)
+- **350 complete DOYs** (all 4 windows ≥ 50 MB)
+- **12 partial DOYs** (3/4 windows each): DOYs 48-50, 52-54, 59-61, 75-77
+- **0 DOYs with zero windows** — confirms no v1 cascade-loss pattern
+
+**Root cause**: `year_predictions_posteriors/2014/` is missing DOYs **45, 46, 47** (Feb 14-16, 2014). These 3 missing lag posteriors cascade to 12 partial window-files via the lag dependency:
+- Window 3 lag DOYs 45/46/47 → DOYs 48/49/50 missing window-3
+- Window 7 lag DOYs 45/46/47 → DOYs 52/53/54 missing window-7
+- Window 14 lag DOYs 45/46/47 → DOYs 59/60/61 missing window-14
+- Window 30 lag DOYs 45/46/47 → DOYs 75/76/77 missing window-30
+
+**Conclusion**: Same upstream-gap class as 2013/2015 residuals. Script 06 behaved correctly — it returned NULL when the upstream data wasn't there; no silent losses, no cascade bug. The stats row for 2014 (185,689,160 rows) is correct: 350 × 4 × 129,310 + 12 × 3 × 129,310 = 185,689,160 ✓.
+
+**Decision**: Accept the gap. No backfill — upstream data (script 03 DOYs 45-47 for 2014) doesn't exist. Phase 6 should treat DOYs 48-50, 52-54, 59-61, 75-77 as partial in 2014 (same handling as 2013/2015 residual DOYs).
+
+### Next session priorities
+1. Start Phase 6 (visualization / drought classification — script 07+, not yet written)
+2. When editing any of 02/03/04/06: add the `print(warnings())` line
+
+---
 
 ## Session Summary (2026-05-27) — 06b first pass + 2016 recovery + stats rebuild
 
@@ -38,20 +65,17 @@
 - `elapsed_mins` is NA for the four years rebuilt via 06c (no single timed run — composite of v1 + 06b). The 2017-2025 elapsed values come from the 06 v2 run.
 
 ### Carryover state — partial DOYs in 2013/2014/2015 NOT re-attempted
-- **2013**: 30 still-missing DOYs (out of original 117). Summary row count → 239.4 DOY-equivalents (some DOYs in-summary have <4 windows).
-- **2014**: NOT a 06b target. Summary row count → 358.9 DOY-equivalents. **NEW SURPRISE**: 2014 likely has its own v1 silent losses that were never audited. Pre-Phase-6 task: run the 06b diff against 2014 to enumerate the gap before deciding whether to backfill.
-- **2015**: 12 still-missing DOYs (out of original 83). Summary row count → 358.9 DOY-equivalents.
-- **2016**: 0 still-missing DOYs (recovered 2026-05-27). Summary row count → 365.0 DOY-equivalents (clean).
+All three years' gaps are confirmed upstream year-prediction posterior gaps (not 06 compute bugs). Same root cause, same decision for all three:
 
-The 2013/2015 residuals are upstream year-prediction posterior gaps for lagged DOYs (process_year_doy succeeded for some windows of a DOY, returned silent NULL for others because their lag-DOY year-prediction posterior is missing). Decision: NOT re-process those — root cause is upstream data, not 06's compute. Phase 6 work can proceed with these gaps documented.
+- **2013**: Year posteriors missing many DOYs. Summary row count → 239.4 DOY-equivalents. Root cause: upstream 03 gaps.
+- **2014**: Year posteriors missing DOYs 45/46/47 → 12 partial window-DOYs. **Audited 2026-05-28** — no v1 cascade losses. Root cause: upstream 03 gaps. Summary row count → 358.9 DOY-equivalents ✓.
+- **2015**: Year posteriors missing lag DOYs. 12 still-partial window-DOYs. Root cause: upstream 03 gaps. Summary row count → 358.9 DOY-equivalents.
+- **2016**: 0 missing DOYs. Summary row count → 365.0 DOY-equivalents (clean).
+
+Decision: NOT re-process. Root cause is upstream data (script 03), not 06's compute. Phase 6 should treat partial DOYs as missing in visualizations.
 
 ### Open question for Phase 6
-The 30/12 partial-window DOYs in 2013/2015 (and any uncounted 2014 gaps) affect derived stats but only on the affected DOYs; the year summaries are otherwise correct. Phase 6 should either (a) treat those DOYs as missing in visualizations, or (b) backfill via a script 03/04 re-run for the specific lag DOYs. (b) is much heavier; defer the call until Phase 6 starts.
-
-### Next session priorities
-1. **Audit 2014** for v1 silent losses (run 06b diff against 2014 only, no compute — just enumerate)
-2. Start Phase 6 (visualization / drought classification — script 07+, not yet written)
-3. When editing any of 02/03/04/06: add the `print(warnings())` line
+Partial-window DOYs in 2013/2014/2015 affect derived stats on those specific DOYs only. Phase 6 should either (a) treat those DOYs as missing in visualizations, or (b) backfill via a script 03/04 re-run for the specific lag DOYs. (b) is much heavier; defer the call until Phase 6 starts.
 
 ## Session Summary (2026-05-26)
 
