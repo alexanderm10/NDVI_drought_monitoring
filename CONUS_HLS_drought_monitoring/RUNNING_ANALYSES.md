@@ -1,11 +1,34 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-02 ~08:50 CDT (full 13-year audit; 2018/2023 backfill in flight; 2014/2015 root-cause CONFIRMED as pre-S2 data density)
+**Updated**: 2026-06-02 ~16:00 CDT — backfill ~99% done (2018 ✓, 2023 mid-save); Phase 6 evening sequence autolaunched
 
-## Active: 06b backfill 2018 + 2023 (~30-60 min ETA)
+## Active overnight (2026-06-02 evening)
 
-Launched 2026-06-02 08:26 CDT, host R (CIFS mount stale in 3-week-old container — host paths auto-detect).
-Log: `gam_models/change_derivatives_06b_2018_2023.log`. PID 10267.
+### 1. 06b backfill 2018 + 2023 — almost done
+- Launched 2026-06-02 08:26 CDT (host R, nohup + disown, PPID=1)
+- PID 10267, log: `gam_models/change_derivatives_06b_2018_2023.log`
+- **2018: COMPLETE** at 12:01 CDT (255.2 min wall, 10.8 GB written, post-rename readback OK)
+- **2023: in save phase** (.tmp at 11 GB, post-rename readback imminent)
+
+### 2. Phase 6 evening sequence — autolaunched, waiting on backfill
+- Launched 2026-06-02 15:52 CDT (host bash, nohup + disown, PID 1564794)
+- Script: `run_evening_sequence.sh`, log dir: `validation/evening_run_20260602_155217/`
+- Sequence (sequential, each gated on prior success): audit_backfill → 06c_rebuild → usdm_process → gridmet → spei → qc
+- Total ETA: 3-5 hours after backfill ends (should finish well before morning)
+- Morning check: look for `SEQUENCE_COMPLETE` (all good) or `SEQUENCE_FAILED` marker file
+- Docker container `conus-hls-drought-monitor` must stay UP — used for Phase 1 spatial steps (sf/terra/SPEI + `/gdo` read-only mount for GridMET/ecoregions)
+
+### Resources at session end (2026-06-02 ~16:00 CDT)
+- Host: 251 GB RAM, ~150 GB free; backfill at ~3 GB RSS; evening sequence ~5 MB RSS
+- Container: 128 GB limit, mostly idle until evening sequence dispatches to it
+- CIFS mount healthy on both host and container
+- SPEI 1.8.1 installed to `/workspace/.Rlibs/` (host-mounted, gitignored)
+
+### What's been verified working pre-overnight
+- Phase 0 USDM event verification — Midwest-cropped maps for 20 weeks in `figures/phase0_event_verification/`
+- 678 USDM weekly ZIPs downloaded + staged in `validation/usdm_raw/`
+- Ecoregion section run successfully — 129,310 pixels → 9 substantive Midwest ecoregions
+- 08 script syntax-clean for all 6 sections; SPEI section uses data.table grouping (no deprecated dplyr API)
 
 ## Session Summary (2026-06-02) — full 13-year audit + root-cause for 2014/2015 gaps
 
