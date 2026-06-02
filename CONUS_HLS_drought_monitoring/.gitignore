@@ -7,6 +7,9 @@ logs/
 .RData
 .Rproj.user/
 
+# Locally-installed R packages (e.g. SPEI installed to /workspace/.Rlibs in container)
+.Rlibs/
+
 # Temporary files
 *~
 *.tmp

@@ -1,8 +1,89 @@
 # Currently Running Analyses
 
-**Updated**: 2026-05-28 ~13:00 CDT (2014 audit complete — no v1 losses, upstream posterior gap only)
+**Updated**: 2026-06-02 ~08:50 CDT (full 13-year audit; 2018/2023 backfill in flight; 2014/2015 root-cause CONFIRMED as pre-S2 data density)
 
-## No active processes
+## Active: 06b backfill 2018 + 2023 (~30-60 min ETA)
+
+Launched 2026-06-02 08:26 CDT, host R (CIFS mount stale in 3-week-old container — host paths auto-detect).
+Log: `gam_models/change_derivatives_06b_2018_2023.log`. PID 10267.
+
+## Session Summary (2026-06-02) — full 13-year audit + root-cause for 2014/2015 gaps
+
+### Full inventory audit (13 years)
+Ran fresh on-disk enumeration of `change_derivatives_posteriors/<year>/doy_DDD_window_WW.rds` files vs `year_predictions_posteriors/<year>/` upstream DOYs. All 17,704 window files are 78.2–84.9 MB (well above 50 MB resume guard; zero sub-threshold files; no corruption).
+
+| Year | Status | Notes |
+|------|--------|-------|
+| 2013 | 30 partial/zero DOYs — **structural Landsat-8-launch lag** | First upstream DOY = 113; DOYs 113-142 progressively gain windows as 16/14/7/3-day lags become available. NOT a loss. |
+| 2014 | 12 partial DOYs | Upstream gap DOYs 45/46/47 |
+| 2015 | 12 partial DOYs | Upstream gap DOYs 15/16/17 |
+| 2016, 2017 | clean (1460/1460) | |
+| **2018** | **1 partial DOY 229 win_30** — newly-found compute loss | Backfill in flight |
+| 2019-2022 | clean (1460/1460) | |
+| **2023** | **1 partial DOY 138 win_30** — newly-found compute loss | Backfill in flight |
+| 2024-2025 | clean (1460/1460) | |
+
+The 2018 and 2023 single-window misses leaked past 06 v2's cascade-bug fix — they were visible in `change_derivatives_stats.rds` as `n_results = 188,663,290` (vs 188,792,600 full = exactly −129,310 = one window's worth) but the v2 log surface-summary said "365/365 valid" because at DOY granularity each had ≥1 window. Both have upstream lag DOYs present and healthy (2018 doy_199 = 79.8 MB; 2023 doy_108 = 81.3 MB), confirming compute loss not upstream gap. Likely one of the 29 lost warnings in the v2 run.
+
+### Backfill (in flight)
+`Rscript 06b_backfill_change_derivatives.R 2018 2023` launched 08:26 CDT. Diff phase correctly detected 1 missing DOY per year. 2018 backup `.v1-pre-backfill.bak` written (11 GB). After merge completes for both years, will run integrity verification.
+
+### 2014/2015 upstream gap — ROOT-CAUSE CONFIRMED (data density limit, not bug)
+
+Investigated whether the 6 missing upstream DOYs (2014: 45/46/47 = Feb 14-16; 2015: 15/16/17 = Jan 15-17) were due to (a) cloud/mask filtering, (b) never-downloaded HLS files, or (c) data-density limit.
+
+**Step 1 — HLS files downloaded? YES, at normal density.**
+
+| Date | HLS NDVI files | Nearby healthy DOYs |
+|---|---:|---|
+| 2014-02-14 (DOY 45) | 164 | range 128–184 |
+| 2014-02-15 (DOY 46) | 148 | |
+| 2014-02-16 (DOY 47) | 153 | |
+| 2015-01-15 (DOY 15) | 107 | |
+| 2015-01-16 (DOY 16) | 188 | |
+| 2015-01-17 (DOY 17) | 153 | |
+
+**Step 2 — Aggregated into 4km timeseries? YES, with low yield.** 2014 yday 30-47 has 50,987 obs — all **L30 (Landsat 8) only**; no S30 contributes in 2014 (Sentinel-2A launched mid-2015, S2B in 2017; HLS S30 doesn't meaningfully contribute until ~2016).
+
+**Step 3 — Script 03 fit threshold (≥33% = ≥42,672 unique pixels in 16-day trailing window with non-NA NDVI AND non-NA baseline norm, line 389 of `03_doy_looped_year_predictions.R`):**
+
+| Window | Unique pixels | Threshold | Short by |
+|---|---:|---:|---:|
+| 2014 DOY 45 (Jan 30–Feb 14) | **40,466** | 42,672 | 2,206 |
+| 2014 DOY 46 (Jan 31–Feb 15) | **35,444** | 42,672 | 7,228 |
+| 2014 DOY 47 (Feb 1–Feb 16)  | **35,201** | 42,672 | 7,471 |
+| 2015 DOY 15 (Dec 31–Jan 15) | **36,717** | 42,672 | 5,955 |
+| 2015 DOY 16 (Jan 1–Jan 16)  | **36,211** | 42,672 | 6,461 |
+| 2015 DOY 17 (Jan 2–Jan 17)  | **40,029** | 42,672 | 2,643 |
+
+Reference: same-season healthy windows hit 56,402–125,557 unique pixels.
+
+**Structural cause**: L30's 16-day revisit means a perfect 16-day window has only ~1 obs per pixel. Winter clouds/snow reject ~50% of valid scenes. Pre-S2 era can't compensate. Unique-pixel coverage falls just below the 0.33 quality threshold for 6 specific DOYs across 2014/2015.
+
+### Decision (user, 2026-06-02)
+
+**Accept the 6-DOY gap.** Preference is for a systematic, robust method applied uniformly across the whole record over tailoring parameters to a known-limited period. Recovery options considered but rejected:
+
+| Option | Cost | Quality impact |
+|---|---|---|
+| Lower threshold 0.33 → 0.27 | Refit 03 for affected years; ~5 hr/year | Recovers only DOY 45 + DOY 17 (near-misses); fits would have ~30% pixel coverage |
+| Widen trailing window 16 → 24 or 32 days | Refit 03 for **all** years; non-trivial | Recovers all 6 but smooths temporal signal everywhere |
+| **Accept the gap** | Free | 6 mid-winter DOYs missing in 2014/2015 derivative coverage |
+
+If Phase 6 analysis quality requires uniformly-complete coverage, may trim record to **2016-2025** (full S30+L30 era). Keep 13-year dataset available for cross-reference. See [[project-pre-s2-winter-gap]] in memory for the structural-data-density explanation.
+
+### Final tier classification (13 years)
+
+| Tier | Years | Count |
+|---|---|---|
+| **Fully clean** (1460/1460 windows) | 2016, 2017, **2018 (pending backfill)**, 2019-2022, **2023 (pending backfill)**, 2024-2025 | 11 of 13 |
+| **Upstream gap** (12 partial DOYs each — pre-S2 winter density) | 2014, 2015 | 2 |
+| **Launch lag** (~30 partial/zero DOYs — structural Landsat 8 launch) | 2013 | 1 |
+
+### Carryover state for next session
+- After backfill: run `06c_rebuild_change_derivatives_stats.R` to refresh 2018/2023 rows in stats file.
+- Phase 6 starts: visualization / drought classification (script 07+, not yet written).
+- When editing 02/03/04/06: add the queued one-liner `if (length(warnings()) > 0) print(warnings())` (see [[feedback-print-warnings-at-end]]).
 
 ## Session Summary (2026-05-28) — 2014 audit
 

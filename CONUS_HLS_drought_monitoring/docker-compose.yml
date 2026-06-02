@@ -14,6 +14,10 @@ services:
       # Mount data directory - adjust path for your Linux system
       # This path corresponds to U: drive on Windows via network mount
       - /mnt/malexander/datasets/ndvi_monitor:/data
+      # Read-only mount of GDO Wildfire project for shared reference layers
+      # (GridMET precip/PET, EPA ecoregions, NLCD, spatial framework grids).
+      # Added 2026-06-02 for Phase 6 Midwest validation work.
+      - /mnt/malexander/datasets/gdo_wildfire_fy25:/gdo:ro
     environment:
       # Set timezone
       - TZ=America/Denver
