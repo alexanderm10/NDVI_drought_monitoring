@@ -1,12 +1,31 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-04 ~16:30 CDT — Phase 6 input-data prep COMPLETE; nothing actively running.
+**Updated**: 2026-06-04 ~17:25 CDT — weekly SPI/SPEI climatology run launched (overnight, ~12-17 hr).
 
-## Status
+## Active (2026-06-04 evening)
 
-Nothing actively running. Container `conus-hls-drought-monitor` is up but idle. All Phase 6 validation + forcing data files are on disk and QC-clean (see [Session Summary 2026-06-03](#session-summary-2026-06-03--phase-6-prep-complete)).
+### Weekly climatology sequence — long-record SPI/SPEI
 
-**Next**: Phase 6 analysis (script 07+, not yet written) — decide on scope (full 13-year vs uniform 2016-2025) and design event-detection/visualization against USDM + SPEI.
+- Launched 2026-06-04 17:21 CDT (host bash, nohup + disown, PID 49128, PPID=1)
+- Script: `run_weekly_climatology.sh`, log dir: `validation/weekly_run_20260604_172125/`
+- Sequence (sequential, each gated on prior success): `gridmet_weekly` → `spei_weekly` → `qc`
+- **Why**: Replace monthly SPI/SPEI with weekly (matches NDVI / USDM cadence) using a robust 1984-2025 GridMET climatology for distribution fits. Output covers 2013-2025 only.
+- Expected total: ~12-17 hr (gridmet_weekly ~2-3 hr + spei_weekly ~10-14 hr + qc ~5 min)
+- Morning check: look for `SEQUENCE_COMPLETE` / `SEQUENCE_FAILED` marker in the log dir
+- Docker container `conus-hls-drought-monitor` must stay UP
+
+### What's in flight
+- `gridmet_weekly`: per-year extract daily pr+pet for 1984-2025 (42 yr), ISO-week aggregate inside the loop; final write ~5-9 GB gzip
+- `spei_weekly`: per-pixel rolling SPI + SPEI at 4w / 13w / 26w windows; full 42-yr record for distribution fits, output saved for 2013-2025 only; 4 workers parallel over 16 pixel chunks
+
+### What was added to 08_validation_data_setup.R (committed pre-launch)
+- `iso_week_key()` helper — ISO 8601 week assignment with cross-year-boundary correctness
+- `section_gridmet_weekly()` — extracts climatology range, ISO-week aggregation, drops partial-week rows at record edges
+- `section_spei_weekly()` — parallel SPI/SPEI compute with sink()-suppressed SPEI package chatter, future_lapply over pixel chunks with worker recycling
+- `qc` section: now validates the two new weekly files
+- CLI: `gridmet_weekly` + `spei_weekly` added; dispatcher skips gracefully when sourced without `--section=` flag
+
+**Next**: After this run completes, Phase 6 analysis (script 07+, not yet written) — decide on scope (full 13-year vs uniform 2016-2025) and design event-detection/visualization against USDM + SPEI/SPI.
 
 ## Session Summary (2026-06-03) — Phase 6 prep COMPLETE
 
