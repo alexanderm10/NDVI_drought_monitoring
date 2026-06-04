@@ -1,34 +1,80 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-02 ~16:00 CDT — backfill ~99% done (2018 ✓, 2023 mid-save); Phase 6 evening sequence autolaunched
+**Updated**: 2026-06-04 ~16:30 CDT — Phase 6 input-data prep COMPLETE; nothing actively running.
 
-## Active overnight (2026-06-02 evening)
+## Status
 
-### 1. 06b backfill 2018 + 2023 — almost done
-- Launched 2026-06-02 08:26 CDT (host R, nohup + disown, PPID=1)
-- PID 10267, log: `gam_models/change_derivatives_06b_2018_2023.log`
-- **2018: COMPLETE** at 12:01 CDT (255.2 min wall, 10.8 GB written, post-rename readback OK)
-- **2023: in save phase** (.tmp at 11 GB, post-rename readback imminent)
+Nothing actively running. Container `conus-hls-drought-monitor` is up but idle. All Phase 6 validation + forcing data files are on disk and QC-clean (see [Session Summary 2026-06-03](#session-summary-2026-06-03--phase-6-prep-complete)).
 
-### 2. Phase 6 evening sequence — autolaunched, waiting on backfill
-- Launched 2026-06-02 15:52 CDT (host bash, nohup + disown, PID 1564794)
-- Script: `run_evening_sequence.sh`, log dir: `validation/evening_run_20260602_155217/`
-- Sequence (sequential, each gated on prior success): audit_backfill → 06c_rebuild → usdm_process → gridmet → spei → qc
-- Total ETA: 3-5 hours after backfill ends (should finish well before morning)
-- Morning check: look for `SEQUENCE_COMPLETE` (all good) or `SEQUENCE_FAILED` marker file
-- Docker container `conus-hls-drought-monitor` must stay UP — used for Phase 1 spatial steps (sf/terra/SPEI + `/gdo` read-only mount for GridMET/ecoregions)
+**Next**: Phase 6 analysis (script 07+, not yet written) — decide on scope (full 13-year vs uniform 2016-2025) and design event-detection/visualization against USDM + SPEI.
 
-### Resources at session end (2026-06-02 ~16:00 CDT)
-- Host: 251 GB RAM, ~150 GB free; backfill at ~3 GB RSS; evening sequence ~5 MB RSS
-- Container: 128 GB limit, mostly idle until evening sequence dispatches to it
-- CIFS mount healthy on both host and container
-- SPEI 1.8.1 installed to `/workspace/.Rlibs/` (host-mounted, gitignored)
+## Session Summary (2026-06-03) — Phase 6 prep COMPLETE
 
-### What's been verified working pre-overnight
-- Phase 0 USDM event verification — Midwest-cropped maps for 20 weeks in `figures/phase0_event_verification/`
-- 678 USDM weekly ZIPs downloaded + staged in `validation/usdm_raw/`
-- Ecoregion section run successfully — 129,310 pixels → 9 substantive Midwest ecoregions
-- 08 script syntax-clean for all 6 sections; SPEI section uses data.table grouping (no deprecated dplyr API)
+### What ran (two-stage)
+
+**(1) Evening sequence (2026-06-02 15:52 → 18:33 CDT)** — partial:
+- `audit_backfill` ✓ — 06b 2018+2023 confirmed clean (188,792,600 rows each)
+- `06c_rebuild` ✓ but **skipped 2018/2023** because both already had stats rows (stale-detection gap — see patches)
+- `usdm_process` ✓ → `usdm_4km_weekly_2013_2025.rds` (1.9 MB, 87,672,180 rows)
+- `gridmet` ✗ — OOM during a single 614M-row `merge(pr_long, pet_long)` (full-record materialization before merge)
+- `spei`, `qc` skipped
+
+**(2) Remaining sequence (2026-06-03 09:40 → 13:05 CDT)** after gridmet rewrite — all green:
+
+| Section | Wall time | Output |
+|---|---:|---|
+| gridmet | 51 min | 4.0 GB, 613,963,880 rows (129,310 px × 4,748 days) |
+| spei    | 149 min | 1.2 GB, 20,172,360 rows (129,310 px × 156 months) |
+| qc      | 4 min | 4/4 files ✓ ok, 0 missing/extra pixels each |
+
+**(3) 06c stale-row rebuild (2026-06-03 13:06 → 13:44 CDT)** auto-launched by `then_run_06c.sh`:
+- New mtime-based stale detection correctly flagged 2018+2023
+- 2018 stats: 188,663,290 → **188,792,600** rows (mean_anomaly 8.29e-04 → 7.94e-04)
+- 2023 stats: 188,663,290 → **188,792,600** rows (mean_anomaly 3.40e-03 → 3.39e-03)
+- 13-year stats now internally consistent
+
+### Patches landed
+
+1. **`section_gridmet` rewrite (`08_validation_data_setup.R`)** — per-year extract + per-year `merge(pr, pet)` + `data.table::rbindlist` at the end. Peak memory bounded to one year's table (~47M rows) instead of two full 614M-row long tables. Final write uses `compress = "gzip"` rather than the default xz: xz on the merged table ran at ~32 MB/min (~60+ min for 4 GB); gzip finishes in ~5 min. This RDS is consumed only by `section_spei` and not archived long-term, so the size trade (~4 GB gzip vs ~2 GB xz) is acceptable.
+2. **`06c_rebuild_change_derivatives_stats.R` default-mode upgrade** — also re-computes rows whose `derivatives_<year>.rds` mtime is newer than `change_derivatives_stats.rds` mtime, not just missing-year rows. Catches the 2026-06-02 case where 06b backfill rewrote derivatives files but 06c said "nothing to do" because stats rows already existed.
+
+### Tooling (untracked → now committed)
+- `run_remaining_sequence.sh` — gridmet → spei → qc with per-step logs + `SEQUENCE_COMPLETE`/`SEQUENCE_FAILED` markers
+- `then_run_06c.sh` — polls the sequence marker, runs 06c rebuild on success
+
+### Final stats — `change_derivatives_stats.rds` (13 rows, 2013-2025)
+
+| year | n_results   | n_significant | pct_significant | mean_anomaly  |
+|------|-------------|---------------|-----------------|---------------|
+| 2013 | 123,878,980 | 111,308,480   | 89.85%          | -2.219e-03    |
+| 2014 | 185,689,160 | 169,021,072   | 91.02%          |  1.703e-03    |
+| 2015 | 185,689,160 | 168,272,004   | 90.62%          | -2.417e-03    |
+| 2016 | 188,792,600 | 172,332,219   | 91.28%          | -6.800e-05    |
+| 2017 | 188,792,600 | 173,703,576   | 92.01%          |  1.666e-04    |
+| 2018 | 188,792,600 | 175,567,396   | 92.99%          |  7.941e-04    |
+| 2019 | 188,792,600 | 175,341,602   | 92.88%          | -2.051e-03    |
+| 2020 | 188,792,600 | 174,560,761   | 92.46%          |  1.908e-03    |
+| 2021 | 188,792,600 | 174,802,540   | 92.59%          | -3.781e-04    |
+| 2022 | 188,792,600 | 176,065,576   | 93.26%          | -2.862e-03    |
+| 2023 | 188,792,600 | 175,771,354   | 93.10%          |  3.395e-03    |
+| 2024 | 188,792,600 | 175,777,785   | 93.11%          | -1.368e-03    |
+| 2025 | 188,792,600 | 176,637,530   | 93.56%          | -1.057e-03    |
+
+### Phase 6 input data inventory (`validation/`)
+
+| File | Size | Rows |
+|---|---:|---:|
+| `midwest_extent.rds` | 1.8 KB | spatial bounds |
+| `pixel_to_ecoregion_l2.rds` | 71 KB | 129,310 pixels → EPA L2 |
+| `ecoregions_midwest_l2.rds` | 2.7 MB | 9 substantive L2 polygons |
+| `usdm_4km_weekly_2013_2025.rds` | 1.9 MB | 87,672,180 |
+| `gridmet_4km_daily_2013_2025.rds` | 4.0 GB | 613,963,880 |
+| `spei_4km_monthly_2013_2025.rds` | 1.2 GB | 20,172,360 |
+| `qc_report.rds` | 272 B | per-file completeness audit (all ✓) |
+
+### Next session priorities
+1. Phase 6 analysis design — script 07+ scaffolding for event-detection (NDVI anomaly vs USDM categorical + SPEI continuous)
+2. Decide temporal scope: full 13-year (with 2013-2015 partial coverage) vs uniform 2016-2025
 
 ## Session Summary (2026-06-02) — full 13-year audit + root-cause for 2014/2015 gaps
 
