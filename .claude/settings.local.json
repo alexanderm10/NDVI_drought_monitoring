@@ -176,7 +176,9 @@
       "Bash(journalctl --since \"2026-05-09 23:00\" --until \"2026-05-10 01:00\")",
       "Bash(sudo journalctl --since \"2026-05-09 22:00\" --until \"2026-05-10 02:00\")",
       "Bash(last reboot *)",
-      "Bash(sudo -n journalctl --since \"2026-05-09 23:30\" --until \"2026-05-10 00:30\")"
+      "Bash(sudo -n journalctl --since \"2026-05-09 23:30\" --until \"2026-05-10 00:30\")",
+      "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring log --oneline -6)",
+      "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring add CONUS_HLS_drought_monitoring/RUNNING_ANALYSES.md .vscode/settings.json)"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [
