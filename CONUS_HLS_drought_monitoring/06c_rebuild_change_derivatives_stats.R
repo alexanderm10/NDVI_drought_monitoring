@@ -15,9 +15,16 @@
 #   year, n_results, n_significant, pct_significant, mean_anomaly, elapsed_mins
 #
 # CLI:
-#   Rscript 06c_rebuild_change_derivatives_stats.R              # missing years
+#   Rscript 06c_rebuild_change_derivatives_stats.R              # missing + stale
 #   Rscript 06c_rebuild_change_derivatives_stats.R 2013 2015    # specific years
 #   Rscript 06c_rebuild_change_derivatives_stats.R --all        # all years
+#
+# Default mode (no args):
+#   target_years = (years with no stats row) ∪ (years whose derivatives file
+#   mtime is newer than the stats file mtime).  This catches the 2026-06-02
+#   case where 06b backfill rewrote derivatives_2018/2023.rds but 06c said
+#   "nothing to do" because both years already had stats rows — checking only
+#   year-level presence missed the row-count mismatch.
 #
 # Notes:
 #   - elapsed_mins is set to NA for years computed here (not a timed 06 run).
@@ -85,7 +92,22 @@ if (.want_all) {
         paste(missing_from_disk, collapse = ", "), "\n")
   }
 } else {
-  target_years <- setdiff(all_years, existing$year)
+  # Default: missing rows + rows whose underlying year file is newer than the
+  # stats file (i.e., the year was rewritten after stats were last computed).
+  missing_years <- setdiff(all_years, existing$year)
+  stale_years   <- integer(0)
+  if (file.exists(config$stats_file)) {
+    stats_mtime <- file.info(config$stats_file)$mtime
+    file_mtimes <- file.info(file.path(config$derivatives_dir,
+                                       sprintf("derivatives_%d.rds", all_years)))$mtime
+    stale_years <- all_years[file_mtimes > stats_mtime]
+    stale_years <- intersect(stale_years, existing$year)  # missing-only handled above
+    if (length(stale_years) > 0) {
+      cat("Stale years (file mtime newer than stats mtime):",
+          paste(stale_years, collapse = ", "), "\n")
+    }
+  }
+  target_years <- sort(union(missing_years, stale_years))
 }
 
 if (length(target_years) == 0) {

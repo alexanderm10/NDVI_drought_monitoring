@@ -264,59 +264,76 @@ section_usdm_process <- function() {
 # ==============================================================================
 section_gridmet <- function() {
   cat("\n=== Section: gridmet (extract pr + pet at pixel centroids) ===\n")
+  suppressPackageStartupMessages(library(data.table))
 
   out_file <- file.path(config$validation_dir, "gridmet_4km_daily_2013_2025.rds")
 
   pixel_pts <- vect(valid_pixels[, c("pixel_id", "x", "y")],
                     geom = c("x", "y"), crs = config$target_crs)
-  cat(sprintf("Extracting at %s pixel centroids\n",
-              format(nrow(valid_pixels), big.mark = ",")))
+  cat(sprintf("Extracting at %s pixel centroids over years %d-%d\n",
+              format(nrow(valid_pixels), big.mark = ","),
+              min(config$years), max(config$years)))
 
-  extract_var <- function(var_dir, var_label) {
-    files <- list.files(var_dir, pattern = paste0(var_label, "_\\d{4}\\.nc$"),
-                        full.names = TRUE)
-    cat(sprintf("  %s: %d annual NetCDF files (%.0f MB total)\n",
-                var_label, length(files), sum(file.info(files)$size) / 1e6))
-    out <- vector("list", length(files))
-    for (i in seq_along(files)) {
-      r <- rast(files[i])
-      # Project pixel pts to GridMET CRS for bilinear extract
-      pixel_pts_native <- project(pixel_pts, crs(r))
-      vals <- terra::extract(r, pixel_pts_native, method = "bilinear")
-      # First col is ID; rest are daily layers
-      vals$ID <- NULL
-      yr <- as.integer(sub(".*_(\\d{4})\\.nc$", "\\1", files[i]))
-      dates_yr <- seq(as.Date(paste0(yr, "-01-01")),
-                      as.Date(paste0(yr, "-12-31")), by = 1)
-      # Drop Feb 29 in non-leap years if needed (GridMET handles this consistently;
-      # use ncol(vals) to know the actual day count)
-      n_layers <- ncol(vals)
-      dates_yr <- dates_yr[seq_len(n_layers)]
-      # Wide → long
-      long <- data.frame(
-        pixel_id = rep(valid_pixels$pixel_id, n_layers),
-        date     = rep(dates_yr, each = nrow(vals)),
-        value    = as.numeric(as.matrix(vals))
-      )
-      names(long)[3] <- var_label
-      out[[i]] <- long
-      cat(sprintf("    %d: %d days, %s rows\n", yr, n_layers,
-                  format(nrow(long), big.mark = ",")))
-      rm(r, vals, long); gc(verbose = FALSE)
-    }
-    do.call(rbind, out)
+  files_for_var <- function(var_dir, var_label) {
+    f <- list.files(var_dir, pattern = paste0("^", var_label, "_\\d{4}\\.nc$"),
+                    full.names = TRUE)
+    yrs <- as.integer(sub(".*_(\\d{4})\\.nc$", "\\1", basename(f)))
+    keep <- yrs %in% config$years
+    list(files = f[keep][order(yrs[keep])], years = sort(yrs[keep]))
   }
 
-  cat("Extracting pr...\n")
-  pr_long <- extract_var(config$gridmet_pr_dir, "pr")
-  cat("Extracting pet...\n")
-  pet_long <- extract_var(config$gridmet_pet_dir, "pet")
+  pr_info  <- files_for_var(config$gridmet_pr_dir,  "pr")
+  pet_info <- files_for_var(config$gridmet_pet_dir, "pet")
+  years    <- sort(intersect(pr_info$years, pet_info$years))
+  cat(sprintf("  pr files: %d  |  pet files: %d  |  shared years to process: %d\n",
+              length(pr_info$files), length(pet_info$files), length(years)))
+  if (length(years) == 0L) stop("No overlapping pr/pet year files in config$years range")
 
-  cat("Merging pr + pet by (pixel_id, date)...\n")
-  merged <- merge(pr_long, pet_long, by = c("pixel_id", "date"), all = TRUE)
+  # Per-year extract that returns a data.table (single var, long form).
+  extract_year_var <- function(file, var_label, yr) {
+    r <- rast(file)
+    pixel_pts_native <- project(pixel_pts, crs(r))
+    vals <- terra::extract(r, pixel_pts_native, method = "bilinear")
+    vals$ID <- NULL
+    dates_yr <- seq(as.Date(paste0(yr, "-01-01")),
+                    as.Date(paste0(yr, "-12-31")), by = 1)
+    n_layers <- ncol(vals)
+    dates_yr <- dates_yr[seq_len(n_layers)]
+    dt <- data.table(
+      pixel_id = rep(valid_pixels$pixel_id, n_layers),
+      date     = rep(dates_yr, each = nrow(vals)),
+      v        = as.numeric(as.matrix(vals))
+    )
+    setnames(dt, "v", var_label)
+    rm(r, vals); gc(verbose = FALSE)
+    dt
+  }
+
+  # Per-year merge keeps peak memory bounded; rbindlist at the end is zero-copy.
+  per_year <- vector("list", length(years))
+  for (i in seq_along(years)) {
+    yr   <- years[i]
+    pr_f <- pr_info$files[pr_info$years  == yr]
+    pe_f <- pet_info$files[pet_info$years == yr]
+    pr_dt  <- extract_year_var(pr_f, "pr",  yr)
+    pet_dt <- extract_year_var(pe_f, "pet", yr)
+    yr_merged <- merge(pr_dt, pet_dt, by = c("pixel_id", "date"), all = TRUE)
+    per_year[[i]] <- yr_merged
+    cat(sprintf("    %d: %d days, %s rows\n",
+                yr, length(unique(yr_merged$date)),
+                format(nrow(yr_merged), big.mark = ",")))
+    rm(pr_dt, pet_dt, yr_merged); gc(verbose = FALSE)
+  }
+
+  cat("Combining annual data.tables (rbindlist)...\n")
+  merged <- rbindlist(per_year, use.names = TRUE)
+  rm(per_year); gc(verbose = FALSE)
   cat(sprintf("Final rows: %s\n", format(nrow(merged), big.mark = ",")))
 
-  saveRDS_validated(merged, out_file)
+  # gzip (not the saveRDS_validated default xz): xz on a 614M-row intermediate
+  # ran at ~32 MB/min → 60+ min save. gzip finishes in ~5 min; file ~5-8 GB
+  # vs ~2-3 GB but this RDS is consumed only by section_spei.
+  saveRDS_validated(as.data.frame(merged), out_file, compress = "gzip")
   cat(sprintf("Saved %s (%.1f MB)\n", basename(out_file), file.size(out_file) / 1e6))
 }
 
