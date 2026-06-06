@@ -1,31 +1,166 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-04 ~17:25 CDT — weekly SPI/SPEI climatology run launched (overnight, ~12-17 hr).
+**Updated**: 2026-06-06 ~08:45 CDT — Phase 6 `align_weekly` launched (10y scope, weekend run, ~60-90 min).
 
-## Active (2026-06-04 evening)
+## Active (2026-06-06)
 
-### Weekly climatology sequence — long-record SPI/SPEI
+### Phase 6 align_weekly — pixel-week master join
 
-- Launched 2026-06-04 17:21 CDT (host bash, nohup + disown, PID 49128, PPID=1)
-- Script: `run_weekly_climatology.sh`, log dir: `validation/weekly_run_20260604_172125/`
-- Sequence (sequential, each gated on prior success): `gridmet_weekly` → `spei_weekly` → `qc`
-- **Why**: Replace monthly SPI/SPEI with weekly (matches NDVI / USDM cadence) using a robust 1984-2025 GridMET climatology for distribution fits. Output covers 2013-2025 only.
-- Expected total: ~12-17 hr (gridmet_weekly ~2-3 hr + spei_weekly ~10-14 hr + qc ~5 min)
-- Morning check: look for `SEQUENCE_COMPLETE` / `SEQUENCE_FAILED` marker in the log dir
+- Launched 2026-06-06 06:43 CDT (host bash, nohup + disown, parent PID 1817531, will reparent to PID 1 after shell exit)
+- Script: `run_phase6_align_weekly.sh` → `07_validate_drought_signal.R --section=align_weekly --scope=10y`
+- Log dir: `validation/phase6_align_10y_20260606_064319/`
+  - `sequence.log` — orchestration / step markers
+  - `align_weekly.log` — live R stdout (per-year load + collapse + merge progress)
+- Markers: `SEQUENCE_COMPLETE` ✓ or `SEQUENCE_FAILED` ✗ in log dir
+- Output: `validation/ndvi_drought_join_weekly_10y.rds` (~6-8 GB est.)
+- Expected wall: 60-90 min (10 years × 5-8 min/year + final joins + save)
 - Docker container `conus-hls-drought-monitor` must stay UP
 
 ### What's in flight
-- `gridmet_weekly`: per-year extract daily pr+pet for 1984-2025 (42 yr), ISO-week aggregate inside the loop; final write ~5-9 GB gzip
-- `spei_weekly`: per-pixel rolling SPI + SPEI at 4w / 13w / 26w windows; full 42-yr record for distribution fits, output saved for 2013-2025 only; 4 workers parallel over 16 pixel chunks
+- Per-year sequential: load anomalies (~1.2 GB) → collapse to ISO-week → load derivatives (~11 GB) → collapse + dcast to per-window-wide → merge → drop year tables
+- After 10-year loop: `rbindlist` → cross-year-boundary re-collapse → join USDM weekly + SPEI weekly + ecoregion lookup → save
+- Parent peak memory: ~25-30 GB during single-year processing, ~13-14 GB at final stage
 
-### What was added to 08_validation_data_setup.R (committed pre-launch)
-- `iso_week_key()` helper — ISO 8601 week assignment with cross-year-boundary correctness
-- `section_gridmet_weekly()` — extracts climatology range, ISO-week aggregation, drops partial-week rows at record edges
-- `section_spei_weekly()` — parallel SPI/SPEI compute with sink()-suppressed SPEI package chatter, future_lapply over pixel chunks with worker recycling
-- `qc` section: now validates the two new weekly files
-- CLI: `gridmet_weekly` + `spei_weekly` added; dispatcher skips gracefully when sourced without `--section=` flag
+### Morning check
+```bash
+ls /mnt/malexander/datasets/ndvi_monitor/validation/phase6_align_10y_20260606_064319/
+# SEQUENCE_COMPLETE = ✓, SEQUENCE_FAILED = ✗
+tail -20 /mnt/malexander/datasets/ndvi_monitor/validation/phase6_align_10y_20260606_064319/align_weekly.log
+```
 
-**Next**: After this run completes, Phase 6 analysis (script 07+, not yet written) — decide on scope (full 13-year vs uniform 2016-2025) and design event-detection/visualization against USDM + SPEI/SPI.
+**Next after this run completes**: Phase 6 sections 2-5 (categorical_usdm, continuous_spei, event_detection, qc). USDM-as-lagging-indicator framing baked into stubs — lead-time skill curves rather than synchronous confusion matrices.
+
+## Session Summary (2026-06-05 / 2026-06-06) — weekly SPI/SPEI COMPLETE
+
+### Run outcome — `run_weekly_climatology.sh`
+
+Launched 2026-06-04 17:21 CDT, marker `SEQUENCE_COMPLETE` at 2026-06-05 11:32 CDT. Total wall: **18.2 hr**.
+
+| Section | Wall | Output | Rows | Pixels × periods |
+|---|---:|---|---:|---|
+| gridmet_weekly | 120.6 min | `gridmet_4km_weekly_1984_2025.rds` (3.4 GB) | 283,318,210 | 129,310 × 2,191 weeks |
+| spei_weekly    | 959.7 min | `spei_4km_weekly_2013_2025.rds` (5.5 GB)   | 87,672,180  | 129,310 × 678 weeks  |
+| qc             | 7.5 min   | `qc_report.rds` updated                     | —           | 6/6 files ✓          |
+
+`qc_report.rds` now covers 6 files (was 4 pre-weekly): ecoregion lookup, USDM weekly, GridMET daily, SPEI monthly, **GridMET weekly, SPEI weekly**. Zero missing/extra pixels across all six.
+
+### Performance footgun — `section_spei_weekly` parallel fell back to sequential (NOT a correctness issue)
+
+`spei_weekly.log` shows **all 4 super-chunks fell back to sequential `lapply`**:
+
+```
+future_lapply ERROR: The total size of the 4 globals exported for future expression (‘FUN()’)
+  is 27.45 GiB. ... The three largest globals are ‘fit_pixel’ (13.72 GiB of class ‘function’),
+  ‘FUN’ (13.72 GiB of class ‘function’) and ‘WIN_SPI’ (43 bytes of class ‘numeric’)
+  -- falling back to sequential
+```
+
+Closure size grew per super-chunk (27 → 47 → 67 → 86 GiB) because `fit_pixel` captured the enclosing `weekly_dt` data.table by reference, and `weekly_dt` itself grew as chunks accumulated results in the same frame.
+
+**Why it's only a perf issue**: per-pixel SPEI fits are deterministic (no parallel RNG), and the fallback was uniform across all super-chunks, so output is bit-equivalent to a hypothetical successful-parallel run. The 16-hr wall is roughly 4× the ~4 hr it should have been at true 4-way parallel.
+
+**Fix pattern** (for next touch of `08_validation_data_setup.R`):
+- Hoist `fit_pixel` to top-level (or `local()`-isolate it) so it doesn't close over `section_spei_weekly`'s frame.
+- Pass the chunk's row-subset explicitly as a `fit_pixel` argument (vs implicit capture of the full table).
+- Inside the worker, dispatch via `data.table[pixel_id %in% chunk_pixels]` slice, not by indexing the captured frame.
+
+**Decision**: defer the fix. Output is correct; no rerun planned unless we extend the climatology record (e.g., add 2026 once GridMET catches up). Patch lands when we next touch the file. Noted here so the fix isn't forgotten.
+
+### Phase 6 input data inventory (final — all in `/mnt/malexander/datasets/ndvi_monitor/validation/`)
+
+| File | Size | Rows | Span / shape |
+|---|---:|---:|---|
+| `midwest_extent.rds` | 1.8 KB | spatial bounds | static |
+| `pixel_to_ecoregion_l2.rds` | 71 KB | 129,310 | per-pixel L2 ID |
+| `ecoregions_midwest_l2.rds` | 2.7 MB | 9 polygons | EPA L2 |
+| `usdm_4km_weekly_2013_2025.rds` | 1.9 MB | 87,672,180 | 678 weeks × 129,310 px (D0-D4 categorical) |
+| `gridmet_4km_daily_2013_2025.rds` | 4.0 GB | 613,963,880 | 4,748 days × 129,310 px (pr+pet) |
+| `gridmet_4km_weekly_1984_2025.rds` | 3.4 GB | 283,318,210 | 2,191 weeks × 129,310 px (pr+pet, climatology) |
+| `spei_4km_monthly_2013_2025.rds` | 1.2 GB | 20,172,360  | 156 months × 129,310 px (SPI/SPEI 1m/3m/6m) |
+| **`spei_4km_weekly_2013_2025.rds`** | **5.5 GB** | **87,672,180** | **678 weeks × 129,310 px (SPI/SPEI 4w/13w/26w)** |
+| `qc_report.rds` | 300 B | per-file ✓ | completeness audit |
+
+ISO-week join key (`year_week`) is consistent across USDM, SPEI weekly, GridMET weekly. The weekly SPEI is the primary climatic reference for Phase 6; monthly SPEI is kept for cross-check against published USDM scoring frameworks (which historically operate at monthly resolution).
+
+### Next session priorities
+1. **Phase 6 script 07 design sign-off** — see [Phase 6 design sketch](#phase-6-design-sketch-2026-06-06) below; decide modules + scope before coding.
+2. **Temporal scope decision** — full 13-yr (2013 launch-lag + 2014/2015 pre-S2 winter gaps) vs uniform 2016-2025 (full S30+L30 era). Per memory `feedback_systematic_over_tailored`, default leans toward "accept the gaps, run uniform method"; the call depends on whether the validation grain forces uniformity (USDM-confusion tables are robust to missing weeks; per-pixel time-series correlation against weekly SPEI is more sensitive).
+3. **Deferrable cleanup**: spei_weekly closure-capture fix; no rerun planned but the fix should land before any climatology extension.
+
+## Phase 6 design sketch (2026-06-06)
+
+**Goal**: Validate the NDVI-derived drought signal (anomalies + derivatives) against an independent ground truth (USDM categorical, SPEI continuous), at a grain that respects the pixel-week structure of the data.
+
+**Sketch is provisional — pending user review/approval before any code lands.**
+
+### Inputs to script 07
+
+| Source | Layer | Frequency | Field(s) |
+|---|---|---|---|
+| NDVI signal | `modeled_ndvi_anomalies/anomalies_YYYY.rds` × 13 | per-DOY | `ndvi_anom`, `ndvi_anom_lwr/upr`, `is_significant` |
+| NDVI signal | `change_derivatives_posteriors/YYYY/doy_DDD_window_WW.rds` × 17,704 | per (DOY, 3/7/14/30-day window) | `change_anom`, `change_anom_lwr/upr`, `is_significant` |
+| USDM (ground truth, categorical) | `usdm_4km_weekly_2013_2025.rds` | weekly | `usdm_cat` ∈ {none, D0, D1, D2, D3, D4} |
+| SPEI (continuous reference) | `spei_4km_weekly_2013_2025.rds` | weekly | `spi_4w/13w/26w`, `spei_4w/13w/26w` |
+| Ecoregion grouping | `pixel_to_ecoregion_l2.rds` | static | `l2_id` (9 substantive L2s) |
+
+### Decisions needed (user input)
+
+| # | Question | Default if no preference |
+|---|---|---|
+| 1 | Validation grain — pixel-week, ecoregion-week, or both? | both (pixel-week is the test; ecoregion-week is the reporting summary) |
+| 2 | Temporal scope — 13-yr (2013-2025) or uniform 10-yr (2016-2025)? | uniform 10-yr; cross-reference figures for 2013-2015 as supplementary |
+| 3 | SPEI window of record — match 4w to weekly NDVI; 13w to derivative 14-30 window; or scan all? | match by timescale (4w↔3/7-day, 13w↔14/30-day) + report 26w as longer-context baseline |
+| 4 | Primary skill metric — categorical (USDM-class confusion) or continuous (correlation/regression vs SPEI)? | both, in separate sub-modules |
+| 5 | Pixel resampling — leave full 129,310 or stratify-sample for figure-friendly summaries? | full for stats; stratified random N=2000 for diagnostics + figures |
+| 6 | NDVI signal collapse — anomaly mean only, derivative significance flag only, or joint? | joint: NDVI anomaly continuous + derivative-significance categorical |
+
+### Proposed script 07 architecture (mirrors 08's section-CLI pattern)
+
+```
+07_validate_against_drought.R --section=<name> [--scope=10y|13y]
+
+Sections (sequential, each cached to disk so reruns are cheap):
+  align_weekly       — collapse per-DOY NDVI anomalies to ISO-week summaries
+                       (mean ndvi_anom, max |ndvi_anom|, fraction-DOYs-significant)
+                       joined to USDM week + SPEI 4w/13w/26w
+                       Output: ndvi_drought_join_weekly_<scope>.rds (~6-8 GB est.)
+  
+  categorical_usdm   — USDM-class confusion matrices:
+                       NDVI-anomaly z-score binned vs USDM D0-D4
+                       Per ecoregion + CONUS-Midwest aggregate
+                       Output: usdm_confusion_<scope>.rds + figures
+  
+  continuous_spei    — Per-pixel + per-ecoregion-week regression:
+                       ndvi_anom ~ spei_<W> + factor(year_week)
+                       Lag analysis (NDVI vs SPEI t / t-1 / t-2 weeks)
+                       Output: spei_regression_<scope>.rds + figures
+  
+  event_detection    — Drought event = run of weeks where USDM ≥ D1
+                       NDVI-signal hit/miss/false-alarm classification
+                       (was NDVI z-anom ≤ -threshold for any week in event?)
+                       Output: events_<scope>.rds + figures
+  
+  qc                 — pixel + week alignment audit across all outputs
+```
+
+### Why this shape
+
+- **`section`-CLI matches 08's pattern** — same dispatcher, same logging convention, same cache-on-disk reruns. Familiar shape for next session.
+- **`align_weekly` runs once** then the four analysis sections (categorical, continuous, event, qc) all read from its cached output — keeps the ~88M-row per-pixel join from being rebuilt 4×.
+- **Two scope flags** (`--scope=10y|13y`) without parallel script copies — one codepath, controlled by filter at `align_weekly`.
+- **Ecoregion + Midwest aggregate** in every output so stats are interpretable at both granularities; user can pick whichever grain answers a given question.
+
+### Open architectural questions
+
+- **Per-pixel regression at 129,310 × 678 ≈ 88M rows** — fits in memory as a tall data.table but downstream `lm()` / fixed-effects would need a `fixest` / per-group `data.table[, lm(...)]` pattern to scale. Decide before coding: `fixest` (fast, memory-friendly) vs per-ecoregion split + serial OLS.
+- **Anomaly significance threshold for event-detection** — `is_significant` (Bayesian CI excludes 0, already on disk) is the natural call. But USDM thresholds are calibrated against various ad-hoc continuous indicators; need to pick z-score bins for the confusion matrix that don't trivialize the comparison. Suggest: report 3 binnings (1σ / 1.5σ / 2σ) and let the reader judge.
+- **Spatial autocorrelation in pixel-level stats** — 4km pixels in the same ecoregion week are NOT independent. For headline numbers, ecoregion-week aggregate is the honest summary; pixel-level numbers are diagnostic-only. Should we mention this in the doc upfront?
+
+### What's NOT in scope for script 07
+
+- Drought classification system (was `07_classify_drought_PLACEHOLDER.R` — separate script, separate decision later)
+- New satellite-data pulls (out of phase)
+- Re-fit of any GAM (this is downstream-only)
 
 ## Session Summary (2026-06-03) — Phase 6 prep COMPLETE
 
