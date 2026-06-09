@@ -1,34 +1,63 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-06 ~08:45 CDT — Phase 6 `align_weekly` launched (10y scope, weekend run, ~60-90 min).
+**Updated**: 2026-06-09 ~09:30 CDT — derivatives_2021 rebuild COMPLETE (20.0 hr total wall); `run_phase6_align_weekly.sh` relaunched (10y scope, ~60-90 min wall).
 
-## Active (2026-06-06)
+## Active (2026-06-09)
 
-### Phase 6 align_weekly — pixel-week master join
+### Phase 6 align_weekly — restart of original blocked task
 
-- Launched 2026-06-06 06:43 CDT (host bash, nohup + disown, parent PID 1817531, will reparent to PID 1 after shell exit)
+- Launched 2026-06-09 ~09:30 CDT (host bash, nohup + disown)
 - Script: `run_phase6_align_weekly.sh` → `07_validate_drought_signal.R --section=align_weekly --scope=10y`
-- Log dir: `validation/phase6_align_10y_20260606_064319/`
+- Log dir: `validation/phase6_align_10y_<tag>/`
   - `sequence.log` — orchestration / step markers
-  - `align_weekly.log` — live R stdout (per-year load + collapse + merge progress)
+  - `align_weekly.log` — live R stdout
 - Markers: `SEQUENCE_COMPLETE` ✓ or `SEQUENCE_FAILED` ✗ in log dir
-- Output: `validation/ndvi_drought_join_weekly_10y.rds` (~6-8 GB est.)
-- Expected wall: 60-90 min (10 years × 5-8 min/year + final joins + save)
+- Output: `validation/ndvi_drought_join_weekly_10y.rds` (~6-8 GB est)
+- Expected wall: ~60-90 min for 10y scope (~75-120 min for 13y)
 - Docker container `conus-hls-drought-monitor` must stay UP
 
-### What's in flight
-- Per-year sequential: load anomalies (~1.2 GB) → collapse to ISO-week → load derivatives (~11 GB) → collapse + dcast to per-window-wide → merge → drop year tables
-- After 10-year loop: `rbindlist` → cross-year-boundary re-collapse → join USDM weekly + SPEI weekly + ecoregion lookup → save
-- Parent peak memory: ~25-30 GB during single-year processing, ~13-14 GB at final stage
-
-### Morning check
+### Mid-day check
 ```bash
-ls /mnt/malexander/datasets/ndvi_monitor/validation/phase6_align_10y_20260606_064319/
-# SEQUENCE_COMPLETE = ✓, SEQUENCE_FAILED = ✗
-tail -20 /mnt/malexander/datasets/ndvi_monitor/validation/phase6_align_10y_20260606_064319/align_weekly.log
+LOG=$(ls -dt /mnt/malexander/datasets/ndvi_monitor/validation/phase6_align_10y_* | head -1)
+ls "$LOG"/  # SEQUENCE_COMPLETE = ✓, SEQUENCE_FAILED = ✗
+tail -30 "$LOG/align_weekly.log"
 ```
 
-**Next after this run completes**: Phase 6 sections 2-5 (categorical_usdm, continuous_spei, event_detection, qc). USDM-as-lagging-indicator framing baked into stubs — lead-time skill curves rather than synchronous confusion matrices.
+**Next after align_weekly completes**: Phase 6 sections 2-5 (categorical_usdm, continuous_spei, event_detection, qc). USDM-as-lagging-indicator framing baked into stubs — lead-time skill curves rather than synchronous confusion matrices.
+
+## Session Summary (2026-06-08 / 2026-06-09) — derivatives_2021 rebuild COMPLETE
+
+### Run outcome — `run_2021_rebuild.sh`
+
+Launched 2026-06-08 13:18 CDT, `SEQUENCE_COMPLETE` at 2026-06-09 09:18 CDT. Total wall: **20.0 hr** (16.4 hr Step 1 + 3.6 hr Step 2).
+
+| Step | Wall | Output |
+|---|---:|---|
+| `rebuild_06` | 16.4 hr (762.4 min compute) | `derivatives_2021.rds` 11 GB, 188,533,980 rows, 92.6% significant, mean anomaly -0.000359 |
+| `restore_stats_06c` | 3.6 hr | `change_derivatives_stats.rds` 548 B, 13 rows (2013-2025); 2021 has `elapsed_mins=762.4`, others NA (mtime-rebuild from on-disk year files) |
+
+### Trigger — CIFS post-rename corruption of derivatives_2021.rds
+
+Phase 6 `align_weekly` (launched 2026-06-06) failed at year 2021 with `lzma decoder corrupt data` reading derivatives_2021.rds (11.4 GB). Same failure class as derivatives_2016.rds on 2026-05-27 (CIFS server lost buffered bytes during a backup window post-rename). 2026-06-08 morning audit confirmed:
+- 9 other year-summary files (2016-2020, 2022-2025) all read cleanly (188,792,600 rows each)
+- `baseline_posteriors/` (365), `year_predictions_posteriors/2021/` (365) all read cleanly
+- `valid_pixels_landcover_filtered.rds` (129,310) and the stale 13-row `change_derivatives_stats.rds` clean
+- First 400/1460 `change_derivatives_posteriors/2021/doy_*_window_*.rds` files read cleanly before audit was killed (no longer load-bearing — Option B overwrites them)
+
+Decision: canonical 06 re-run rather than algebraic-identity resurrection. Resurrection would shave ~12 hr but introduces novel code for a one-off recovery. 06 already has CIFS defenses baked in (`saveRDS_validated` post-rename readback added 2026-05-27).
+
+### Verification (2026-06-09 ~09:30)
+
+- `derivatives_2021.rds`: 11 GB, 188,533,980 rows, 92.6% significant ✓. Pre-rebuild stale-stats row reported 174,802,540 sig / mean -3.78e-04; new values are 174,553,320 sig / mean -3.59e-04 — within sim-level drift from BLAS-thread non-determinism (per memory note on `project_script02_parallelization`).
+- `change_derivatives_stats.rds`: 13 rows, years 2013-2025 ✓.
+- `baseline_posteriors/doy_200.rds` + `doy_269.rds`: XZ-integrity ✓ via `xz -t` (7.5 / 7.6 s full per-block CRC32 verify). These were the two baseline reads that triggered "Host is down" warnings during the rebuild; mtimes (May 7-8) prove they weren't mutated, xz CRC32 confirms bytes are intact.
+
+### Operational notes
+
+- 9 transient "Host is down" warnings in `rebuild_06.log` across the 762-min run (5 on per-window `.tmp` files mid-write, 2 on baseline reads, 2 generic `lzma decoding result 10`). All recovered by retry layer; final result was 365/365 valid DOYs (100% coverage). Warnings were noise from the retry layer, NOT the dangerous post-rename byte-loss class.
+- Side issue from 13:16 launch attempt: matrixStats missing from container (re-installed via `docker exec -u root`). Verify after any future `docker compose up --build` per [project_container_matrixstats_drift](../../malexander/.claude/projects/-home-malexander-r-projects-github-NDVI-drought-monitoring/memory/project_container_matrixstats_drift.md). The 13:18 relaunch succeeded.
+- Pre-step (manual): renamed corrupt year file to `derivatives_2021.rds.corrupt-2026-06-08.bak` (parallel to 2016 evidence file). Wrapper's pre-flight guard refuses to launch if original path is still occupied.
+- **R↔CIFS readRDS hang on the two flagged baseline files (worth investigating later)**: post-rebuild verification attempts via `readRDS()` from R (host or docker) silently hung on doy_200.rds + doy_269.rds even after CIFS was free. `xz -t` worked cleanly in seconds. Some R/CIFS interaction worth investigating, but `xz -t` is the more authoritative integrity check anyway.
 
 ## Session Summary (2026-06-05 / 2026-06-06) — weekly SPI/SPEI COMPLETE
 
