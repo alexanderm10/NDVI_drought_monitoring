@@ -7,7 +7,10 @@
 # ecoregion attributes) for the chosen scope.
 #
 # Sequence:
-#   1. align_weekly --scope=$SCOPE  — sole step (~60-90 min for 10y)
+#   1. align_weekly --scope=$SCOPE  — sole step (~5 hr for 10y, ~6.3 hr for 13y)
+#
+# Per-year cost is remarkably uniform: ~24 min/year (range 23.7-24.6 min) in the
+# 2026-06-09 10y run. Add ~1 hr for rbindlist + dedup + USDM/SPEI joins + save.
 #
 # Output marker:
 #   $LOG_DIR/SEQUENCE_COMPLETE   — step succeeded
@@ -69,7 +72,7 @@ main() {
   log "Run tag: $RUN_TAG"
   log "Scope:   $SCOPE"
   log "Log dir: $LOG_DIR"
-  log "Expected duration: ~60-90 min (10y) / ~75-120 min (13y)"
+  log "Expected duration: ~5 hr (10y) / ~6.3 hr (13y)"
   log ""
 
   if ! run_step "align_weekly" step_align_weekly; then

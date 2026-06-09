@@ -1,29 +1,34 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-09 ~09:30 CDT — derivatives_2021 rebuild COMPLETE (20.0 hr total wall); `run_phase6_align_weekly.sh` relaunched (10y scope, ~60-90 min wall).
+**Updated**: 2026-06-09 ~14:30 CDT — Phase 6 align_weekly (10y) COMPLETE (5.0 hr wall); derivatives_2021 rebuild validated end-to-end. No active runs. Next: Phase 6 sections 2-5 design sign-off.
 
-## Active (2026-06-09)
+## No active runs
 
-### Phase 6 align_weekly — restart of original blocked task
+**Next**: Phase 6 sections 2-5 (categorical_usdm, continuous_spei, event_detection, qc) — design sketch in [Phase 6 design sketch (2026-06-06)](#phase-6-design-sketch-2026-06-06) below; sign-off needed before coding. USDM-as-lagging-indicator framing baked into stubs — lead-time skill curves rather than synchronous confusion matrices.
 
-- Launched 2026-06-09 ~09:30 CDT (host bash, nohup + disown)
-- Script: `run_phase6_align_weekly.sh` → `07_validate_drought_signal.R --section=align_weekly --scope=10y`
-- Log dir: `validation/phase6_align_10y_<tag>/`
-  - `sequence.log` — orchestration / step markers
-  - `align_weekly.log` — live R stdout
-- Markers: `SEQUENCE_COMPLETE` ✓ or `SEQUENCE_FAILED` ✗ in log dir
-- Output: `validation/ndvi_drought_join_weekly_10y.rds` (~6-8 GB est)
-- Expected wall: ~60-90 min for 10y scope (~75-120 min for 13y)
-- Docker container `conus-hls-drought-monitor` must stay UP
+## Session Summary (2026-06-09) — Phase 6 align_weekly COMPLETE (10y)
 
-### Mid-day check
-```bash
-LOG=$(ls -dt /mnt/malexander/datasets/ndvi_monitor/validation/phase6_align_10y_* | head -1)
-ls "$LOG"/  # SEQUENCE_COMPLETE = ✓, SEQUENCE_FAILED = ✗
-tail -30 "$LOG/align_weekly.log"
-```
+### Run outcome — `run_phase6_align_weekly.sh`
 
-**Next after align_weekly completes**: Phase 6 sections 2-5 (categorical_usdm, continuous_spei, event_detection, qc). USDM-as-lagging-indicator framing baked into stubs — lead-time skill curves rather than synchronous confusion matrices.
+Launched 2026-06-09 09:26:47 CDT, `SEQUENCE_COMPLETE` at 2026-06-09 14:26 CDT. Total wall: **5.0 hr (300.0 min)** for 10y scope.
+
+| Stage | Detail |
+|---|---|
+| Per-year loop (2016-2025) | 10 × ~24.0 min (range 23.7-24.6 min, remarkably uniform). Each year: anomalies 47.2M rows → 6.85M pixel-weeks; derivatives 188.8M rows → 6.85M pixel-weeks. |
+| Year 2021 — rebuild validation | Read cleanly with the matching 6,853,430-row count → 2026-06-08 CIFS-corruption rebuild is end-to-end validated. |
+| rbindlist + cross-year-boundary dedup | 68,534,300 → 67,629,130 rows |
+| Join USDM + SPEI weekly + ecoregion | 67,629,130 rows, USDM 99.62% non-NA, SPEI-4w 99.62% non-NA, ecoregion 100% |
+| Save | `ndvi_drought_join_weekly_10y.rds` 8.3 GB (8,901.8 MB), pixel coverage 129,310/129,310 (drift 0) |
+
+### Docstring ETA correction
+
+`run_phase6_align_weekly.sh` advertised ~60-90 min for 10y scope — actual is ~5 hr (the per-year loop alone is ~4 hr at uniform ~24 min/year, plus ~1 hr for rbindlist + dedup + joins + save). Updated this commit. Revised estimates:
+- 10y scope: ~5 hr ± 10 min
+- 13y scope: ~6.3 hr ± 15 min
+
+### Open thread (deferred, not blocking)
+
+R-side `readRDS()` silently hangs on two baseline files (`baseline_posteriors/doy_200.rds`, `doy_269.rds`) from both docker and host context, even when CIFS is idle. `xz -t` on the same files passes per-block CRC32 in 7-8 sec. This was flagged 2026-06-09 during rebuild verification (these two files triggered "Host is down" warnings during the rebuild) but is NOT blocking because the rebuild + downstream align_weekly both completed successfully and `xz -t` is the more authoritative integrity check. Some R↔CIFS interaction worth investigating later.
 
 ## Session Summary (2026-06-08 / 2026-06-09) — derivatives_2021 rebuild COMPLETE
 
