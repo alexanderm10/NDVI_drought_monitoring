@@ -180,13 +180,15 @@
       "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring log --oneline -6)",
       "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring add CONUS_HLS_drought_monitoring/RUNNING_ANALYSES.md .vscode/settings.json)",
       "Bash(Rscript /tmp/audit_posteriors.R \\\\ *)",
-      "Bash(nohup ./run_2021_rebuild.sh)"
+      "Bash(nohup ./run_2021_rebuild.sh)",
+      "Bash(mv /mnt/malexander/datasets/ndvi_monitor/validation/usdm_confusion_10y.rds /mnt/malexander/datasets/ndvi_monitor/validation/usdm_confusion_10y.v1.rds && ls -lh /mnt/malexander/datasets/ndvi_monitor/validation/usdm_confusion_10y*.rds)"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [
       "/mnt/malexander/datasets/ndvi_monitor/gam_models/baseline_posteriors",
       "/mnt/malexander/datasets/ndvi_monitor/gam_models",
-      "/tmp"
+      "/tmp",
+      "/mnt/malexander/datasets/ndvi_monitor/validation"
     ]
   }
 }

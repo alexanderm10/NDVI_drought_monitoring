@@ -34,9 +34,8 @@ Analysis pipeline (run sequentially)
   05c_create_yearly_gifs.R               - Split 05b animation frames into 12 yearly GIFs
   06_calculate_change_derivatives.R      - Multi-window rate-of-change anomalies (3/7/14/30 day)
   07_visualize_derivatives.R             - Visualize change-derivative outputs (post-script-06)
-
-Not in main pipeline
-  07_classify_drought_PLACEHOLDER.R      - PLACEHOLDER: anomaly → drought-category classification (not validated)
+  08_validation_data_setup.R             - Pull + grid USDM / GridMET / SPEI to the 4km pixel basis (--section= CLI)
+  09_validate_drought_signal.R           - Phase 6 validation: align NDVI to weekly + skill-score vs USDM/SPEI (--section= CLI)
 
 Acquisition module (sourced by 00_monthly_update.R; also runnable directly)
   acquisition/hls_acquisition_core.R              - NASA HLS STAC search + download helpers
@@ -184,10 +183,21 @@ docker exec conus-hls-drought-monitor Rscript 07_visualize_derivatives.R
 - Faceted-by-year time series for each window
 - **Location**: `/data/figures/DERIVATIVES/`
 
-### Planned future step
+### Phase 6: Validation
 
-#### **Script 07_classify_drought_PLACEHOLDER.R** (NOT for operational use)
-This file defines three candidate classification methods (percentile-based, significance-based, hybrid) for converting NDVI anomalies into drought categories analogous to USDM (D0-D4). The `_PLACEHOLDER` suffix is load-bearing: thresholds are not validated against any ground-truth dataset, and USDM agreement metrics are TODOs. Do not use the outputs operationally without method validation. Treat this as a starting point for a future drought-classification subproject.
+#### **Script 08: Validation Data Setup** (~3-18 hr depending on sections)
+```bash
+docker exec -w /workspace conus-hls-drought-monitor \
+  Rscript 08_validation_data_setup.R --section=<name>
+```
+Pulls + rasterizes reference data onto the 4 km Midwest pixel basis. Sections: `ecoregion`, `usdm_download`, `usdm_process`, `gridmet`, `spei`, `gridmet_weekly`, `spei_weekly`, `qc`. Outputs in `/data/validation/` (USDM weekly, GridMET daily/weekly, SPI/SPEI weekly + monthly, ecoregion lookup).
+
+#### **Script 09: Validate Drought Signal** (~5 hr align_weekly; ~20-40 min per analysis section)
+```bash
+docker exec -w /workspace conus-hls-drought-monitor \
+  Rscript 09_validate_drought_signal.R --section=<name> [--scope=10y|13y]
+```
+Sections: `align_weekly` builds the master pixel-week join (NDVI summaries + USDM + SPEI + ecoregion); the analysis sections (`categorical_usdm`, `continuous_spei`, `event_detection`, `qc`) read the cached join and score the NDVI signal against USDM (categorical, lead-time-K sweep) and SPEI (continuous). USDM is treated as a lagging indicator throughout.
 
 ## Data Flow
 

@@ -1,10 +1,76 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-09 ~14:30 CDT — Phase 6 align_weekly (10y) COMPLETE (5.0 hr wall); derivatives_2021 rebuild validated end-to-end. No active runs. Next: Phase 6 sections 2-5 design sign-off.
+**Updated**: 2026-06-09 ~16:00 CDT — Phase 6 `categorical_usdm` v1 ran + revealed wrong-framing (HSS≈0, wrong-direction K trend); v2 (bidirectional, magnitude + 4 derivatives) launched 15:56 CDT, ETA 30-50 min. Renumber: `07_validate_drought_signal.R` → `09_*`; `07_classify_drought_PLACEHOLDER.R` deleted.
 
-## No active runs
+## Active run
 
-**Next**: Phase 6 sections 2-5 (categorical_usdm, continuous_spei, event_detection, qc) — design sketch in [Phase 6 design sketch (2026-06-06)](#phase-6-design-sketch-2026-06-06) below; sign-off needed before coding. USDM-as-lagging-indicator framing baked into stubs — lead-time skill curves rather than synchronous confusion matrices.
+**`09_validate_drought_signal.R --section=categorical_usdm --scope=10y` (v2)**
+- Launched: 2026-06-09 15:56 CDT (container PID 28730)
+- Log: `logs/categorical_usdm_v2_10y_20260609_1556.log`
+- ETA: ~30-50 min total (cache load ~2 min, z-standardize 5 cols ~5 min, lead-K + USDM-change ~2 min, skill+correlation sweep ~15-25 min over 240 iterations, save ~1 min)
+- Output: `/data/validation/usdm_confusion_10y.rds` (v1 archived as `usdm_confusion_10y.v1.rds`)
+
+## Session Summary (2026-06-09 afternoon) — `categorical_usdm` v1 + v2
+
+### Script renumber + placeholder delete
+- `git mv 07_validate_drought_signal.R 09_validate_drought_signal.R` — slots after `08_validation_data_setup.R` in workflow order.
+- Deleted `07_classify_drought_PLACEHOLDER.R` (unused; read `conus_4km_anomalies.csv` no longer in pipeline output).
+- Updated `run_phase6_align_weekly.sh:67` and `WORKFLOW.md` (script list + new Phase 6 section pointing to 08/09).
+- `07_visualize_derivatives.R` kept at 07 — actively in use, slots after script 06.
+
+### `categorical_usdm` v1 (2026-06-09 14:58 → 15:35 CDT, 20.8 min wall)
+Initial implementation: per-pixel z of `ndvi_anom_mean`, lead-K USDM = max(usdm[t..t+K]) for K ∈ {0,1,2,4,8}, skill sweep over (z-threshold × USDM-threshold × K × stratum), plus a `bayes_sig` comparator from `ndvi_n_sig ≥ 4`.
+
+**Bug fixed mid-session**: integer overflow in `compute_skill` HSS denominator — `(tp+fn)*(fn+tn)` overflows R's 32-bit int when subset sizes exceed sqrt(2^31) ≈ 46K; per-ecoregion subsets are tens of millions. Cast all four contingency cells to numeric upfront. Verified at overflow scale (30M/5M/2M/30M test case yields POD=0.94, HSS=0.79).
+
+**Headline (Midwest aggregate, USDM ≥ D1)** — saved to `usdm_confusion_10y.v1.rds`:
+
+| K | bayes_sig | z ≤ −1.5σ |
+|--:|---|---|
+| 0 | POD=0.997 FAR=0.78 CSI=0.22 **HSS≈0** | POD=0.08 FAR=0.73 CSI=0.07 HSS=0.025 |
+| 4 | POD=0.997 FAR=0.73 CSI=0.27 **HSS≈0** | POD=0.07 FAR=0.71 CSI=0.06 HSS=0.007 |
+| 8 | POD=0.997 FAR=0.68 CSI=0.32 **HSS≈−0.001** | POD=0.07 FAR=0.68 CSI=0.06 HSS=0.001 |
+
+Three problems with the framing:
+1. `bayes_sig` fires across the population — `ndvi_n_sig ≥ 4` predicate is direction-agnostic and base rate of significance is ~90%, so HSS≈0 (high recall, no precision).
+2. z-bin skill barely above chance.
+3. K-trend is the **wrong direction** for HSS — lead-time hypothesis would predict skill *increasing* with K; instead 0.025 → 0.001.
+
+Root cause: synchronous "is USDM high?" framing is the wrong question. USDM movement matters more than USDM level.
+
+### `categorical_usdm` v2 (in flight — launched 2026-06-09 15:56 CDT)
+
+Reframed per session discussion: directionality matters in **both directions** (drought worsening AND drought receding); both **magnitude** (anomaly z) and **derivative** (rate of change) are NDVI signals; USDM target is signed change over [t, t+K] rather than static class.
+
+**Five NDVI signals**, all per-pixel z-standardized:
+- `ndvi_z` (magnitude — anomaly z)
+- `deriv_w03_z`, `deriv_w07_z`, `deriv_w14_z`, `deriv_w30_z` (rate, 4 windows)
+
+**USDM target**: `usdm_change_K = usdm_lead_K − usdm[t]` (signed).
+
+**Two confusion-matrix directions** per (stratum × K × signal):
+- INTENSIFICATION: pred = signal ≤ −threshold paired with usdm_change ≥ +T
+- RECOVERY:        pred = signal ≥ +threshold paired with usdm_change ≤ −T
+
+**Z thresholds**: signed {−2.5, −2, −1.5, −1, −0.5, +0.5, +1, +1.5, +2, +2.5}σ.
+**USDM-change thresholds**: ±{1, 2, 3} class transitions.
+**K values**: {1, 2, 4, 8} (K=0 dropped — change is always 0 there).
+
+**Side cache**: Spearman ρ between (−signal) and `usdm_change` per (stratum × K × signal); negated so positive ρ = good skill (NDVI moves opposite to USDM). 200 rows total.
+
+**Skill table size**: 12 strata × 4 K × 5 signals × 2 directions × 3 USDM-change × 5 z = **7,200 rows** (vs v1's 1,440).
+
+**`bayes_sig` comparator dropped** in v2 — `ndvi_n_sig` on the cached file is direction-agnostic, can't honor the bidirectional framing without re-running align_weekly (5 hr) to add `ndvi_n_sig_neg/pos`. Flagged in code comments as the re-enable path.
+
+### Next session priorities
+
+1. **Validate v2 results in the morning** — `usdm_confusion_10y.rds` should be ~80-100 KB (vs v1's 72 KB given the expanded skill table). Check:
+   - Spearman ρ — sign and magnitude per signal/K/ecoregion. Should be positive (NDVI moves opposite to USDM); larger derivative-window signals (w14, w30) may correlate better than w03 if the lead-time hypothesis holds.
+   - Direction asymmetry — intensification HSS likely beats recovery HSS (NDVI lag during recovery is longer than during onset).
+   - Per-ecoregion variation — Great Plains (cropland minimal) likely shows stronger NDVI-USDM coupling than Eastern Temperate Forests (heavily managed cropland).
+2. **If v2 results are interpretable**: design `event_detection` and `continuous_spei` to follow the same bidirectional + magnitude+derivative pattern.
+3. **If v2 also shows weak skill**: investigate whether the per-pixel z-standardization is the right baseline (vs ecoregion-week pooled), or whether the issue is the cached anomaly representation itself.
+4. **Deferred**: align_weekly extension for directional `ndvi_n_sig_neg/pos` (would let us re-add the bayes_sig comparator).
 
 ## Session Summary (2026-06-09) — Phase 6 align_weekly COMPLETE (10y)
 

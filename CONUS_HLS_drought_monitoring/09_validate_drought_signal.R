@@ -1,5 +1,5 @@
 # ==============================================================================
-# 07_validate_drought_signal.R
+# 09_validate_drought_signal.R
 #
 # Phase 6: validate the NDVI-derived drought signal (anomalies + derivatives)
 # against independent references (USDM categorical, SPEI/SPI continuous), at
@@ -24,7 +24,7 @@
 #
 # Usage (in container):
 #   docker exec -w /workspace conus-hls-drought-monitor \
-#     Rscript 07_validate_drought_signal.R --section=align_weekly [--scope=10y|13y]
+#     Rscript 09_validate_drought_signal.R --section=align_weekly [--scope=10y|13y]
 #
 # Outputs land in /data/validation/.
 #
@@ -95,7 +95,9 @@ config <- list(
   spei_weekly_file     = file.path(paths$validation_data, "spei_4km_weekly_2013_2025.rds"),
   # Scope-dependent output (set after CLI parse)
   align_out_10y        = file.path(paths$validation_data, "ndvi_drought_join_weekly_10y.rds"),
-  align_out_13y        = file.path(paths$validation_data, "ndvi_drought_join_weekly_13y.rds")
+  align_out_13y        = file.path(paths$validation_data, "ndvi_drought_join_weekly_13y.rds"),
+  usdm_confusion_10y   = file.path(paths$validation_data, "usdm_confusion_10y.rds"),
+  usdm_confusion_13y   = file.path(paths$validation_data, "usdm_confusion_13y.rds")
 )
 
 # ------------------------------------------------------------------------------
@@ -392,15 +394,367 @@ section_align_weekly <- function(scope) {
 # SECTION stubs — to be implemented after align_weekly is verified
 # ==============================================================================
 
+# ==============================================================================
+# SECTION: categorical_usdm (v2 — bidirectional, magnitude + 4 derivatives)
+#
+# v1 (initial, 2026-06-09 14:58 run) asked the wrong question: "when USDM is
+# high, does NDVI z exceed a negative threshold?" Resulting HSS≈0 and a wrong-
+# direction lead-K trend confirmed the framing was off.
+#
+# v2 (this code) asks the right question: "when USDM is CHANGING, does NDVI
+# move in the corresponding direction?" Drought worsens AND drought eases —
+# both directions matter and both are scored.
+#
+# Five NDVI signals (all per-pixel z-standardized over the loaded record):
+#   ndvi_z              — magnitude (anomaly z)
+#   deriv_w03_z         — 3-day window rate-of-change (z)
+#   deriv_w07_z         — 7-day window rate-of-change (z)
+#   deriv_w14_z         — 14-day window rate-of-change (z)
+#   deriv_w30_z         — 30-day window rate-of-change (z)
+#
+# USDM target = SIGNED CHANGE over [t, t+K]:
+#   usdm_change_K = usdm_lead_K - usdm[t]
+# (positive = drought intensifying, negative = drought receding)
+#
+# Two confusion-matrix directions per (stratum × K × signal):
+#   INTENSIFICATION: pred = signal ≤ -threshold paired with usdm_change ≥ +T
+#   RECOVERY:        pred = signal ≥ +threshold paired with usdm_change ≤ -T
+#
+# Side cache:
+#   Spearman ρ between (-signal) and usdm_change per (stratum × K × signal).
+#   Negated so positive ρ = "good skill" (NDVI moves opposite to USDM, as
+#   expected since drought worsening = USDM up + NDVI down).
+#
+# bayes_sig comparator: DROPPED in v2. The cached `ndvi_n_sig` is direction-
+# agnostic (counts both browning AND greening significance), so it can't honor
+# the bidirectional framing without an align_weekly extension that splits into
+# ndvi_n_sig_neg / ndvi_n_sig_pos. Re-add if/when that extension lands.
+#
+# Reads:  ndvi_drought_join_weekly_<scope>.rds (built by section_align_weekly)
+# Writes: usdm_confusion_<scope>.rds (overwrites v1 output)
+# ==============================================================================
+compute_skill <- function(tp, fp, fn, tn) {
+  # 2x2 contingency → POD / FAR / CSI / HSS (Heidke). Returns named 4-vector.
+  # Cast to double: callers pass integer sums (from sum(logical)), and HSS's
+  # denominator (tp+fn)*(fn+tn) overflows R's 32-bit int when subset sizes
+  # exceed ~46K (sqrt of .Machine$integer.max); ecoregion subsets here are
+  # tens of millions of rows.
+  tp <- as.numeric(tp); fp <- as.numeric(fp)
+  fn <- as.numeric(fn); tn <- as.numeric(tn)
+  p   <- tp + fn
+  pp  <- tp + fp
+  pod <- if (p > 0)  tp / p   else NA_real_
+  far <- if (pp > 0) fp / pp  else NA_real_
+  csi <- if ((tp + fp + fn) > 0) tp / (tp + fp + fn) else NA_real_
+  denom <- (tp + fn) * (fn + tn) + (tp + fp) * (fp + tn)
+  hss <- if (denom > 0) 2 * (tp * tn - fp * fn) / denom else NA_real_
+  c(pod = pod, far = far, csi = csi, hss = hss)
+}
+
 section_categorical_usdm <- function(scope) {
-  cat("\n=== Section: categorical_usdm (scope =", scope, ") — STUB ===\n")
-  cat("Not yet implemented. USDM-class confusion matrices, per ecoregion +\n")
-  cat("Midwest aggregate, NDVI z-anomaly binned at {-0.5, -1, -1.5, -2, -2.5}σ.\n")
-  cat("Lead-time variants (USDM is lagging — see header):\n")
-  cat("  - synchronous: USDM(t)\n")
-  cat("  - lead-K: max(USDM(t), USDM(t+1), ..., USDM(t+K)) for K = 1, 2, 4, 8 wk\n")
-  cat("  Report skill (HSS, CSI) as a function of K to surface the lead-time curve.\n")
-  cat("Reads: ndvi_drought_join_weekly_", scope, ".rds\n", sep = "")
+  cat("\n=== Section: categorical_usdm v2 (scope =", scope, ") ===\n")
+  stopifnot(scope %in% c("10y", "13y"))
+
+  in_file  <- if (scope == "10y") config$align_out_10y      else config$align_out_13y
+  out_file <- if (scope == "10y") config$usdm_confusion_10y else config$usdm_confusion_13y
+
+  if (!file.exists(in_file)) {
+    stop("Cache file missing: ", in_file,
+         "\n  Run --section=align_weekly --scope=", scope, " first.")
+  }
+  cat(sprintf("Input:  %s (%.1f GB)\n", basename(in_file), file.size(in_file) / 1e9))
+  cat(sprintf("Output: %s\n", basename(out_file)))
+
+  t_section <- Sys.time()
+
+  Z_THRESHOLDS_NEG           <- c(-0.5, -1.0, -1.5, -2.0, -2.5)
+  Z_THRESHOLDS_POS           <- c( 0.5,  1.0,  1.5,  2.0,  2.5)
+  USDM_CHANGE_THRESHOLDS_POS <- 1:3            # intensification
+  USDM_CHANGE_THRESHOLDS_NEG <- -(1:3)         # recovery
+  K_VALUES                   <- c(1L, 2L, 4L, 8L)   # K=0 dropped (change is always 0)
+  MAX_K                      <- max(K_VALUES)
+  MIN_VALID_WEEKS            <- 30L
+  Z_BREAKS                   <- c(-Inf, -2.5, -2.0, -1.5, -1.0, -0.5,
+                                  0, 0.5, 1.0, 1.5, 2.0, 2.5, Inf)
+
+  ANOM_COLS    <- c("ndvi_anom_mean",
+                    "deriv_w03_anom_mean", "deriv_w07_anom_mean",
+                    "deriv_w14_anom_mean", "deriv_w30_anom_mean")
+  SIGNAL_NAMES <- c("ndvi_z",
+                    "deriv_w03_z", "deriv_w07_z", "deriv_w14_z", "deriv_w30_z")
+
+  # --- 1. Load cache, keep only required columns ---
+  cat("\n[1] Load cache...\n")
+  dt <- as.data.table(readRDS_retry(in_file))
+  cat(sprintf("  raw: %s rows × %d cols\n", format(nrow(dt), big.mark = ","), ncol(dt)))
+  keep_cols <- c("pixel_id", "iso_year", "iso_week", "week_start",
+                 ANOM_COLS, "usdm", "L2_code", "L2_name")
+  dt <- dt[, ..keep_cols]
+  gc(verbose = FALSE)
+
+  n_px_in <- uniqueN(dt$pixel_id)
+  cat(sprintf("  pixel count: %d (expected %d)\n", n_px_in, EXPECTED_VALID_PIXELS))
+  if (n_px_in != EXPECTED_VALID_PIXELS) {
+    cat(sprintf("  WARN: pixel drift %d (see feedback_pixel_count_invariant)\n",
+                n_px_in - EXPECTED_VALID_PIXELS))
+  }
+
+  # --- 2. Per-pixel z-standardize all 5 NDVI signals ---
+  cat("\n[2] Per-pixel z-standardize 5 NDVI signals...\n")
+  setorder(dt, pixel_id, week_start)
+
+  drop_px <- integer(0)
+  for (i in seq_along(ANOM_COLS)) {
+    col_anom <- ANOM_COLS[i]
+    col_z    <- SIGNAL_NAMES[i]
+    cat(sprintf("  [%s → %s] ", col_anom, col_z))
+
+    stats <- dt[!is.na(get(col_anom)), .(
+      mu_pix  = mean(get(col_anom)),
+      sd_pix  = sd(get(col_anom)),
+      n_valid = .N
+    ), by = pixel_id]
+
+    drop_this <- stats[n_valid < MIN_VALID_WEEKS | sd_pix == 0 | is.na(sd_pix),
+                       pixel_id]
+    drop_px <- union(drop_px, drop_this)
+    cat(sprintf("dropping %d pixels (signal-specific σ=0 or n<%d)\n",
+                length(drop_this), MIN_VALID_WEEKS))
+
+    dt[stats, `:=`(mu_pix = i.mu_pix, sd_pix = i.sd_pix), on = "pixel_id"]
+    dt[, (col_z) := (get(col_anom) - mu_pix) / sd_pix]
+    dt[, c("mu_pix", "sd_pix") := NULL]
+  }
+  cat(sprintf("  total unique drop list: %d pixels (across all 5 signals)\n",
+              length(drop_px)))
+  if (length(drop_px) > 0L) dt <- dt[!pixel_id %in% drop_px]
+  # Drop raw anomaly cols — keep only z variants
+  dt[, (ANOM_COLS) := NULL]
+  gc(verbose = FALSE)
+
+  # --- 3. Build lead-K USDM + signed USDM_change columns ---
+  cat(sprintf("\n[3] Build lead-K USDM + USDM_change (K = %s)...\n",
+              paste(K_VALUES, collapse = ",")))
+
+  usdm_panel <- dt[, .(pixel_id, week_start, usdm)]
+  setkey(usdm_panel, pixel_id, week_start)
+
+  # Running max iterates K = 0..MAX_K. Snapshot to usdm_lead_K + usdm_change_K
+  # for K ∈ K_VALUES. na.rm = FALSE: any missing week in the window drops that
+  # (pixel, t, K) from downstream stats. USDM coverage ~99.6%, loss is small.
+  dt[, running_max := usdm]
+  for (K in 0:MAX_K) {
+    if (K > 0L) {
+      tmp <- usdm_panel[, .(pixel_id,
+                            ws_match = week_start - 7L * K,
+                            usdm_at_K = usdm)]
+      dt[tmp, usdm_at_K := i.usdm_at_K,
+         on = c("pixel_id", "week_start==ws_match")]
+      dt[, running_max := pmax(running_max, usdm_at_K, na.rm = FALSE)]
+      dt[, usdm_at_K := NULL]
+      rm(tmp)
+    }
+    if (K %in% K_VALUES) {
+      dt[, sprintf("usdm_lead_%d",   K) := running_max]
+      dt[, sprintf("usdm_change_%d", K) := running_max - usdm]
+      change_col <- sprintf("usdm_change_%d", K)
+      cat(sprintf("  K=%d: lead %.2f%% non-NA | change range [%+d, %+d]\n",
+                  K,
+                  100 * mean(!is.na(dt[[sprintf("usdm_lead_%d", K)]])),
+                  min(dt[[change_col]], na.rm = TRUE),
+                  max(dt[[change_col]], na.rm = TRUE)))
+    }
+  }
+  dt[, running_max := NULL]
+  rm(usdm_panel); gc(verbose = FALSE)
+
+  # --- 4. Skill sweep + Spearman correlation, loop over (stratum × K × signal) ---
+  cat("\n[4] Skill + correlation sweep over (stratum × K × signal)...\n")
+
+  # Inner helper: confusion-cell sweep for one (sub, signal_col, change_col,
+  # direction). Builds z × usdm_change_threshold grid of contingency tables +
+  # POD/FAR/CSI/HSS rows.
+  sweep_one_direction <- function(sub, signal_col, change_col,
+                                  z_thresholds, change_thresholds,
+                                  z_op, change_op, direction_label) {
+    sig_vec <- sub[[signal_col]]
+    chg_vec <- sub[[change_col]]
+    rbindlist(lapply(change_thresholds, function(uct) {
+      obs_yes <- if (change_op == ">=") chg_vec >= uct else chg_vec <= uct
+      rbindlist(lapply(z_thresholds, function(zt) {
+        pred_yes <- if (z_op == "<=") sig_vec <= zt else sig_vec >= zt
+        tp <- sum(pred_yes &  obs_yes)
+        fp <- sum(pred_yes & !obs_yes)
+        fn <- sum(!pred_yes &  obs_yes)
+        tn <- sum(!pred_yes & !obs_yes)
+        sk <- compute_skill(tp, fp, fn, tn)
+        data.table(
+          direction             = direction_label,
+          z_threshold           = zt,
+          usdm_change_threshold = uct,
+          n_pixel_weeks         = nrow(sub),
+          tp = tp, fp = fp, fn = fn, tn = tn,
+          pod = sk[["pod"]], far = sk[["far"]],
+          csi = sk[["csi"]], hss = sk[["hss"]]
+        )
+      }))
+    }))
+  }
+
+  eco_codes <- sort(unique(dt$L2_code[!is.na(dt$L2_code)]))
+  cat(sprintf("  %d ecoregions found\n", length(eco_codes)))
+
+  skill_rows  <- list()
+  corr_rows   <- list()
+  total_iter  <- (length(eco_codes) + 1L) * length(K_VALUES) * length(SIGNAL_NAMES)
+  iter        <- 0L
+  t_sweep     <- Sys.time()
+
+  strata_list <- c(as.list(eco_codes), list(NA_integer_))   # NA = Midwest aggregate
+  for (stratum in strata_list) {
+    is_mw    <- is.na(stratum)
+    sub_full <- if (is_mw) dt else dt[L2_code == stratum]
+    if (nrow(sub_full) == 0L) next
+    stratum_type <- if (is_mw) "midwest_aggregate" else "ecoregion"
+    L2_label     <- if (is_mw) NA_integer_         else as.integer(stratum)
+
+    for (K in K_VALUES) {
+      change_col <- sprintf("usdm_change_%d", K)
+      for (sig in SIGNAL_NAMES) {
+        iter <- iter + 1L
+        sub <- sub_full[!is.na(get(sig)) & !is.na(get(change_col))]
+        if (nrow(sub) == 0L) next
+
+        intens <- sweep_one_direction(sub, sig, change_col,
+                                      Z_THRESHOLDS_NEG, USDM_CHANGE_THRESHOLDS_POS,
+                                      "<=", ">=", "intensification")
+        recov  <- sweep_one_direction(sub, sig, change_col,
+                                      Z_THRESHOLDS_POS, USDM_CHANGE_THRESHOLDS_NEG,
+                                      ">=", "<=", "recovery")
+        block <- rbind(intens, recov)
+        block[, `:=`(stratum_type = stratum_type, L2_code = L2_label,
+                     K = K, ndvi_signal = sig)]
+        skill_rows[[length(skill_rows) + 1L]] <- block
+
+        # Spearman ρ between -signal and usdm_change. Negated so positive ρ =
+        # "good" (NDVI drops when USDM rises). Uses the full sub (no extra NAs).
+        rho <- suppressWarnings(
+          cor(-sub[[sig]], sub[[change_col]], method = "spearman")
+        )
+        corr_rows[[length(corr_rows) + 1L]] <- data.table(
+          stratum_type = stratum_type, L2_code = L2_label,
+          K = K, ndvi_signal = sig,
+          n_pixel_weeks = nrow(sub),
+          spearman_rho_neg_signal = rho
+        )
+
+        if (iter %% 25L == 0L) {
+          el  <- as.numeric(Sys.time() - t_sweep, units = "mins")
+          eta <- el * (total_iter - iter) / iter
+          cat(sprintf("    iter %d/%d (%.1f min elapsed, ETA %.1f min)\n",
+                      iter, total_iter, el, eta))
+        }
+      }
+    }
+  }
+
+  skill <- rbindlist(skill_rows)
+  setcolorder(skill, c("stratum_type", "L2_code", "K", "ndvi_signal",
+                       "direction", "z_threshold", "usdm_change_threshold",
+                       "n_pixel_weeks", "tp", "fp", "fn", "tn",
+                       "pod", "far", "csi", "hss"))
+  setorder(skill, stratum_type, L2_code, K, ndvi_signal, direction,
+           z_threshold, usdm_change_threshold)
+  correlation <- rbindlist(corr_rows)
+  setorder(correlation, stratum_type, L2_code, K, ndvi_signal)
+  cat(sprintf("  skill: %d rows | correlation: %d rows\n",
+              nrow(skill), nrow(correlation)))
+
+  # --- 5. Full contingency tables (signed z-bins × signed USDM_change) ---
+  cat("\n[5] Full contingency tables (signed bins)...\n")
+  cont_list <- list()
+  for (sig in SIGNAL_NAMES) {
+    for (K in K_VALUES) {
+      change_col <- sprintf("usdm_change_%d", K)
+      sub <- dt[!is.na(get(sig)) & !is.na(get(change_col)),
+                .(L2_code,
+                  sig_val    = get(sig),
+                  change_val = as.integer(get(change_col)))]
+      sub[, sig_bin := cut(sig_val, breaks = Z_BREAKS,
+                            include.lowest = TRUE, right = TRUE)]
+
+      eco_cont <- sub[!is.na(L2_code), .N,
+                       by = .(L2_code, sig_bin, usdm_change = change_val)]
+      eco_cont[, `:=`(stratum_type = "ecoregion", K = K, ndvi_signal = sig)]
+
+      mw_cont <- sub[, .N,
+                      by = .(sig_bin, usdm_change = change_val)]
+      mw_cont[, `:=`(stratum_type = "midwest_aggregate", L2_code = NA_integer_,
+                     K = K, ndvi_signal = sig)]
+
+      cont_list[[length(cont_list) + 1L]] <-
+        rbind(eco_cont, mw_cont, use.names = TRUE)
+    }
+  }
+  contingency_full <- rbindlist(cont_list, use.names = TRUE)
+  setcolorder(contingency_full,
+              c("stratum_type", "L2_code", "K", "ndvi_signal",
+                "sig_bin", "usdm_change", "N"))
+  cat(sprintf("  %s rows\n", format(nrow(contingency_full), big.mark = ",")))
+
+  # --- 6. Assemble + save ---
+  result <- list(
+    skill            = skill,
+    correlation      = correlation,
+    contingency_full = contingency_full,
+    meta = list(
+      scope                      = scope,
+      version                    = "v2_bidirectional_magnitude_plus_4_derivatives",
+      n_pixels_in                = n_px_in,
+      n_pixels_dropped           = length(drop_px),
+      n_pixels_kept              = n_px_in - length(drop_px),
+      run_time_minutes           = as.numeric(Sys.time() - t_section, units = "mins"),
+      z_thresholds_negative      = Z_THRESHOLDS_NEG,
+      z_thresholds_positive      = Z_THRESHOLDS_POS,
+      K_values                   = K_VALUES,
+      usdm_change_thresholds_pos = USDM_CHANGE_THRESHOLDS_POS,
+      usdm_change_thresholds_neg = USDM_CHANGE_THRESHOLDS_NEG,
+      min_valid_weeks            = MIN_VALID_WEEKS,
+      z_breaks                   = Z_BREAKS,
+      ndvi_signals               = SIGNAL_NAMES,
+      bayes_sig_dropped          = paste("ndvi_n_sig on disk is direction-agnostic;",
+                                         "would need align_weekly extension to split",
+                                         "into ndvi_n_sig_neg/pos to re-enable")
+    )
+  )
+
+  cat(sprintf("\n[6] Saving %s...\n", basename(out_file)))
+  saveRDS_validated(result, out_file, compress = "gzip")
+  cat(sprintf("  wrote %.2f MB in %.1f min total\n",
+              file.size(out_file) / 1e6,
+              result$meta$run_time_minutes))
+
+  # --- 7. Quick summary: Midwest aggregate, magnitude + w14 derivative ---
+  cat("\n--- Quick summary (Midwest aggregate) ---\n")
+  for (sig in c("ndvi_z", "deriv_w14_z")) {
+    cat(sprintf("\n  %s:\n", sig))
+    for (K in K_VALUES) {
+      r_corr <- correlation[stratum_type == "midwest_aggregate" & K == ..K &
+                              ndvi_signal == sig]
+      r_int <- skill[stratum_type == "midwest_aggregate" & K == ..K &
+                       ndvi_signal == sig & direction == "intensification" &
+                       z_threshold == -1.5 & usdm_change_threshold == 1L]
+      r_rec <- skill[stratum_type == "midwest_aggregate" & K == ..K &
+                       ndvi_signal == sig & direction == "recovery" &
+                       z_threshold == 1.5 & usdm_change_threshold == -1L]
+      cat(sprintf(
+        "    K=%d  ρ=%+.3f  INT(z≤-1.5,ΔU≥+1):HSS=%+.3f POD=%.3f  REC(z≥+1.5,ΔU≤-1):HSS=%+.3f POD=%.3f\n",
+        K, r_corr$spearman_rho_neg_signal,
+        r_int$hss, r_int$pod,
+        r_rec$hss, r_rec$pod))
+    }
+  }
+
   invisible(NULL)
 }
 

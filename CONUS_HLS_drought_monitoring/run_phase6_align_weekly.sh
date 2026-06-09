@@ -64,7 +64,7 @@ run_step() {
 
 step_align_weekly() {
   docker exec -w /workspace conus-hls-drought-monitor \
-    Rscript 07_validate_drought_signal.R --section=align_weekly --scope=$SCOPE
+    Rscript 09_validate_drought_signal.R --section=align_weekly --scope=$SCOPE
 }
 
 main() {
