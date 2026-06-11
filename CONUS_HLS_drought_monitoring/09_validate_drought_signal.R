@@ -33,6 +33,10 @@
 #   --scope=13y  → 2013-2025 (includes 2013 launch-lag + 2014/2015 winter gaps;
 #                  supplementary)
 #
+# Null-reps flag (categorical_usdm v3 only):
+#   --null-reps=N  → run N permutation null reps after the observed sweep.
+#                    Default 5. Use 0 to skip (fast smoke test).
+#
 # Design notes:
 # - Per-year sequential processing inside align_weekly. data.table by-group is
 #   C-level multithreaded; parent peak ~30 GB worst-case (derivatives 11 GB load
@@ -395,43 +399,71 @@ section_align_weekly <- function(scope) {
 # ==============================================================================
 
 # ==============================================================================
-# SECTION: categorical_usdm (v2 — bidirectional, magnitude + 4 derivatives)
+# SECTION: categorical_usdm (v3 — corrected scale, true lead-K, two-track skill,
+#                            permutation null)
 #
-# v1 (initial, 2026-06-09 14:58 run) asked the wrong question: "when USDM is
-# high, does NDVI z exceed a negative threshold?" Resulting HSS≈0 and a wrong-
-# direction lead-K trend confirmed the framing was off.
+# History:
+#   v1 (2026-06-09 14:58) — "when USDM is high, does NDVI z drop?" HSS≈0;
+#     framing was wrong (synchronous level, not transition).
+#   v2 (2026-06-09 15:56) — bidirectional level-change; BUT (a) usdm_change
+#     used running-max so recovery half had 0 TPs everywhere, and (b) USDM
+#     sentinel -1 (= "None"; recoded from NA at 08_validation_data_setup.R:275)
+#     was treated as an arithmetic ordinal class, making None→D0 numerically
+#     equivalent to D2→D3. Also (c) L2_code labels collapsed 11 EPA Level II
+#     ecoregions {"9.3","8.1",…} to 5 integers {9,8,…} via as.integer().
+#   v3 (this code) — fixes all three; adds permutation null + two-track design
+#     that honors the categorical nature of USDM's "any drought y/n" boundary
+#     separately from the within-drought ordinal progression.
 #
-# v2 (this code) asks the right question: "when USDM is CHANGING, does NDVI
-# move in the corresponding direction?" Drought worsens AND drought eases —
-# both directions matter and both are scored.
+# v3 design:
 #
-# Five NDVI signals (all per-pixel z-standardized over the loaded record):
-#   ndvi_z              — magnitude (anomaly z)
-#   deriv_w03_z         — 3-day window rate-of-change (z)
-#   deriv_w07_z         — 7-day window rate-of-change (z)
-#   deriv_w14_z         — 14-day window rate-of-change (z)
-#   deriv_w30_z         — 30-day window rate-of-change (z)
+# (1) USDM in-analysis recode (cache stays valid; source-side fix deferred):
+#       usdm_ord  = usdm + 1L                  # {0=None, 1=D0, ..., 5=D4}
+#       in_drought = usdm_ord >= 1L
 #
-# USDM target = SIGNED CHANGE over [t, t+K]:
-#   usdm_change_K = usdm_lead_K - usdm[t]
-# (positive = drought intensifying, negative = drought receding)
+# (2) True lead-K via self-join (NOT running max):
+#       usdm_ord_lead_K  = usdm_ord  at (week_start + 7*K)
+#       in_drought_lead_K = in_drought at (week_start + 7*K)
+#       usdm_change_K = usdm_ord_lead_K - usdm_ord     # signed, K ∈ {1,2,4,8}
+#       onset_K = !in_drought &  in_drought_lead_K     # binary onset event
+#       end_K   =  in_drought & !in_drought_lead_K     # binary end event
 #
-# Two confusion-matrix directions per (stratum × K × signal):
-#   INTENSIFICATION: pred = signal ≤ -threshold paired with usdm_change ≥ +T
-#   RECOVERY:        pred = signal ≥ +threshold paired with usdm_change ≤ -T
+# (3) Two skill tracks per (stratum × K × signal):
+#       BINARY (full population — honors None↔D0 boundary as a binary event):
+#         intensification: pred = signal ≤ -T  vs obs = onset_K
+#         recovery:        pred = signal ≥ +T  vs obs = end_K
+#       ORDINAL (within-drought subset, usdm_ord ≥ 1 — strict ordinal progression):
+#         intensification: pred = signal ≤ -T  vs obs = usdm_change_K ≥ +T_chg
+#         recovery:        pred = signal ≥ +T  vs obs = usdm_change_K ≤ -T_chg
 #
-# Side cache:
-#   Spearman ρ between (-signal) and usdm_change per (stratum × K × signal).
-#   Negated so positive ρ = "good skill" (NDVI moves opposite to USDM, as
-#   expected since drought worsening = USDM up + NDVI down).
+# (4) Spearman ρ side-cache:
+#       binary:  ρ(-signal, in_drought_lead_K - in_drought)   # signed {-1,0,+1}
+#       ordinal: ρ(-signal, usdm_change_K)  on within-drought subset
+#     Negated so positive ρ = NDVI moves opposite to USDM as ecologically expected.
 #
-# bayes_sig comparator: DROPPED in v2. The cached `ndvi_n_sig` is direction-
-# agnostic (counts both browning AND greening significance), so it can't honor
-# the bidirectional framing without an align_weekly extension that splits into
-# ndvi_n_sig_neg / ndvi_n_sig_pos. Re-add if/when that extension lands.
+# (5) L2_code label fix:
+#       Use as.character(stratum), NOT as.integer(). 11 ecoregions preserved
+#       distinctly: {"0.0","5.2","6.2","8.1","8.2","8.3","8.4","8.5","9.2",
+#       "9.3","9.4"}. L2_name joined into every output table.
+#
+# (6) Permutation null (default 5 reps, configurable via --null-reps=N):
+#       Per rep:
+#         Block-permute usdm_ord within (pixel_id × season ∈ DJF/MAM/JJA/SON).
+#         Preserves per-pixel + seasonal marginal distribution; breaks temporal
+#         alignment with NDVI dynamics. Recompute lead-K + skill sweep on the
+#         shuffled USDM. Stores HSS per cell per rep.
+#       Aggregated two ways:
+#         (a) per-cell: null_mean, null_sd, z_score = (obs - null_mean)/null_sd
+#         (b) max-across-windows: per (stratum × K × direction × thresholds),
+#             max HSS across the 5 signals; null distribution from per-rep max.
+#             Honest "best-of-5-correlated-signals" inflation correction without
+#             dropping windows or assuming independence.
+#
+# bayes_sig comparator: still dropped per v2 reasoning (cached ndvi_n_sig is
+# direction-agnostic). Re-enable path same as before.
 #
 # Reads:  ndvi_drought_join_weekly_<scope>.rds (built by section_align_weekly)
-# Writes: usdm_confusion_<scope>.rds (overwrites v1 output)
+# Writes: usdm_confusion_<scope>.rds  (v2 archived as .v2.rds by hand)
 # ==============================================================================
 compute_skill <- function(tp, fp, fn, tn) {
   # 2x2 contingency → POD / FAR / CSI / HSS (Heidke). Returns named 4-vector.
@@ -451,9 +483,237 @@ compute_skill <- function(tp, fp, fn, tn) {
   c(pod = pod, far = far, csi = csi, hss = hss)
 }
 
-section_categorical_usdm <- function(scope) {
-  cat("\n=== Section: categorical_usdm v2 (scope =", scope, ") ===\n")
-  stopifnot(scope %in% c("10y", "13y"))
+# ---- v3 helpers (file-scope; avoid closure capture of large objects) --------
+
+# Compute lead-K USDM columns by self-join (NOT running max). Mutates `dt`
+# in place: adds usdm_change_K, onset_K, end_K, in_drought_lead_K for each K.
+# `dt` MUST contain (pixel_id, week_start, usdm_ord, in_drought) and be
+# sorted on (pixel_id, week_start). Idempotent for re-call (overwrites the
+# K-suffixed columns), used by both the observed run and each null rep.
+build_lead_K <- function(dt, K_values) {
+  panel <- dt[, .(pixel_id, week_start,
+                  usdm_ord_src = usdm_ord, in_drought_src = in_drought)]
+  setkey(panel, pixel_id, week_start)
+
+  for (K in K_values) {
+    # ws_match shifted BACK by 7K days so that joining on equality between
+    # the panel's (pixel_id, ws_match) and dt's (pixel_id, week_start)
+    # pulls the future value at week_start + 7K into the current row.
+    tmp <- panel[, .(pixel_id,
+                     ws_match        = week_start - 7L * K,
+                     usdm_ord_lead   = usdm_ord_src,
+                     in_drought_lead = in_drought_src)]
+    dt[tmp, `:=`(usdm_ord_lead_tmp = i.usdm_ord_lead,
+                 in_drought_lead_tmp = i.in_drought_lead),
+       on = c("pixel_id", "week_start==ws_match")]
+    dt[, sprintf("usdm_change_%d", K) := usdm_ord_lead_tmp - usdm_ord]
+    dt[, sprintf("onset_%d", K)       := !in_drought &  in_drought_lead_tmp]
+    dt[, sprintf("end_%d",   K)       :=  in_drought & !in_drought_lead_tmp]
+    dt[, c("usdm_ord_lead_tmp", "in_drought_lead_tmp") := NULL]
+    rm(tmp); gc(verbose = FALSE)   # release per-K tmp (~3 cols × 67M rows ≈ 1.6 GB)
+  }
+  rm(panel); gc(verbose = FALSE)
+  invisible(NULL)
+}
+
+# Sweep z-thresholds for a single (sig_vec × obs_yes_vec). obs_yes_vec MUST be
+# logical and the same length as sig_vec; pre-filter NAs upstream.
+sweep_z <- function(sig_vec, obs_yes_vec, n_total, z_thresholds, z_op,
+                    direction_label) {
+  rbindlist(lapply(z_thresholds, function(zt) {
+    pred_yes <- if (z_op == "<=") sig_vec <= zt else sig_vec >= zt
+    tp <- sum(pred_yes &  obs_yes_vec)
+    fp <- sum(pred_yes & !obs_yes_vec)
+    fn <- sum(!pred_yes &  obs_yes_vec)
+    tn <- sum(!pred_yes & !obs_yes_vec)
+    sk <- compute_skill(tp, fp, fn, tn)
+    data.table(
+      direction     = direction_label,
+      z_threshold   = zt,
+      n_pixel_weeks = n_total,
+      tp = tp, fp = fp, fn = fn, tn = tn,
+      pod = sk[["pod"]], far = sk[["far"]],
+      csi = sk[["csi"]], hss = sk[["hss"]]
+    )
+  }))
+}
+
+# Run the two-track skill sweep (binary + ordinal) across all
+# (stratum × K × signal). Returns list(binary = dt, ordinal = dt). Used by
+# both the observed run and each null rep. Strata: each of the L2_code values
+# in `eco_codes` plus "midwest_aggregate" (NA L2_code).
+run_two_track_sweep <- function(dt, eco_codes, K_values, signal_names,
+                                z_neg, z_pos, change_pos, change_neg,
+                                progress_every = 25L, label = "obs") {
+  binary_rows  <- list()
+  ordinal_rows <- list()
+  total_iter   <- (length(eco_codes) + 1L) * length(K_values) * length(signal_names)
+  iter         <- 0L
+  t_sweep      <- Sys.time()
+
+  strata_list <- c(as.list(eco_codes), list(NA_character_))   # NA = midwest agg
+  for (stratum in strata_list) {
+    is_mw <- is.na(stratum)
+    sub_full <- if (is_mw) dt else dt[L2_code == stratum]
+    if (nrow(sub_full) == 0L) next
+    stratum_type <- if (is_mw) "midwest_aggregate" else "ecoregion"
+    L2_label     <- if (is_mw) NA_character_       else as.character(stratum)
+
+    # Within-drought subset used by the ordinal track (recomputed once per stratum).
+    # in_drought is a CURRENT-ROW property — K-independent — so this subset is
+    # the same across all K within a stratum. During null reps, in_drought has
+    # been re-derived from the shuffled USDM by the caller BEFORE the sweep,
+    # so this subset correctly reflects the rep's shuffled drought status.
+    sub_drought_full <- sub_full[in_drought == TRUE]
+
+    for (K in K_values) {
+      change_col <- sprintf("usdm_change_%d", K)
+      onset_col  <- sprintf("onset_%d", K)
+      end_col    <- sprintf("end_%d", K)
+
+      for (sig in signal_names) {
+        iter <- iter + 1L
+
+        # --- BINARY track: population = full sub, need (signal, onset, end) non-NA
+        sub_bin <- sub_full[!is.na(get(sig)) &
+                              !is.na(get(onset_col)) &
+                              !is.na(get(end_col))]
+        if (nrow(sub_bin) > 0L) {
+          sig_vec <- sub_bin[[sig]]
+          int_block <- sweep_z(sig_vec, sub_bin[[onset_col]], nrow(sub_bin),
+                               z_neg, "<=", "intensification")
+          rec_block <- sweep_z(sig_vec, sub_bin[[end_col]],   nrow(sub_bin),
+                               z_pos, ">=", "recovery")
+          bin_block <- rbind(int_block, rec_block)
+          bin_block[, `:=`(stratum_type = stratum_type, L2_code = L2_label,
+                            K = K, ndvi_signal = sig)]
+          binary_rows[[length(binary_rows) + 1L]] <- bin_block
+        }
+
+        # --- ORDINAL track: population = within-drought subset, need (signal, change) non-NA
+        sub_ord <- sub_drought_full[!is.na(get(sig)) & !is.na(get(change_col))]
+        if (nrow(sub_ord) > 0L) {
+          sig_vec_o <- sub_ord[[sig]]
+          chg_vec_o <- sub_ord[[change_col]]
+          int_o_list <- lapply(change_pos, function(uct) {
+            obs_yes <- chg_vec_o >= uct
+            blk <- sweep_z(sig_vec_o, obs_yes, nrow(sub_ord),
+                           z_neg, "<=", "intensification")
+            blk[, usdm_change_threshold := uct]
+            blk
+          })
+          rec_o_list <- lapply(change_neg, function(uct) {
+            obs_yes <- chg_vec_o <= uct
+            blk <- sweep_z(sig_vec_o, obs_yes, nrow(sub_ord),
+                           z_pos, ">=", "recovery")
+            blk[, usdm_change_threshold := uct]
+            blk
+          })
+          ord_block <- rbindlist(c(int_o_list, rec_o_list))
+          ord_block[, `:=`(stratum_type = stratum_type, L2_code = L2_label,
+                            K = K, ndvi_signal = sig)]
+          ordinal_rows[[length(ordinal_rows) + 1L]] <- ord_block
+        }
+
+        if (iter %% progress_every == 0L) {
+          el  <- as.numeric(Sys.time() - t_sweep, units = "mins")
+          eta <- el * (total_iter - iter) / iter
+          cat(sprintf("    [%s] iter %d/%d (%.1f min, ETA %.1f min)\n",
+                      label, iter, total_iter, el, eta))
+        }
+      }
+    }
+  }
+
+  list(
+    binary  = rbindlist(binary_rows,  use.names = TRUE),
+    ordinal = rbindlist(ordinal_rows, use.names = TRUE)
+  )
+}
+
+# Run the two-track Spearman correlation sweep — observed run only.
+# Binary correlation uses signed transition indicator (in_drought_lead - in_drought) ∈ {-1,0,+1}.
+# Ordinal correlation uses usdm_change_K restricted to the within-drought subset.
+run_two_track_correlation <- function(dt, eco_codes, K_values, signal_names) {
+  bin_rows <- list()
+  ord_rows <- list()
+  strata_list <- c(as.list(eco_codes), list(NA_character_))
+
+  for (stratum in strata_list) {
+    is_mw <- is.na(stratum)
+    sub_full <- if (is_mw) dt else dt[L2_code == stratum]
+    if (nrow(sub_full) == 0L) next
+    stratum_type <- if (is_mw) "midwest_aggregate" else "ecoregion"
+    L2_label     <- if (is_mw) NA_character_       else as.character(stratum)
+    sub_drought  <- sub_full[in_drought == TRUE]
+
+    for (K in K_values) {
+      change_col <- sprintf("usdm_change_%d", K)
+      onset_col  <- sprintf("onset_%d", K)
+      end_col    <- sprintf("end_%d", K)
+
+      # signed transition indicator for the binary track
+      # +1 = onset (None → drought), -1 = end (drought → None), 0 = no boundary cross
+      for (sig in signal_names) {
+        sub_b <- sub_full[!is.na(get(sig)) &
+                            !is.na(get(onset_col)) & !is.na(get(end_col))]
+        if (nrow(sub_b) > 0L) {
+          transition_signed <- as.integer(sub_b[[onset_col]]) -
+                                as.integer(sub_b[[end_col]])
+          rho_b <- suppressWarnings(
+            cor(-sub_b[[sig]], transition_signed, method = "spearman")
+          )
+          bin_rows[[length(bin_rows) + 1L]] <- data.table(
+            stratum_type = stratum_type, L2_code = L2_label,
+            K = K, ndvi_signal = sig,
+            n_pixel_weeks = nrow(sub_b),
+            spearman_rho_neg_signal = rho_b
+          )
+        }
+
+        sub_o <- sub_drought[!is.na(get(sig)) & !is.na(get(change_col))]
+        if (nrow(sub_o) > 0L) {
+          # Ordinal correlation uses the same -signal sign convention as the
+          # binary track: positive ρ = "NDVI moves opposite USDM" (NDVI below
+          # normal precedes USDM going up = drought worsening). usdm_change_K
+          # is positive for worsening within-drought; negation of signal keeps
+          # the "positive ρ = good skill" convention consistent across tracks.
+          rho_o <- suppressWarnings(
+            cor(-sub_o[[sig]], sub_o[[change_col]], method = "spearman")
+          )
+          ord_rows[[length(ord_rows) + 1L]] <- data.table(
+            stratum_type = stratum_type, L2_code = L2_label,
+            K = K, ndvi_signal = sig,
+            n_pixel_weeks = nrow(sub_o),
+            spearman_rho_neg_signal = rho_o
+          )
+        }
+      }
+    }
+  }
+
+  list(
+    binary  = rbindlist(bin_rows,  use.names = TRUE),
+    ordinal = rbindlist(ord_rows, use.names = TRUE)
+  )
+}
+
+# Map month → meteorological season {DJF, MAM, JJA, SON}. Used to define
+# permutation blocks: shuffling within (pixel × season) preserves per-pixel +
+# seasonal marginal distribution of USDM while breaking temporal alignment
+# with NDVI dynamics at week-to-week and year-to-year scales.
+month_to_season <- function(m) {
+  factor(c("DJF","DJF","MAM","MAM","MAM","JJA","JJA","JJA","SON","SON","SON","DJF")[m],
+         levels = c("DJF","MAM","JJA","SON"))
+}
+
+# ---- end v3 helpers --------------------------------------------------------
+
+section_categorical_usdm <- function(scope, null_reps = 5L) {
+  cat("\n=== Section: categorical_usdm v3 (scope =", scope,
+      ", null_reps =", null_reps, ") ===\n")
+  stopifnot(scope %in% c("10y", "13y"), is.numeric(null_reps), null_reps >= 0L)
+  null_reps <- as.integer(null_reps)
 
   in_file  <- if (scope == "10y") config$align_out_10y      else config$align_out_13y
   out_file <- if (scope == "10y") config$usdm_confusion_10y else config$usdm_confusion_13y
@@ -469,13 +729,13 @@ section_categorical_usdm <- function(scope) {
 
   Z_THRESHOLDS_NEG           <- c(-0.5, -1.0, -1.5, -2.0, -2.5)
   Z_THRESHOLDS_POS           <- c( 0.5,  1.0,  1.5,  2.0,  2.5)
-  USDM_CHANGE_THRESHOLDS_POS <- 1:3            # intensification
-  USDM_CHANGE_THRESHOLDS_NEG <- -(1:3)         # recovery
-  K_VALUES                   <- c(1L, 2L, 4L, 8L)   # K=0 dropped (change is always 0)
-  MAX_K                      <- max(K_VALUES)
+  USDM_CHANGE_THRESHOLDS_POS <- 1:3            # intensification (within-drought)
+  USDM_CHANGE_THRESHOLDS_NEG <- -(1:3)         # recovery (within-drought)
+  K_VALUES                   <- c(1L, 2L, 4L, 8L)
   MIN_VALID_WEEKS            <- 30L
   Z_BREAKS                   <- c(-Inf, -2.5, -2.0, -1.5, -1.0, -0.5,
                                   0, 0.5, 1.0, 1.5, 2.0, 2.5, Inf)
+  NULL_SEED_BASE             <- 8675309L
 
   ANOM_COLS    <- c("ndvi_anom_mean",
                     "deriv_w03_anom_mean", "deriv_w07_anom_mean",
@@ -483,13 +743,26 @@ section_categorical_usdm <- function(scope) {
   SIGNAL_NAMES <- c("ndvi_z",
                     "deriv_w03_z", "deriv_w07_z", "deriv_w14_z", "deriv_w30_z")
 
-  # --- 1. Load cache, keep only required columns ---
-  cat("\n[1] Load cache...\n")
+  # --- 1. Load cache + USDM in-analysis recode (v3 fix) ---------------------
+  cat("\n[1] Load cache + USDM in-analysis recode...\n")
   dt <- as.data.table(readRDS_retry(in_file))
-  cat(sprintf("  raw: %s rows × %d cols\n", format(nrow(dt), big.mark = ","), ncol(dt)))
+  cat(sprintf("  raw: %s rows × %d cols\n",
+              format(nrow(dt), big.mark = ","), ncol(dt)))
   keep_cols <- c("pixel_id", "iso_year", "iso_week", "week_start",
                  ANOM_COLS, "usdm", "L2_code", "L2_name")
   dt <- dt[, ..keep_cols]
+
+  # v3 USDM recode: source -1 sentinel ("None") → 0 ordinal; D0..D4 (0..4) → 1..5.
+  # See 08_validation_data_setup.R:275 for where the -1 sentinel originates.
+  # NA-handling: align_weekly joins USDM with all.x = TRUE so unmatched
+  # pixel-weeks (~0.4%) have usdm = NA → propagate to usdm_ord = NA, in_drought
+  # = NA. These rows are correctly filtered downstream by the !is.na guards in
+  # run_two_track_sweep and by data.table's NA == TRUE → drop in the
+  # in_drought == TRUE subset. The NA-rate report below flags any drift from
+  # the expected ~0.4% (which would indicate an upstream join regression).
+  dt[, usdm_ord   := as.integer(usdm) + 1L]
+  dt[, in_drought := usdm_ord >= 1L]
+  dt[, usdm := NULL]   # drop raw to prevent accidental arithmetic
   gc(verbose = FALSE)
 
   n_px_in <- uniqueN(dt$pixel_id)
@@ -498,8 +771,17 @@ section_categorical_usdm <- function(scope) {
     cat(sprintf("  WARN: pixel drift %d (see feedback_pixel_count_invariant)\n",
                 n_px_in - EXPECTED_VALID_PIXELS))
   }
+  na_rate <- 100 * mean(is.na(dt$usdm_ord))
+  cat(sprintf("  USDM recoded scale {0..5}: %.2f%% None | %.2f%% in_drought | %.2f%% NA\n",
+              100 * mean(dt$usdm_ord == 0L, na.rm = TRUE),
+              100 * mean(dt$in_drought,      na.rm = TRUE),
+              na_rate))
+  if (na_rate > 5.0) {
+    cat(sprintf("  WARN: USDM NA rate %.2f%% exceeds 5%% — investigate align_weekly join.\n",
+                na_rate))
+  }
 
-  # --- 2. Per-pixel z-standardize all 5 NDVI signals ---
+  # --- 2. Per-pixel z-standardize all 5 NDVI signals (unchanged from v2) ---
   cat("\n[2] Per-pixel z-standardize 5 NDVI signals...\n")
   setorder(dt, pixel_id, week_start)
 
@@ -528,188 +810,310 @@ section_categorical_usdm <- function(scope) {
   cat(sprintf("  total unique drop list: %d pixels (across all 5 signals)\n",
               length(drop_px)))
   if (length(drop_px) > 0L) dt <- dt[!pixel_id %in% drop_px]
-  # Drop raw anomaly cols — keep only z variants
   dt[, (ANOM_COLS) := NULL]
   gc(verbose = FALSE)
 
-  # --- 3. Build lead-K USDM + signed USDM_change columns ---
-  cat(sprintf("\n[3] Build lead-K USDM + USDM_change (K = %s)...\n",
+  # --- 3. True lead-K USDM via self-join (v3 fix — replaces running-max) ----
+  cat(sprintf("\n[3] Build lead-K USDM (true self-join, K = %s)...\n",
               paste(K_VALUES, collapse = ",")))
+  build_lead_K(dt, K_VALUES)
 
-  usdm_panel <- dt[, .(pixel_id, week_start, usdm)]
-  setkey(usdm_panel, pixel_id, week_start)
-
-  # Running max iterates K = 0..MAX_K. Snapshot to usdm_lead_K + usdm_change_K
-  # for K ∈ K_VALUES. na.rm = FALSE: any missing week in the window drops that
-  # (pixel, t, K) from downstream stats. USDM coverage ~99.6%, loss is small.
-  dt[, running_max := usdm]
-  for (K in 0:MAX_K) {
-    if (K > 0L) {
-      tmp <- usdm_panel[, .(pixel_id,
-                            ws_match = week_start - 7L * K,
-                            usdm_at_K = usdm)]
-      dt[tmp, usdm_at_K := i.usdm_at_K,
-         on = c("pixel_id", "week_start==ws_match")]
-      dt[, running_max := pmax(running_max, usdm_at_K, na.rm = FALSE)]
-      dt[, usdm_at_K := NULL]
-      rm(tmp)
-    }
-    if (K %in% K_VALUES) {
-      dt[, sprintf("usdm_lead_%d",   K) := running_max]
-      dt[, sprintf("usdm_change_%d", K) := running_max - usdm]
-      change_col <- sprintf("usdm_change_%d", K)
-      cat(sprintf("  K=%d: lead %.2f%% non-NA | change range [%+d, %+d]\n",
-                  K,
-                  100 * mean(!is.na(dt[[sprintf("usdm_lead_%d", K)]])),
-                  min(dt[[change_col]], na.rm = TRUE),
-                  max(dt[[change_col]], na.rm = TRUE)))
-    }
-  }
-  dt[, running_max := NULL]
-  rm(usdm_panel); gc(verbose = FALSE)
-
-  # --- 4. Skill sweep + Spearman correlation, loop over (stratum × K × signal) ---
-  cat("\n[4] Skill + correlation sweep over (stratum × K × signal)...\n")
-
-  # Inner helper: confusion-cell sweep for one (sub, signal_col, change_col,
-  # direction). Builds z × usdm_change_threshold grid of contingency tables +
-  # POD/FAR/CSI/HSS rows.
-  sweep_one_direction <- function(sub, signal_col, change_col,
-                                  z_thresholds, change_thresholds,
-                                  z_op, change_op, direction_label) {
-    sig_vec <- sub[[signal_col]]
-    chg_vec <- sub[[change_col]]
-    rbindlist(lapply(change_thresholds, function(uct) {
-      obs_yes <- if (change_op == ">=") chg_vec >= uct else chg_vec <= uct
-      rbindlist(lapply(z_thresholds, function(zt) {
-        pred_yes <- if (z_op == "<=") sig_vec <= zt else sig_vec >= zt
-        tp <- sum(pred_yes &  obs_yes)
-        fp <- sum(pred_yes & !obs_yes)
-        fn <- sum(!pred_yes &  obs_yes)
-        tn <- sum(!pred_yes & !obs_yes)
-        sk <- compute_skill(tp, fp, fn, tn)
-        data.table(
-          direction             = direction_label,
-          z_threshold           = zt,
-          usdm_change_threshold = uct,
-          n_pixel_weeks         = nrow(sub),
-          tp = tp, fp = fp, fn = fn, tn = tn,
-          pod = sk[["pod"]], far = sk[["far"]],
-          csi = sk[["csi"]], hss = sk[["hss"]]
-        )
-      }))
-    }))
+  for (K in K_VALUES) {
+    change_col <- sprintf("usdm_change_%d", K)
+    onset_col  <- sprintf("onset_%d", K)
+    end_col    <- sprintf("end_%d", K)
+    cat(sprintf("  K=%d: change non-NA %.2f%% | range [%+d, %+d] | onset %.3f%% | end %.3f%%\n",
+                K,
+                100 * mean(!is.na(dt[[change_col]])),
+                min(dt[[change_col]], na.rm = TRUE),
+                max(dt[[change_col]], na.rm = TRUE),
+                100 * mean(dt[[onset_col]], na.rm = TRUE),
+                100 * mean(dt[[end_col]],   na.rm = TRUE)))
   }
 
+  # --- 4. Observed two-track skill sweep -----------------------------------
+  cat("\n[4] Observed skill sweep (binary + ordinal tracks)...\n")
   eco_codes <- sort(unique(dt$L2_code[!is.na(dt$L2_code)]))
-  cat(sprintf("  %d ecoregions found\n", length(eco_codes)))
+  cat(sprintf("  %d ecoregions found: %s\n",
+              length(eco_codes), paste(eco_codes, collapse = ", ")))
 
-  skill_rows  <- list()
-  corr_rows   <- list()
-  total_iter  <- (length(eco_codes) + 1L) * length(K_VALUES) * length(SIGNAL_NAMES)
-  iter        <- 0L
-  t_sweep     <- Sys.time()
+  obs <- run_two_track_sweep(dt, eco_codes, K_VALUES, SIGNAL_NAMES,
+                              Z_THRESHOLDS_NEG, Z_THRESHOLDS_POS,
+                              USDM_CHANGE_THRESHOLDS_POS, USDM_CHANGE_THRESHOLDS_NEG,
+                              label = "obs")
 
-  strata_list <- c(as.list(eco_codes), list(NA_integer_))   # NA = Midwest aggregate
-  for (stratum in strata_list) {
-    is_mw    <- is.na(stratum)
-    sub_full <- if (is_mw) dt else dt[L2_code == stratum]
-    if (nrow(sub_full) == 0L) next
-    stratum_type <- if (is_mw) "midwest_aggregate" else "ecoregion"
-    L2_label     <- if (is_mw) NA_integer_         else as.integer(stratum)
+  # L2_name lookup for self-describing outputs (one row per L2_code)
+  L2_name_lookup <- unique(dt[!is.na(L2_code), .(L2_code, L2_name)])
 
-    for (K in K_VALUES) {
-      change_col <- sprintf("usdm_change_%d", K)
-      for (sig in SIGNAL_NAMES) {
-        iter <- iter + 1L
-        sub <- sub_full[!is.na(get(sig)) & !is.na(get(change_col))]
-        if (nrow(sub) == 0L) next
-
-        intens <- sweep_one_direction(sub, sig, change_col,
-                                      Z_THRESHOLDS_NEG, USDM_CHANGE_THRESHOLDS_POS,
-                                      "<=", ">=", "intensification")
-        recov  <- sweep_one_direction(sub, sig, change_col,
-                                      Z_THRESHOLDS_POS, USDM_CHANGE_THRESHOLDS_NEG,
-                                      ">=", "<=", "recovery")
-        block <- rbind(intens, recov)
-        block[, `:=`(stratum_type = stratum_type, L2_code = L2_label,
-                     K = K, ndvi_signal = sig)]
-        skill_rows[[length(skill_rows) + 1L]] <- block
-
-        # Spearman ρ between -signal and usdm_change. Negated so positive ρ =
-        # "good" (NDVI drops when USDM rises). Uses the full sub (no extra NAs).
-        rho <- suppressWarnings(
-          cor(-sub[[sig]], sub[[change_col]], method = "spearman")
-        )
-        corr_rows[[length(corr_rows) + 1L]] <- data.table(
-          stratum_type = stratum_type, L2_code = L2_label,
-          K = K, ndvi_signal = sig,
-          n_pixel_weeks = nrow(sub),
-          spearman_rho_neg_signal = rho
-        )
-
-        if (iter %% 25L == 0L) {
-          el  <- as.numeric(Sys.time() - t_sweep, units = "mins")
-          eta <- el * (total_iter - iter) / iter
-          cat(sprintf("    iter %d/%d (%.1f min elapsed, ETA %.1f min)\n",
-                      iter, total_iter, el, eta))
-        }
-      }
-    }
-  }
-
-  skill <- rbindlist(skill_rows)
-  setcolorder(skill, c("stratum_type", "L2_code", "K", "ndvi_signal",
-                       "direction", "z_threshold", "usdm_change_threshold",
-                       "n_pixel_weeks", "tp", "fp", "fn", "tn",
-                       "pod", "far", "csi", "hss"))
-  setorder(skill, stratum_type, L2_code, K, ndvi_signal, direction,
+  skill_binary  <- merge(obs$binary,  L2_name_lookup, by = "L2_code",
+                          all.x = TRUE, sort = FALSE)
+  skill_ordinal <- merge(obs$ordinal, L2_name_lookup, by = "L2_code",
+                          all.x = TRUE, sort = FALSE)
+  setcolorder(skill_binary,
+              c("stratum_type", "L2_code", "L2_name", "K", "ndvi_signal",
+                "direction", "z_threshold", "n_pixel_weeks",
+                "tp", "fp", "fn", "tn", "pod", "far", "csi", "hss"))
+  setcolorder(skill_ordinal,
+              c("stratum_type", "L2_code", "L2_name", "K", "ndvi_signal",
+                "direction", "z_threshold", "usdm_change_threshold",
+                "n_pixel_weeks", "tp", "fp", "fn", "tn",
+                "pod", "far", "csi", "hss"))
+  setorder(skill_binary,  stratum_type, L2_code, K, ndvi_signal, direction, z_threshold)
+  setorder(skill_ordinal, stratum_type, L2_code, K, ndvi_signal, direction,
            z_threshold, usdm_change_threshold)
-  correlation <- rbindlist(corr_rows)
-  setorder(correlation, stratum_type, L2_code, K, ndvi_signal)
-  cat(sprintf("  skill: %d rows | correlation: %d rows\n",
-              nrow(skill), nrow(correlation)))
+  cat(sprintf("  skill_binary: %d rows | skill_ordinal: %d rows\n",
+              nrow(skill_binary), nrow(skill_ordinal)))
 
-  # --- 5. Full contingency tables (signed z-bins × signed USDM_change) ---
-  cat("\n[5] Full contingency tables (signed bins)...\n")
-  cont_list <- list()
+  # --- 5. Observed Spearman ρ (binary + ordinal) ----------------------------
+  cat("\n[5] Observed Spearman ρ (per-track)...\n")
+  corr <- run_two_track_correlation(dt, eco_codes, K_VALUES, SIGNAL_NAMES)
+  correlation_binary  <- merge(corr$binary,  L2_name_lookup, by = "L2_code",
+                                all.x = TRUE, sort = FALSE)
+  correlation_ordinal <- merge(corr$ordinal, L2_name_lookup, by = "L2_code",
+                                all.x = TRUE, sort = FALSE)
+  setorder(correlation_binary,  stratum_type, L2_code, K, ndvi_signal)
+  setorder(correlation_ordinal, stratum_type, L2_code, K, ndvi_signal)
+  cat(sprintf("  correlation_binary: %d | correlation_ordinal: %d\n",
+              nrow(correlation_binary), nrow(correlation_ordinal)))
+
+  # --- 6. Full contingency tables (signed z-bins × signed USDM_change) ------
+  # Kept from v2 for post-hoc reanalysis. Only the ordinal direction is
+  # informative since usdm_change is now scoreable in both signs.
+  cat("\n[6] Full contingency tables (binary + ordinal grids)...\n")
+  cont_bin_list <- list()
+  cont_ord_list <- list()
   for (sig in SIGNAL_NAMES) {
     for (K in K_VALUES) {
       change_col <- sprintf("usdm_change_%d", K)
-      sub <- dt[!is.na(get(sig)) & !is.na(get(change_col)),
-                .(L2_code,
-                  sig_val    = get(sig),
-                  change_val = as.integer(get(change_col)))]
-      sub[, sig_bin := cut(sig_val, breaks = Z_BREAKS,
-                            include.lowest = TRUE, right = TRUE)]
+      onset_col  <- sprintf("onset_%d", K)
+      end_col    <- sprintf("end_%d", K)
 
-      eco_cont <- sub[!is.na(L2_code), .N,
-                       by = .(L2_code, sig_bin, usdm_change = change_val)]
-      eco_cont[, `:=`(stratum_type = "ecoregion", K = K, ndvi_signal = sig)]
+      # Binary: (z-bin) × (onset, end). Signed transition col {-1,0,+1}.
+      sub_b <- dt[!is.na(get(sig)) &
+                    !is.na(get(onset_col)) & !is.na(get(end_col)),
+                  .(L2_code,
+                    sig_val = get(sig),
+                    transition_signed = as.integer(get(onset_col)) -
+                                        as.integer(get(end_col)))]
+      sub_b[, sig_bin := cut(sig_val, breaks = Z_BREAKS,
+                              include.lowest = TRUE, right = TRUE)]
+      eco_b <- sub_b[!is.na(L2_code), .N,
+                      by = .(L2_code, sig_bin, transition = transition_signed)]
+      eco_b[, `:=`(stratum_type = "ecoregion", K = K, ndvi_signal = sig)]
+      mw_b <- sub_b[, .N, by = .(sig_bin, transition = transition_signed)]
+      mw_b[, `:=`(stratum_type = "midwest_aggregate", L2_code = NA_character_,
+                   K = K, ndvi_signal = sig)]
+      cont_bin_list[[length(cont_bin_list) + 1L]] <- rbind(eco_b, mw_b,
+                                                            use.names = TRUE)
 
-      mw_cont <- sub[, .N,
-                      by = .(sig_bin, usdm_change = change_val)]
-      mw_cont[, `:=`(stratum_type = "midwest_aggregate", L2_code = NA_integer_,
-                     K = K, ndvi_signal = sig)]
-
-      cont_list[[length(cont_list) + 1L]] <-
-        rbind(eco_cont, mw_cont, use.names = TRUE)
+      # Ordinal: within-drought × (z-bin × signed change). Drop rows where
+      # current state is None (not in scope for ordinal interpretation).
+      sub_o <- dt[in_drought == TRUE &
+                    !is.na(get(sig)) & !is.na(get(change_col)),
+                  .(L2_code,
+                    sig_val    = get(sig),
+                    change_val = as.integer(get(change_col)))]
+      sub_o[, sig_bin := cut(sig_val, breaks = Z_BREAKS,
+                              include.lowest = TRUE, right = TRUE)]
+      eco_o <- sub_o[!is.na(L2_code), .N,
+                      by = .(L2_code, sig_bin, usdm_change = change_val)]
+      eco_o[, `:=`(stratum_type = "ecoregion", K = K, ndvi_signal = sig)]
+      mw_o <- sub_o[, .N, by = .(sig_bin, usdm_change = change_val)]
+      mw_o[, `:=`(stratum_type = "midwest_aggregate", L2_code = NA_character_,
+                   K = K, ndvi_signal = sig)]
+      cont_ord_list[[length(cont_ord_list) + 1L]] <- rbind(eco_o, mw_o,
+                                                            use.names = TRUE)
     }
   }
-  contingency_full <- rbindlist(cont_list, use.names = TRUE)
-  setcolorder(contingency_full,
+  contingency_binary  <- rbindlist(cont_bin_list, use.names = TRUE)
+  contingency_ordinal <- rbindlist(cont_ord_list, use.names = TRUE)
+  setcolorder(contingency_binary,
+              c("stratum_type", "L2_code", "K", "ndvi_signal",
+                "sig_bin", "transition", "N"))
+  setcolorder(contingency_ordinal,
               c("stratum_type", "L2_code", "K", "ndvi_signal",
                 "sig_bin", "usdm_change", "N"))
-  cat(sprintf("  %s rows\n", format(nrow(contingency_full), big.mark = ",")))
+  cat(sprintf("  contingency_binary: %s rows | contingency_ordinal: %s rows\n",
+              format(nrow(contingency_binary),  big.mark = ","),
+              format(nrow(contingency_ordinal), big.mark = ",")))
 
-  # --- 6. Assemble + save ---
+  # --- 7. Permutation null --------------------------------------------------
+  null_summary_binary           <- NULL
+  null_summary_ordinal          <- NULL
+  null_max_across_windows_binary  <- NULL
+  null_max_across_windows_ordinal <- NULL
+
+  if (null_reps > 0L) {
+    cat(sprintf("\n[7] Permutation null (%d reps)...\n", null_reps))
+
+    # Stash the observed USDM scale and prepare season blocks once
+    dt[, usdm_ord_real   := usdm_ord]
+    dt[, in_drought_real := in_drought]
+    dt[, season := month_to_season(lubridate::month(week_start))]
+
+    null_skill_binary_list  <- vector("list", null_reps)
+    null_skill_ordinal_list <- vector("list", null_reps)
+
+    # Use `rep_id` not `rep` for the loop var to avoid shadowing base::rep
+    for (rep_id in seq_len(null_reps)) {
+      t_rep <- Sys.time()
+      cat(sprintf("\n  --- null rep %d/%d ---\n", rep_id, null_reps))
+      set.seed(NULL_SEED_BASE + rep_id)
+
+      # Shuffle usdm_ord within (pixel × season). Each (pixel, season) group's
+      # USDM values get reordered across the group's rows, preserving the
+      # marginal distribution but breaking temporal alignment with NDVI.
+      cat("    shuffling within (pixel × season)... ")
+      dt[, usdm_ord := usdm_ord_real[sample(.N)], by = .(pixel_id, season)]
+      dt[, in_drought := usdm_ord >= 1L]
+      cat(sprintf("done (%.1f sec)\n",
+                  as.numeric(Sys.time() - t_rep, units = "secs")))
+
+      # Recompute lead-K from shuffled USDM
+      cat("    rebuilding lead-K columns... ")
+      t_lead <- Sys.time()
+      build_lead_K(dt, K_VALUES)
+      cat(sprintf("done (%.1f sec)\n",
+                  as.numeric(Sys.time() - t_lead, units = "secs")))
+
+      # Run skill sweep on shuffled USDM
+      rep_skill <- run_two_track_sweep(dt, eco_codes, K_VALUES, SIGNAL_NAMES,
+                                        Z_THRESHOLDS_NEG, Z_THRESHOLDS_POS,
+                                        USDM_CHANGE_THRESHOLDS_POS,
+                                        USDM_CHANGE_THRESHOLDS_NEG,
+                                        label = sprintf("null%d", rep_id))
+      rep_skill$binary[,  rep_id := rep_id]
+      rep_skill$ordinal[, rep_id := rep_id]
+      null_skill_binary_list[[rep_id]]  <- rep_skill$binary
+      null_skill_ordinal_list[[rep_id]] <- rep_skill$ordinal
+      rm(rep_skill)
+
+      el <- as.numeric(Sys.time() - t_rep, units = "mins")
+      cat(sprintf("    rep %d complete in %.1f min\n", rep_id, el))
+    }
+
+    # Restore observed state (used by subsequent code paths only;
+    # everything we care about is already saved to obs / corr / contingency).
+    dt[, usdm_ord   := usdm_ord_real]
+    dt[, in_drought := in_drought_real]
+    dt[, c("usdm_ord_real", "in_drought_real", "season") := NULL]
+
+    null_skill_binary  <- rbindlist(null_skill_binary_list,  use.names = TRUE)
+    null_skill_ordinal <- rbindlist(null_skill_ordinal_list, use.names = TRUE)
+
+    # --- Per-cell null aggregation (mean, sd, z_score vs observed) ---
+    cat("\n  aggregating per-cell null...\n")
+    null_summary_binary <- null_skill_binary[, .(
+      null_mean_hss = mean(hss, na.rm = TRUE),
+      null_sd_hss   = sd(hss,   na.rm = TRUE),
+      n_reps        = .N
+    ), by = .(stratum_type, L2_code, K, ndvi_signal, direction, z_threshold)]
+    null_summary_binary <- merge(
+      null_summary_binary,
+      skill_binary[, .(stratum_type, L2_code, K, ndvi_signal, direction,
+                       z_threshold, observed_hss = hss)],
+      by = c("stratum_type", "L2_code", "K", "ndvi_signal", "direction",
+             "z_threshold"),
+      all.x = TRUE
+    )
+    null_summary_binary[, z_score := (observed_hss - null_mean_hss) / null_sd_hss]
+
+    null_summary_ordinal <- null_skill_ordinal[, .(
+      null_mean_hss = mean(hss, na.rm = TRUE),
+      null_sd_hss   = sd(hss,   na.rm = TRUE),
+      n_reps        = .N
+    ), by = .(stratum_type, L2_code, K, ndvi_signal, direction,
+              z_threshold, usdm_change_threshold)]
+    null_summary_ordinal <- merge(
+      null_summary_ordinal,
+      skill_ordinal[, .(stratum_type, L2_code, K, ndvi_signal, direction,
+                        z_threshold, usdm_change_threshold, observed_hss = hss)],
+      by = c("stratum_type", "L2_code", "K", "ndvi_signal", "direction",
+             "z_threshold", "usdm_change_threshold"),
+      all.x = TRUE
+    )
+    null_summary_ordinal[, z_score := (observed_hss - null_mean_hss) / null_sd_hss]
+
+    # --- Max-across-windows null (best-of-5-signals correction) ---
+    # Per (stratum × K × direction × z_threshold [× usdm_change_threshold for ordinal]),
+    # take max HSS across the 5 signals. Per rep. Then aggregate to null distribution.
+    # Honest correction for correlated multiple comparisons (no independence assumed,
+    # no windows dropped).
+    cat("  aggregating max-across-windows null...\n")
+    # Helper: argmax over hss, NA-safe. which.max() returns integer(0) on an
+    # all-NA vector, which would silently drop the group from the by= result;
+    # the [1L] subset + NA fallback keeps the row with explicit NA.
+    safe_argmax <- function(hss_vec, sig_vec) {
+      idx <- which.max(hss_vec)
+      if (length(idx) == 0L) NA_character_ else sig_vec[idx[1L]]
+    }
+
+    null_max_per_rep_b <- null_skill_binary[, .(max_hss = max(hss, na.rm = TRUE)),
+                                             by = .(stratum_type, L2_code, K,
+                                                    direction, z_threshold, rep_id)]
+    null_max_across_windows_binary <- null_max_per_rep_b[, .(
+      max_null_mean = mean(max_hss, na.rm = TRUE),
+      max_null_sd   = sd(max_hss,   na.rm = TRUE),
+      n_reps        = .N
+    ), by = .(stratum_type, L2_code, K, direction, z_threshold)]
+    obs_max_b <- skill_binary[, .(max_obs_hss = max(hss, na.rm = TRUE),
+                                  argmax_signal = safe_argmax(hss, ndvi_signal)),
+                              by = .(stratum_type, L2_code, K,
+                                      direction, z_threshold)]
+    null_max_across_windows_binary <- merge(
+      null_max_across_windows_binary, obs_max_b,
+      by = c("stratum_type", "L2_code", "K", "direction", "z_threshold"),
+      all.x = TRUE
+    )
+    null_max_across_windows_binary[, max_z := (max_obs_hss - max_null_mean) /
+                                                max_null_sd]
+
+    null_max_per_rep_o <- null_skill_ordinal[, .(max_hss = max(hss, na.rm = TRUE)),
+                                              by = .(stratum_type, L2_code, K,
+                                                     direction, z_threshold,
+                                                     usdm_change_threshold, rep_id)]
+    null_max_across_windows_ordinal <- null_max_per_rep_o[, .(
+      max_null_mean = mean(max_hss, na.rm = TRUE),
+      max_null_sd   = sd(max_hss,   na.rm = TRUE),
+      n_reps        = .N
+    ), by = .(stratum_type, L2_code, K, direction,
+              z_threshold, usdm_change_threshold)]
+    obs_max_o <- skill_ordinal[, .(max_obs_hss = max(hss, na.rm = TRUE),
+                                   argmax_signal = safe_argmax(hss, ndvi_signal)),
+                               by = .(stratum_type, L2_code, K, direction,
+                                       z_threshold, usdm_change_threshold)]
+    null_max_across_windows_ordinal <- merge(
+      null_max_across_windows_ordinal, obs_max_o,
+      by = c("stratum_type", "L2_code", "K", "direction", "z_threshold",
+             "usdm_change_threshold"),
+      all.x = TRUE
+    )
+    null_max_across_windows_ordinal[, max_z := (max_obs_hss - max_null_mean) /
+                                                 max_null_sd]
+
+    cat(sprintf("  null aggregation complete: binary %d cells | ordinal %d cells | max-binary %d | max-ordinal %d\n",
+                nrow(null_summary_binary), nrow(null_summary_ordinal),
+                nrow(null_max_across_windows_binary),
+                nrow(null_max_across_windows_ordinal)))
+  } else {
+    cat("\n[7] Permutation null SKIPPED (null_reps = 0).\n")
+  }
+
+  # --- 8. Assemble + save ---------------------------------------------------
   result <- list(
-    skill            = skill,
-    correlation      = correlation,
-    contingency_full = contingency_full,
+    skill_binary                    = skill_binary,
+    skill_ordinal                   = skill_ordinal,
+    correlation_binary              = correlation_binary,
+    correlation_ordinal             = correlation_ordinal,
+    contingency_binary              = contingency_binary,
+    contingency_ordinal             = contingency_ordinal,
+    null_summary_binary             = null_summary_binary,
+    null_summary_ordinal            = null_summary_ordinal,
+    null_max_across_windows_binary  = null_max_across_windows_binary,
+    null_max_across_windows_ordinal = null_max_across_windows_ordinal,
     meta = list(
       scope                      = scope,
-      version                    = "v2_bidirectional_magnitude_plus_4_derivatives",
+      version                    = "v3_two_track_lead_K_with_null",
       n_pixels_in                = n_px_in,
       n_pixels_dropped           = length(drop_px),
       n_pixels_kept              = n_px_in - length(drop_px),
@@ -722,36 +1126,60 @@ section_categorical_usdm <- function(scope) {
       min_valid_weeks            = MIN_VALID_WEEKS,
       z_breaks                   = Z_BREAKS,
       ndvi_signals               = SIGNAL_NAMES,
+      usdm_recode_in_analysis    = "usdm_ord = usdm + 1L; in_drought = usdm_ord >= 1L; raw -1 sentinel = None; D0-D4 = 1-5",
+      lead_K_method              = "self-join on (pixel_id, week_start + 7K) — NOT running max",
+      L2_code_handling           = "preserved as character; L2_name joined into all outputs",
+      null_reps                  = null_reps,
+      null_block_strategy        = "block-permute usdm_ord within (pixel_id × season ∈ DJF/MAM/JJA/SON)",
+      null_seed_base             = NULL_SEED_BASE,
       bayes_sig_dropped          = paste("ndvi_n_sig on disk is direction-agnostic;",
                                          "would need align_weekly extension to split",
                                          "into ndvi_n_sig_neg/pos to re-enable")
     )
   )
 
-  cat(sprintf("\n[6] Saving %s...\n", basename(out_file)))
+  cat(sprintf("\n[8] Saving %s...\n", basename(out_file)))
   saveRDS_validated(result, out_file, compress = "gzip")
   cat(sprintf("  wrote %.2f MB in %.1f min total\n",
               file.size(out_file) / 1e6,
               result$meta$run_time_minutes))
 
-  # --- 7. Quick summary: Midwest aggregate, magnitude + w14 derivative ---
-  cat("\n--- Quick summary (Midwest aggregate) ---\n")
+  # --- 9. Quick summary -----------------------------------------------------
+  cat("\n--- Quick summary (Midwest aggregate, ndvi_z + deriv_w14_z) ---\n")
   for (sig in c("ndvi_z", "deriv_w14_z")) {
     cat(sprintf("\n  %s:\n", sig))
-    for (K in K_VALUES) {
-      r_corr <- correlation[stratum_type == "midwest_aggregate" & K == ..K &
-                              ndvi_signal == sig]
-      r_int <- skill[stratum_type == "midwest_aggregate" & K == ..K &
-                       ndvi_signal == sig & direction == "intensification" &
-                       z_threshold == -1.5 & usdm_change_threshold == 1L]
-      r_rec <- skill[stratum_type == "midwest_aggregate" & K == ..K &
-                       ndvi_signal == sig & direction == "recovery" &
-                       z_threshold == 1.5 & usdm_change_threshold == -1L]
+    for (K_local in K_VALUES) {
+      r_corr_b <- correlation_binary[stratum_type == "midwest_aggregate" &
+                                       K == K_local & ndvi_signal == sig]
+      r_corr_o <- correlation_ordinal[stratum_type == "midwest_aggregate" &
+                                        K == K_local & ndvi_signal == sig]
+      r_int_b <- skill_binary[stratum_type == "midwest_aggregate" &
+                                K == K_local & ndvi_signal == sig &
+                                direction == "intensification" &
+                                z_threshold == -1.5]
+      r_rec_b <- skill_binary[stratum_type == "midwest_aggregate" &
+                                K == K_local & ndvi_signal == sig &
+                                direction == "recovery" &
+                                z_threshold == 1.5]
+      r_int_o <- skill_ordinal[stratum_type == "midwest_aggregate" &
+                                 K == K_local & ndvi_signal == sig &
+                                 direction == "intensification" &
+                                 z_threshold == -1.5 &
+                                 usdm_change_threshold == 1L]
+      r_rec_o <- skill_ordinal[stratum_type == "midwest_aggregate" &
+                                 K == K_local & ndvi_signal == sig &
+                                 direction == "recovery" &
+                                 z_threshold == 1.5 &
+                                 usdm_change_threshold == -1L]
       cat(sprintf(
-        "    K=%d  ρ=%+.3f  INT(z≤-1.5,ΔU≥+1):HSS=%+.3f POD=%.3f  REC(z≥+1.5,ΔU≤-1):HSS=%+.3f POD=%.3f\n",
-        K, r_corr$spearman_rho_neg_signal,
-        r_int$hss, r_int$pod,
-        r_rec$hss, r_rec$pod))
+        "    K=%d  BIN ρ=%+.3f int.HSS=%+.3f rec.HSS=%+.3f  |  ORD ρ=%+.3f int.HSS=%+.3f rec.HSS=%+.3f\n",
+        K_local,
+        if (nrow(r_corr_b) > 0L) r_corr_b$spearman_rho_neg_signal else NA_real_,
+        if (nrow(r_int_b)  > 0L) r_int_b$hss else NA_real_,
+        if (nrow(r_rec_b)  > 0L) r_rec_b$hss else NA_real_,
+        if (nrow(r_corr_o) > 0L) r_corr_o$spearman_rho_neg_signal else NA_real_,
+        if (nrow(r_int_o)  > 0L) r_int_o$hss else NA_real_,
+        if (nrow(r_rec_o)  > 0L) r_rec_o$hss else NA_real_))
     }
   }
 
@@ -804,10 +1232,19 @@ section_qc <- function(scope) {
 # CLI dispatcher (mirrors 08's pattern; no --section= = source-only mode)
 # ==============================================================================
 args <- commandArgs(trailingOnly = TRUE)
-section_arg <- gsub("^--section=", "", grep("^--section=", args, value = TRUE))
-scope_arg   <- gsub("^--scope=",   "", grep("^--scope=",   args, value = TRUE))
+section_arg   <- gsub("^--section=",   "", grep("^--section=",   args, value = TRUE))
+scope_arg     <- gsub("^--scope=",     "", grep("^--scope=",     args, value = TRUE))
+null_reps_arg <- gsub("^--null-reps=", "", grep("^--null-reps=", args, value = TRUE))
 if (length(scope_arg) == 0L) scope_arg <- "10y"  # default per design sketch
 if (!scope_arg %in% c("10y", "13y")) stop("--scope must be '10y' or '13y'")
+
+# --null-reps: only used by categorical_usdm. Default 5 reps (per Phase 1 plan).
+# Pass 0 to skip the null model entirely (e.g., for fast smoke tests).
+null_reps <- if (length(null_reps_arg) == 0L) 5L else as.integer(null_reps_arg)
+if (is.na(null_reps) || null_reps < 0L) {
+  stop("--null-reps must be a non-negative integer; got: ",
+       paste(null_reps_arg, collapse = ","))
+}
 
 if (length(section_arg) == 0L) {
   cat("No --section= flag; section functions defined but nothing dispatched.\n")
@@ -815,17 +1252,19 @@ if (length(section_arg) == 0L) {
   invisible(NULL)
 } else {
 
-cat(sprintf("Section: %s | Scope: %s\n", section_arg, scope_arg))
+cat(sprintf("Section: %s | Scope: %s%s\n", section_arg, scope_arg,
+            if (section_arg %in% c("categorical_usdm", "all"))
+              sprintf(" | null_reps: %d", null_reps) else ""))
 
 switch(section_arg,
   align_weekly      = section_align_weekly(scope_arg),
-  categorical_usdm  = section_categorical_usdm(scope_arg),
+  categorical_usdm  = section_categorical_usdm(scope_arg, null_reps = null_reps),
   continuous_spei   = section_continuous_spei(scope_arg),
   event_detection   = section_event_detection(scope_arg),
   qc                = section_qc(scope_arg),
   all = {
     section_align_weekly(scope_arg)
-    section_categorical_usdm(scope_arg)
+    section_categorical_usdm(scope_arg, null_reps = null_reps)
     section_continuous_spei(scope_arg)
     section_event_detection(scope_arg)
     section_qc(scope_arg)

@@ -1,14 +1,51 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-09 ~16:00 CDT — Phase 6 `categorical_usdm` v1 ran + revealed wrong-framing (HSS≈0, wrong-direction K trend); v2 (bidirectional, magnitude + 4 derivatives) launched 15:56 CDT, ETA 30-50 min. Renumber: `07_validate_drought_signal.R` → `09_*`; `07_classify_drought_PLACEHOLDER.R` deleted.
+**Updated**: 2026-06-10 ~16:00 CDT — Phase 6 `categorical_usdm` **v3 COMPLETE** (391.9 min wall, 5 null reps). Three v2 bugs fixed (lead-K running-max → true self-join; USDM -1 sentinel → 0-5 ordinal; L2_code labels preserved). Two-track design (binary + ordinal) + permutation null. Recovery direction now populated (was all-zero in v2). Best HSS 0.0548 in ecoregion 8.4 within-drought recovery. **Recovery beats intensification consistently across all top cells.** Ecoregion heterogeneity is the dominant pattern. See `PHASE6_VALIDATION_MEMO.md` for full findings + Phase 2/3 plan (NLCD stratification next).
 
 ## Active run
 
-**`09_validate_drought_signal.R --section=categorical_usdm --scope=10y` (v2)**
-- Launched: 2026-06-09 15:56 CDT (container PID 28730)
-- Log: `logs/categorical_usdm_v2_10y_20260609_1556.log`
-- ETA: ~30-50 min total (cache load ~2 min, z-standardize 5 cols ~5 min, lead-K + USDM-change ~2 min, skill+correlation sweep ~15-25 min over 240 iterations, save ~1 min)
-- Output: `/data/validation/usdm_confusion_10y.rds` (v1 archived as `usdm_confusion_10y.v1.rds`)
+(none)
+
+## Session Summary (2026-06-10) — `categorical_usdm` v3 + Phase 6 reframe
+
+### Bug fixes confirmed in production (v3)
+
+| Bug | v2 state | v3 state |
+|---|---|---|
+| Lead-K | `usdm_change ∈ [+0, +5]` (running-max, non-negative) | `usdm_change ∈ [-5, +5]` (true self-join, bidirectional) |
+| Recovery TPs | All zero | 80.6M binary + 145.8M ordinal |
+| USDM scale | -1, 0..4 (arithmetic on -1 sentinel) | 0..5 ordinal |
+| L2_code labels | 5 integers (collapsed from "8.1","8.2"...) | 11 distinct character codes |
+
+### Scientific findings (v3)
+
+- **Recovery beats intensification**: 9/10 top-z binary cells + all 10 top-z ordinal cells are recovery. Ecologically plausible (greening response sharper than browning during drought onset).
+- **Ecoregion heterogeneity**: 3 of 11 ecoregions show positive within-drought Spearman ρ for ndvi_z (Ozark/Ouachita 8.4 +0.023; South Central Semiarid Prairies 9.4 +0.014; Western Cordillera 6.2 +0.005). 8 show negative ρ; aggregate cancels to -0.024. The "no signal" headline is actually "heterogeneous signal averaging to zero."
+- **Short-window derivatives dominate**: `deriv_w03_z`, `deriv_w07_z` are the modal argmax signal across cells. Magnitude (`ndvi_z`) rarely wins.
+- **Effect sizes operationally modest**: best HSS = 0.0548 (8.4 recovery K=1 deriv_w03_z z≥2.0 dT=-1). Statistically detectable (z=821 vs null_sd≈1e-4) but small.
+
+### v3 implementation (replaces v2 in `09_validate_drought_signal.R`)
+- `section_categorical_usdm(scope, null_reps = 5L)` — new helpers `build_lead_K`, `sweep_z`, `run_two_track_sweep`, `run_two_track_correlation`, `month_to_season`, `safe_argmax` all file-scope above the section
+- CLI: `--null-reps=N` (default 5; pass 0 to skip null model)
+- Output `/data/validation/usdm_confusion_10y.rds` (0.84 MB, 11 components: skill_binary/ordinal, correlation_binary/ordinal, contingency_binary/ordinal, null_summary_binary/ordinal, null_max_across_windows_binary/ordinal, meta)
+- v2 archived to `usdm_confusion_10y.v2.rds`
+- Verification: r-reviewer pass (1 BLOCKER + 3 CONCERN + 4 NIT all addressed) + synthetic smoke test before launch
+
+### Methodology decisions made this session
+- **USDM recode site**: in-analysis (cache stays valid); source-side fix to 08 deferred as separate task
+- **USDM encoding**: 2-track — BINARY (any drought y/n) for None↔D0 boundary + ORDINAL (D0..D4) within-drought
+- **Null model**: 5 reps, block-permute usdm_ord within (pixel × season ∈ DJF/MAM/JJA/SON)
+- **Multi-window correction**: max-across-windows null distribution (no windows dropped; handles correlated-test inflation exactly)
+
+### Plan forward — combo route (light Phase 2 + Phase 3)
+
+**Light Phase 2 (~1 day)**: NLCD land cover stratification (Juliana's lead — better recovery in Chicago area at LC aggregate) + condition skill on current USDM state (D0/D1/D2+ subsets).
+
+**Phase 3 (~2-3 days)**: implement `section_continuous_spei` (pooled FE regression NDVI_anom ~ SPEI | year_week + (ecoregion or land cover)) + `section_event_detection` (USDM-event-anchored lead-time, not week-by-week). USDM becomes operational secondary; SPEI primary scientific reference.
+
+**Deferred**: source-side USDM sentinel fix in 08 + cache rebuild (5 hr). Not blocking.
+
+See `PHASE6_VALIDATION_MEMO.md` for full details.
 
 ## Session Summary (2026-06-09 afternoon) — `categorical_usdm` v1 + v2
 
