@@ -312,3 +312,137 @@ names(r)
 | `null_summary_ordinal` | 7,200 | same + dT |
 | `null_max_across_windows_binary` | 480 | best-of-5-signals correction per (stratum × K × direction × z_threshold) |
 | `null_max_across_windows_ordinal` | 1,440 | same + dT |
+
+---
+
+# 2026-06-11 Session — Phase 6 reframe: Section C + A complete, Section B paused
+
+## Strategic reframe
+
+The v3 `categorical_usdm` validation result (HSS≈0.05, weak ecoregion-pooled correlations) raised a deeper question: is USDM-severity the right validation reference at all? USDM is a subjective, analyst-driven consensus product with documented lag; treating it as severity truth caps the validation. The reframe:
+
+- **Continuous reference** → `continuous_spei` (Section A): does NDVI track meteorological drought (SPEI)?
+- **Event-block reference** → `event_detection` (Section B): when USDM declares events, when does NDVI fire?
+
+USDM is now the event-block identifier and a lagging operational reference. SPEI is the primary independent scientific reference. v3 `categorical_usdm` stays as supplementary context.
+
+## Section C (`within_week_diagnostic`) — gate decision: WEEKLY
+
+Output: `/data/validation/within_week_sd_10y.rds` (447 MB, 25 min).
+
+Per-(pixel × iso_week) SD of `anoms_mean` across DOYs in that week, vs per-pixel SD of weekly-mean anomalies across weeks. Ratio < 1 means weekly aggregation preserves the signal.
+
+| L2 | median ratio (within/across SD) |
+|---|---:|
+| 9.3 W-C Semiarid Prairies | 0.218 |
+| 9.4 S-C Semiarid Prairies | 0.252 |
+| 9.2 Temperate Prairies | 0.258 |
+| 5.2 Mixed Wood Shield | 0.266 |
+| 8.1 Mixed Wood Plains | 0.270 |
+| 8.2 Central USA Plains | 0.291 |
+| 8.4 Ozark Forests | 0.313 |
+| 8.3 SE USA Plains | 0.324 |
+
+All 11 ecoregions in [0.22, 0.36]. Zero pixels with ratio > 1. Weekly aggregation is fine. **Section B uses the existing align_weekly cache, not daily files.**
+
+Two structural findings:
+- **Sentinel-2 density drift** (memory: `sentinel2-density-drift`): within-week SD ratio dropped from 0.375 (2016) to 0.23 (2023-25) as S2-B + L9 missions accumulated. Affects how Section B's cross-year skill should be interpreted.
+- **2016-wk-50 snow contamination hotspot**: 5,026 upper-Midwest pixels with within-week SD > 0.20 in mid-December 2016. Fmask snow flag missed it. Don't filter the dormant period (memory: `dormant-season-qualitative`); flag the artifact when interpreting.
+
+## Section A (`continuous_spei`) — three-tier ecoregion pattern
+
+Output: `/data/validation/continuous_spei_10y.rds` (41 MB, 80 min).
+
+Two FE models per (stratum × spei_window × signal): pooled (`signal_z ~ spei`) and iso_week-FE (`signal_z ~ spei | iso_week`). Both with pixel-clustered SEs. Plus per-pixel slope map + permutation null.
+
+User caught early design error: I proposed `iso_year × iso_week` FE (standard panel data default) which would absorb regional drought events — the very signal we want to measure. Pooled FE is the operational headline; iso_week-FE adds mild seasonality control without stripping the signal.
+
+### Headline finding — ecoregion stratification reveals 3-tier pattern
+
+| Stratum × SPEI × signal | β | r² | % pixels positive | Tier |
+|---|---:|---:|---:|---|
+| **9.4 × spei_26w × ndvi_z** | **+0.184** | **3.7%** | 93% | **Tier 1 — works** |
+| 6.2 × spei_26w × ndvi_z | +0.106 | 1.3% | 100% | Tier 1 |
+| 9.3 × spei_26w × ndvi_z | +0.062 | 0.7% | 75% | Tier 1 |
+| 9.4 × spei_13w × ndvi_z | +0.104 | 1.2% | 77% | Tier 1 (shorter window) |
+| 8.4 × spei_13w × ndvi_z | −0.048 | 0.3% | 16% | Tier 2 — silent (Ozark mesic forest) |
+| 8.3 × spei_13w × ndvi_z | −0.045 | 0.2% | 17% | Tier 2 |
+| 8.2 × spei_13w × ndvi_z | −0.051 | 0.3% | 16% | Tier 2 |
+| 8.1 × spei_13w × ndvi_z | −0.066 | 0.5% | 24% | Tier 3 — REVERSED (Chicago corridor) |
+| 5.2 × spei_13w × ndvi_z | −0.090 | 0.9% | 8% | Tier 3 |
+| **9.2 × spei_13w × ndvi_z** | **−0.124** | **2.0%** | **15%** | **Tier 3 (corn belt heartland)** |
+| midwest_aggregate × spei_13w × ndvi_z | −0.038 | 0.2% | — | MISLEADING — averages opposite signs |
+
+### Interpretation
+- **Tier 1 (semiarid prairies)**: NDVI tracks SPEI in expected direction at longer integration windows (26w > 13w > 4w). Sustained drought drives NDVI. This is the operational drought-monitoring success story.
+- **Tier 2 (mesic forests, transitional plains)**: water-buffered systems show no linear NDVI~SPEI relationship.
+- **Tier 3 (corn belt + Mixed Wood Plains)**: NEGATIVE β. Most likely mechanism is irrigation buffering + heat-mediated confound + management intensity. The strongest reverse is 9.2 Temperate Prairies (Iowa/Illinois corn belt).
+
+### Statistical robustness
+- All |β| > 0.01 cells have null permutation z-scores > 100 (most are 500-820+). Tiny in r² but rock-solid signal.
+- Pooled vs iso_week-FE estimates differ by < 0.01 for 95% of cells. Seasonality not the main driver.
+- 14/150 cells flip sign between pooled and iso_week-FE; all involve coefficients near zero.
+
+### Derivative vs magnitude
+Maximum derivative β in entire table is +0.049 (9.4 × spei_4w × deriv_w03_z). Derivatives are transient signals; SPEI is integrating. The "short SPEI × short derivative" pairing is the only derivative cell that matters operationally. Magnitude (`ndvi_z`) is the right signal for SPEI comparisons.
+
+### Operational implications
+- Best operating point for an NDVI drought monitor at concurrent grain: 9.4 (and similar) × spei_26w × ndvi_z. Defendable claim: "in semiarid prairie ecoregions, our NDVI anomaly indicator tracks 6-month SPEI with β ≈ 0.18 and ~3.7% of variance explained."
+- Cannot claim aggregate Midwest-wide tracking — the signal is heterogeneous and averages to misleading near-zero.
+- Section B's event_detection needs to inherit this stratification.
+
+## Section B (`event_detection`) — PAUSED for framing redesign
+
+### Implementation status
+All helpers drafted and smoke-tested:
+- `build_pixel_events()` — per-pixel chronological USDM transitions (onset: -1→≥0; recovery: ≥0→-1)
+- `build_ecoregion_events()` — per (L2×week), in_drought fraction change ≥ MAJORITY_DELTA=0.10 (user's ≥50% was structurally impossible at 4 km USDM resolution)
+- `detect_signal_fires_weekly()` — per-pixel runs of K consecutive weeks where signal crosses threshold
+- `match_fires_to_events()` — per event, find nearest fire within ±lead_window
+- `match_fires_to_eco_events()` — eco-aggregate version
+- `count_false_alarms()` — proper FAR (fires NOT within ±lead of any event)
+- `summarize_lead_skill()` — hit_rate, FAR, median lead, percentile distribution
+- `process_signal_cell()` — full pipeline for one (signal × z × K × direction), iterates lead inside (~3x speedup)
+- `run_event_grid()` — main loop
+- `run_event_permutation_null()` — re-match cached fires against shuffled event dates
+
+### Smoke test result (9.4 + 8.4, 30K pixels, headline op-point)
+| Stratum | event_type | n_events | hit_rate | median_lead | pct_lead_pos | FAR |
+|---|---|---:|---:|---:|---:|---:|
+| 8.4 Ozark | onset | 107,673 | 33.4% | -1 wk | 44% | 80% |
+| 9.4 Prairies | onset | 240,948 | 23.1% | -1 wk | 44% | 78% |
+| 8.4 Ozark | recovery | 104,830 | 19.7% | 0 wk | 47% | 55% |
+| 9.4 Prairies | recovery | 234,619 | 28.9% | -1 wk | 26% | 68% |
+
+### Why paused
+Claude framed Section B op-point design as "does NDVI provide lead time?" and proposed optimizing for "max lead with high hit rate." User caught the conflation:
+
+> "wait why are we wanting to quantify a lead time. We're wanting to see if there is a lead time. We weren't saying that NDVI would be a leading indicator. We were saying that USDM might be a lagging indicator. I think you're conflating things."
+
+The project framing is **USDM-as-lagging-indicator**, NOT **NDVI-as-leading-indicator**. Under the correct framing, median_lead = -1 weeks doesn't read as failure — it reads as "NDVI fires near-simultaneously with USDM, which (given USDM's documented lag) could mean NDVI is tracking actual onset and USDM is catching up." Different scientific question, different op-point design, different headline metrics.
+
+See memory `usdm-lagging-not-ndvi-leading` for the full distinction and concrete consequences for redesign.
+
+### Runtime concern (not fixed yet)
+Smoke-test scaling: 90 cells × 3 leads × 4.3× pixel scaling ≈ 30+ hr unoptimized. Vectorized `match_fires_to_events` + `count_false_alarms` (outer product + `max.col`) would give 5-10x speedup → ~5-8 hr. Not yet executed; depends on framing decision.
+
+### Pickup tomorrow
+1. Resolve framing: what does Section B actually test under USDM-as-lagging frame? Which metrics matter?
+2. Redesign op-points (likely fewer than 270; possibly focused on temporal correspondence, not max lead)
+3. Decide whether to optimize helpers (probably yes regardless)
+4. Smoke + launch
+
+## Phase 6 extension candidates (deferred but documented)
+
+See memory `phase6-extension-candidates`. Top three:
+1. **NLCD land cover stratification** (Juliana's lead). Made MORE compelling by Section A finding 9.2 strong negative β — testing whether crop pixels vs grassland pixels within 9.2 show different signs would directly test the irrigation/management-buffer hypothesis.
+2. **Drought-week conditioning**: does β get larger during USDM-flagged drought weeks than non-drought weeks? Tests drought-specificity.
+3. **NDVI ⊥ SPEI residual conditioning**: `usdm ~ ndvi_z + spei` — does NDVI add information beyond SPEI?
+
+## Files updated this session
+
+- `09_validate_drought_signal.R`: added Section C + A (full implementations), Section B (drafted, smoke-tested, paused)
+- `Dockerfile`: added `fixest` to Batch 8
+- `RUNNING_ANALYSES.md`: full session summary at top
+- `PHASE6_VALIDATION_MEMO.md`: this section
+- Six memory entries (see Memory additions in RUNNING_ANALYSES)

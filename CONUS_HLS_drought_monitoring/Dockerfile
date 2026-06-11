@@ -64,7 +64,9 @@ RUN R -e "install.packages(c('arrow', 'RSQLite', 'DBI'), repos=Sys.getenv('R_REP
 # matrixStats: rowQuantiles ~1.8x faster than apply(quantile) on N x 100 sims
 # matrices in scripts 04 + 06; bit-equivalent to base R (type 7).
 # callr: subprocess isolation around terra::resample in script 01 (segfault survival)
-RUN R -e "install.packages(c('matrixStats', 'callr'), repos=Sys.getenv('R_REPOS'), dependencies=TRUE)"
+# fixest: high-performance fixed-effects panel regression for script 09 Phase 6
+# continuous_spei validation (67M-row panels with year-week FE + pixel clustering).
+RUN R -e "install.packages(c('matrixStats', 'callr', 'fixest'), repos=Sys.getenv('R_REPOS'), dependencies=TRUE)"
 
 # Set proper permissions for the workspace (rstudio user already exists in base image)
 RUN chown -R rstudio:rstudio /workspace

@@ -1,10 +1,66 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-10 ~16:00 CDT — Phase 6 `categorical_usdm` **v3 COMPLETE** (391.9 min wall, 5 null reps). Three v2 bugs fixed (lead-K running-max → true self-join; USDM -1 sentinel → 0-5 ordinal; L2_code labels preserved). Two-track design (binary + ordinal) + permutation null. Recovery direction now populated (was all-zero in v2). Best HSS 0.0548 in ecoregion 8.4 within-drought recovery. **Recovery beats intensification consistently across all top cells.** Ecoregion heterogeneity is the dominant pattern. See `PHASE6_VALIDATION_MEMO.md` for full findings + Phase 2/3 plan (NLCD stratification next).
+**Updated**: 2026-06-11 ~15:30 CDT — Phase 6 reframe in progress. Sections A (`continuous_spei`) and C (`within_week_diagnostic`) COMPLETE. Section B (`event_detection`) drafted but **PAUSED for framing redesign** — the "does NDVI provide lead time?" framing I (Claude) used during op-point design conflated "NDVI as leading indicator" with the actual project framing "USDM as lagging indicator." Resuming tomorrow with clearer framing. See [[usdm-lagging-not-ndvi-leading]] memory.
 
 ## Active run
 
 (none)
+
+## Session Summary (2026-06-11) — Phase 6 reframe + Section C + A; Section B paused
+
+### Phase 6 strategic reframe
+Validation goal pivoted from "does NDVI correlate with USDM severity bins?" (v3 `categorical_usdm` framing) to:
+1. **Continuous reference**: does NDVI anomaly track continuous SPEI? (Section A, complete)
+2. **Event-block correspondence**: when USDM declares events, when does NDVI signal fire? (Section B, partial)
+
+USDM treated as event-block identifier + lagging consensus product; SPEI is the primary independent meteorological reference.
+
+### Infrastructure
+- **Dockerfile**: added `fixest` to Batch 8 (continuous_spei needs it). Container rebuilt 2026-06-11 ~09:55 CDT. Verified `requireNamespace("fixest")` returns TRUE.
+- **No matrixStats drift this rebuild** (unlike 2026-06-08).
+
+### Section C (`within_week_diagnostic`) — COMPLETE in 25 min
+- Output: `/data/validation/within_week_sd_10y.rds` (447 MB)
+- **Gate decision**: WEEKLY grain for Section B. All 11 ecoregions have median ratio(within_week_sd / across_week_sd) between 0.22 and 0.36; no pixels with ratio > 1. Weekly aggregation preserves the signal — daily-resolution event_detection NOT justified.
+- **Sentinel-2 density effect** found in per-year breakdown: ratio dropped 0.375 (2016) → 0.23 (2023-25) as S2-B + L9 missions accumulated. Documented in [[sentinel2-density-drift]].
+- **2016 wk 50 snow contamination hotspot** found: 5,026 pixels in upper Midwest with within-week SD > 0.2 in Dec 12-18 2016. Fmask snow flag didn't catch all snow. Documented in [[dormant-season-qualitative]] (don't mask dormant period, report qualitatively).
+
+### Section A (`continuous_spei`) — COMPLETE in 80 min
+- Output: `/data/validation/continuous_spei_10y.rds` (41 MB)
+- Headline midwest_aggregate β = -0.038 is **misleading**; ecoregion stratification reveals 3-tier pattern:
+  - **Tier 1 — works as expected** (positive β): 9.4 S-C Semiarid Prairies × spei_26w × ndvi_z β = +0.184 r² = 3.7% (best cell); 9.3, 6.2 also positive
+  - **Tier 2 — silent** (β ≈ -0.04 to -0.05): 8.4 Ozark, 8.3 SE Plains, 8.2 Central Plains
+  - **Tier 3 — REVERSED** (β = -0.07 to -0.12, NEGATIVE sign): 9.2 Temperate Prairies (corn belt heartland), 5.2 Mixed Wood Shield, 8.1 Mixed Wood Plains. Most plausible mechanism: irrigation buffering + heat-mediated confound + management intensity.
+- All |β| > 0.01 cells have null permutation z-scores > 100. Effects are tiny in r² but statistically rock-solid.
+- Pooled vs iso_week-FE estimates differ by < 0.01 for 95% of cells — seasonality not the main driver.
+- Derivatives uniformly weaker than magnitude (max β = +0.049 for 9.4 × spei_4w × deriv_w03_z).
+- **Implementation**: two file-scope models per cell (pooled + iso_week-FE), reuses v3 z-standardization helper (lifted to file scope), permutation null with SPEI shuffled within (pixel × season). One bug found mid-run: `residuals(fit)` row-mismatch fixed by manual `intercept + slope*x` (now uses `is.finite()` everywhere — see [[spei-cache-inf-quirk]]).
+- Memory: [[section-a-findings]].
+
+### Section B (`event_detection`) — DRAFTED, PAUSED before launch
+- All helpers implemented and smoke-tested on 9.4 + 8.4 (30K pixels): build_pixel_events, build_ecoregion_events (with MAJORITY_DELTA=0.10 instead of impossible-at-4km ≥50%), detect_signal_fires_weekly, match_fires_to_events, match_fires_to_eco_events, count_false_alarms, summarize_lead_skill, process_signal_cell, run_event_grid, run_event_permutation_null.
+- Smoke test produced interpretable numbers (8.4 onset hit_rate 33%, median_lead -1 wk; 9.4 onset hit_rate 23%, median_lead -1 wk).
+- **PAUSED reason**: Claude framed op-point question as "does NDVI provide lead time?" and proposed sweep optimizing for "max lead time." User caught the conflation: the project framing is "USDM is a lagging indicator" NOT "NDVI is a leading indicator." Median lead = -1/0 weeks doesn't mean failure under correct framing. See [[usdm-lagging-not-ndvi-leading]] for full distinction.
+- **Runtime concern**: naive scaling estimates ~30+ hr for full op-point sweep at unoptimized helpers. Optimization path (vectorize match + FAR via outer product + max.col) exists but not yet executed.
+- **Tomorrow's pickup**: re-think Section B op-point design under USDM-as-lagging frame; decide which metrics matter (hit_rate, pct_lead_pos, temporal correspondence, NOT max-lead); reconsider whether sweep is needed vs focused-grid; then optimize helpers + launch.
+
+### Methodology decisions made this session
+- **Phase 6 reframe** (USDM-severity → SPEI-continuous + USDM-event-block). Driven by the observation that USDM is subjective/lagged/analyst-driven and inappropriate as severity truth.
+- **iso_week-FE not iso_year×iso_week FE** for Section A: aggressive FE absorbs regional drought events (the signal). User caught this and we settled on pooled + iso_week-FE.
+- **Test all three SPEI windows** (4w, 13w, 26w): empirically determine which timescale our NDVI signals track best.
+- **MAJORITY_DELTA = 0.10** for ecoregion-aggregate events (instead of impossible ≥50% threshold).
+- **Headline op-point for Section B = ndvi_z + deriv_w14_z** (both pixel maps kept).
+- **Proper FAR**: fires NOT within ±lead of any event, not the approximate `n_fires - n_hits`.
+
+### Memory additions this session
+- [[sentinel2-density-drift]] (project)
+- [[dormant-season-qualitative]] (feedback)
+- [[spei-cache-inf-quirk]] (reference)
+- [[phase6-extension-candidates]] (project — NLCD stratification, drought-week conditioning, VPD, SPEI lag, etc.)
+- [[section-a-findings]] (project)
+- [[usdm-lagging-not-ndvi-leading]] (feedback — the framing fix that paused Section B)
+
+## Session Summary (2026-06-10) — `categorical_usdm` v3 + Phase 6 reframe
 
 ## Session Summary (2026-06-10) — `categorical_usdm` v3 + Phase 6 reframe
 

@@ -8,19 +8,28 @@
 # Five sections, each runnable independently via CLI; later sections read from
 # earlier sections' on-disk cache so reruns are cheap.
 #
-#   align_weekly       — collapse per-DOY NDVI anomalies + derivatives to ISO-week
-#                        summaries, join to USDM + SPEI. ONE big cache that the
-#                        analysis sections read. ~6-8 GB est.
-#   categorical_usdm   — confusion matrices: binned NDVI z-anom vs USDM D0-D4.
-#                        Per ecoregion + Midwest aggregate. (STUB)
-#   continuous_spei    — pooled FE panel (fixest) for headline β + per-pixel
-#                        slope map (data.table by-pixel). Includes additive +
-#                        interaction terms for derivative significance. (STUB)
-#   event_detection    — drought event = USDM ≥ D1 weeks; classify NDVI hit/
-#                        miss/false-alarm across z-score sweep + Bayesian
-#                        is_significant operating point. (STUB)
-#   qc                 — alignment + completeness audit across all outputs.
-#                        (STUB)
+#   align_weekly             — collapse per-DOY NDVI anomalies + derivatives to
+#                              ISO-week summaries, join to USDM + SPEI. ONE big
+#                              cache that the analysis sections read. ~6-8 GB est.
+#   categorical_usdm         — confusion matrices: binned NDVI z-anom vs USDM
+#                              D0-D4. Per ecoregion + Midwest aggregate.
+#   within_week_diagnostic   — gate diagnostic: within-week SD of daily NDVI
+#                              anomalies vs across-week SD per pixel. Tells us
+#                              whether daily-resolution event_detection is worth
+#                              the cost vs reusing the weekly cache.
+#   continuous_spei          — pooled feols + iso_week-FE feols (fixest)
+#                              for headline β per (ecoregion × spei window ×
+#                              NDVI signal × model type). Per-pixel slope map
+#                              + per-eco summary. Five NDVI signals × three
+#                              SPEI accumulation windows (4w/13w/26w). Both
+#                              pooled and iso_week-FE reported so seasonality
+#                              control can be inspected separately from
+#                              regional-event signal preservation.
+#   event_detection          — anchored on USDM transitions (none→D0 onset,
+#                              recovery). Per-event NDVI lead-time at daily or
+#                              weekly grain (per within_week_diagnostic gate). (STUB)
+#   qc                       — alignment + completeness audit across all outputs.
+#                              (STUB)
 #
 # Usage (in container):
 #   docker exec -w /workspace conus-hls-drought-monitor \
@@ -101,7 +110,13 @@ config <- list(
   align_out_10y        = file.path(paths$validation_data, "ndvi_drought_join_weekly_10y.rds"),
   align_out_13y        = file.path(paths$validation_data, "ndvi_drought_join_weekly_13y.rds"),
   usdm_confusion_10y   = file.path(paths$validation_data, "usdm_confusion_10y.rds"),
-  usdm_confusion_13y   = file.path(paths$validation_data, "usdm_confusion_13y.rds")
+  usdm_confusion_13y   = file.path(paths$validation_data, "usdm_confusion_13y.rds"),
+  within_week_sd_10y   = file.path(paths$validation_data, "within_week_sd_10y.rds"),
+  within_week_sd_13y   = file.path(paths$validation_data, "within_week_sd_13y.rds"),
+  continuous_spei_10y  = file.path(paths$validation_data, "continuous_spei_10y.rds"),
+  continuous_spei_13y  = file.path(paths$validation_data, "continuous_spei_13y.rds"),
+  event_detection_10y  = file.path(paths$validation_data, "event_detection_10y.rds"),
+  event_detection_13y  = file.path(paths$validation_data, "event_detection_13y.rds")
 )
 
 # ------------------------------------------------------------------------------
@@ -1186,37 +1201,1359 @@ section_categorical_usdm <- function(scope, null_reps = 5L) {
   invisible(NULL)
 }
 
-section_continuous_spei <- function(scope) {
-  cat("\n=== Section: continuous_spei (scope =", scope, ") — STUB ===\n")
-  cat("Not yet implemented. Two model families:\n")
-  cat("  (a) fixest::feols per ecoregion: ndvi_anom ~ spei | year_week,\n")
-  cat("      with additive deriv-sig term + (anom × deriv-sig) interaction.\n")
-  cat("      SPEI is concurrent meteorology — match-window on timescale only\n")
-  cat("      (no temporal lag; NDVI vs SPEI(t) and SPEI(t-K) for K=2,4,8 wk).\n")
-  cat("  (b) data.table by pixel: per-pixel slope map of NDVI vs SPEI.\n")
-  cat("Notes:\n")
-  cat("  - USDM enters here only as a stratifier (within-event vs outside)\n")
-  cat("    so the lagging-indicator concern is sidestepped at this stage.\n")
-  cat("Reads: ndvi_drought_join_weekly_", scope, ".rds\n", sep = "")
-  invisible(NULL)
+# ==============================================================================
+# SECTION: within_week_diagnostic
+#
+# Quantify how much within-week variability exists in our daily NDVI anomalies.
+# The align_weekly section collapses daily values to a weekly mean per pixel-week,
+# which is the right grain for joining to USDM (published weekly). The question
+# this section answers: is the weekly mean throwing away signal we'd want to
+# preserve at daily resolution for event-detection lead-time work?
+#
+# Strategy: per year, load anomalies_YYYY.rds (~1.2 GB; skip derivatives for
+# this first pass — anomalies alone tell the story), compute the SD of
+# anoms_mean across the DOYs in each (pixel × iso_week) group. Compare to the
+# across-week SD per pixel (computed from the existing align_weekly cache's
+# ndvi_anom_mean column).
+#
+# Decision rule for downstream Section B (event_detection):
+#   median(within_week_sd / across_week_sd) << 1  → weekly aggregation preserves
+#       the signal; Section B can safely use the existing weekly cache (~6 hr).
+#   median ratio approaching 1 or above           → daily-resolution work in
+#       Section B is justified (~14 hr).
+#
+# Anomalies-only first pass costs ~30 min. Extending to derivatives (the
+# 11 GB/year files) is a second pass if the ecoregion-level ratios warrant it.
+#
+# Outputs in within_week_sd_<scope>.rds:
+#   pixel_week_sd  — per (pixel × iso_year × iso_week) within-week SD + n_doys
+#   pixel_summary  — per pixel: median within-week SD, across-week SD, ratio
+#   eco_summary    — per L2 ecoregion: median ratio + IQR
+#   meta           — scope, years, runtime, signal_set
+# ==============================================================================
+
+#' Per-year driver. Reads anomalies_YYYY.rds, computes per-(pixel, iso_week) SD
+#' of anoms_mean across DOYs in that week. Returns a per-year data.table; the
+#' caller is responsible for rbinding across years and calling gc().
+compute_within_week_sd_for_year <- function(year) {
+  t0 <- Sys.time()
+  cat(sprintf("\n[year %d] ", year))
+
+  anom_file <- file.path(config$anomalies_dir, sprintf("anomalies_%d.rds", year))
+  if (!file.exists(anom_file)) {
+    cat(sprintf("WARN: missing %s — skipping\n", basename(anom_file)))
+    return(NULL)
+  }
+
+  cat(sprintf("load (%s MB)... ",
+              format(round(file.size(anom_file) / 1e6), big.mark = ",")))
+  anom <- as.data.table(readRDS_retry(anom_file))
+  anom <- anom[, .(pixel_id, yday, anoms_mean)]
+
+  iso_lookup <- yday_iso_lookup(year)
+  anom <- merge(anom, iso_lookup, by = "yday", all.x = TRUE)
+
+  cat("compute per-pixel-week SD... ")
+  pw_sd <- anom[, .(
+    within_week_sd     = if (sum(!is.na(anoms_mean)) >= 2L)
+                           sd(anoms_mean, na.rm = TRUE) else NA_real_,
+    within_week_n_doys = sum(!is.na(anoms_mean))
+  ), by = .(pixel_id, iso_year, iso_week)]
+
+  rm(anom); gc(verbose = FALSE)
+
+  cat(sprintf("%s rows in %.1f min\n",
+              format(nrow(pw_sd), big.mark = ","),
+              as.numeric(Sys.time() - t0, units = "mins")))
+  pw_sd
 }
 
-section_event_detection <- function(scope) {
-  cat("\n=== Section: event_detection (scope =", scope, ") — STUB ===\n")
-  cat("Not yet implemented. USDM-anchored drought events (consecutive weeks\n")
-  cat("where USDM ≥ D1; minimum-duration filter to drop single-week flickers).\n")
-  cat("Treat USDM as a LAGGING reference — credit NDVI for early warning:\n")
-  cat("  - 'event_start' = first week of qualifying run\n")
-  cat("  - for each event, search backward up to K weeks for prior NDVI hits\n")
-  cat("    (z ≤ θ or is_significant TRUE or derivative-w14 sig run ≥ M weeks)\n")
-  cat("  - report lead-time distribution (median weeks NDVI leads event_start)\n")
-  cat("  - rapid-onset / flash-drought subclass: events where USDM transitions\n")
-  cat("    D0→D2+ within 4 weeks → expect derivative signal to outperform\n")
-  cat("    static anomaly here (the user's flash-drought hypothesis)\n")
-  cat("Outputs: per-event hit/miss/lead-time table; ROC-style POD vs FAR\n")
-  cat("curves sweeping z and lead-tolerance window K. Per ecoregion + aggregate.\n")
-  cat("Reads: ndvi_drought_join_weekly_", scope, ".rds\n", sep = "")
-  invisible(NULL)
+#' Combine per-pixel-week within-week SD with across-week SD from the existing
+#' align_weekly cache. Returns a per-pixel summary table.
+summarize_within_vs_across <- function(pixel_week_sd, weekly_cache_file,
+                                       scope_years) {
+  cat("\nLoad align_weekly cache for across-week SD... ")
+  wk <- as.data.table(readRDS_retry(weekly_cache_file))
+  wk <- wk[iso_year %in% scope_years, .(pixel_id, iso_year, iso_week,
+                                         ndvi_anom_mean, L2_code, L2_name)]
+  cat(sprintf("%s rows\n", format(nrow(wk), big.mark = ",")))
+
+  cat("Compute per-pixel across-week SD... ")
+  across <- wk[, .(
+    across_week_sd = if (sum(!is.na(ndvi_anom_mean)) >= 2L)
+                       sd(ndvi_anom_mean, na.rm = TRUE) else NA_real_,
+    n_weeks        = sum(!is.na(ndvi_anom_mean)),
+    L2_code        = first(na.omit(L2_code)),
+    L2_name        = first(na.omit(L2_name))
+  ), by = pixel_id]
+  cat(sprintf("%d pixels\n", nrow(across)))
+
+  cat("Compute per-pixel median within-week SD... ")
+  within <- pixel_week_sd[!is.na(within_week_sd),
+                          .(median_within_week_sd = median(within_week_sd, na.rm = TRUE),
+                            mean_within_week_sd   = mean(within_week_sd,   na.rm = TRUE),
+                            n_weeks_with_sd       = .N),
+                          by = pixel_id]
+  cat(sprintf("%d pixels\n", nrow(within)))
+
+  px <- merge(across, within, by = "pixel_id", all = TRUE)
+  px[, ratio_within_over_across := median_within_week_sd / across_week_sd]
+  px
+}
+
+#' Per-ecoregion summary of within/across ratio distribution.
+summarize_ecoregion_ratio <- function(pixel_summary) {
+  pixel_summary[!is.na(ratio_within_over_across) & !is.na(L2_code),
+                .(n_pixels         = .N,
+                  median_ratio     = median(ratio_within_over_across),
+                  q25_ratio        = quantile(ratio_within_over_across, 0.25),
+                  q75_ratio        = quantile(ratio_within_over_across, 0.75),
+                  median_within_sd = median(median_within_week_sd, na.rm = TRUE),
+                  median_across_sd = median(across_week_sd,        na.rm = TRUE)),
+                by = .(L2_code, L2_name)][order(median_ratio)]
+}
+
+section_within_week_diagnostic <- function(scope) {
+  cat("\n=== Section: within_week_diagnostic (scope =", scope, ") ===\n")
+  stopifnot(scope %in% c("10y", "13y"))
+
+  scope_years <- if (scope == "10y") 2016:2025 else 2013:2025
+  out_file <- if (scope == "10y") config$within_week_sd_10y else config$within_week_sd_13y
+  weekly_cache_file <- if (scope == "10y") config$align_out_10y else config$align_out_13y
+
+  cat(sprintf("Scope: %s (years %d-%d)\n", scope, min(scope_years), max(scope_years)))
+  cat(sprintf("Output: %s\n", out_file))
+  cat(sprintf("Weekly cache (for across-week SD): %s\n", weekly_cache_file))
+  if (!file.exists(weekly_cache_file)) {
+    stop("Weekly cache not found; run --section=align_weekly first.")
+  }
+
+  t_section <- Sys.time()
+
+  # --- 1. Per-year within-week SD ---
+  cat("\n[1/3] Computing within-week SD per year...\n")
+  year_list <- vector("list", length(scope_years))
+  for (i in seq_along(scope_years)) {
+    yr <- scope_years[i]
+    year_list[[i]] <- compute_within_week_sd_for_year(yr)
+    gc(verbose = FALSE)
+  }
+  year_list <- Filter(Negate(is.null), year_list)
+  if (length(year_list) == 0L) stop("within_week_diagnostic: no per-year outputs.")
+
+  cat(sprintf("\nrbindlist %d years... ", length(year_list)))
+  pixel_week_sd <- rbindlist(year_list, use.names = TRUE)
+  rm(year_list); gc(verbose = FALSE)
+  cat(sprintf("%s rows\n", format(nrow(pixel_week_sd), big.mark = ",")))
+
+  # --- 2. Per-pixel within vs across ---
+  cat("\n[2/3] Combining with across-week SD from weekly cache...\n")
+  pixel_summary <- summarize_within_vs_across(pixel_week_sd,
+                                              weekly_cache_file,
+                                              scope_years)
+
+  # --- 3. Per-ecoregion summary ---
+  cat("\n[3/3] Ecoregion-level summary of within/across ratio...\n")
+  eco_summary <- summarize_ecoregion_ratio(pixel_summary)
+
+  meta <- list(
+    scope             = scope,
+    scope_years       = scope_years,
+    n_pixels_in_pw    = uniqueN(pixel_week_sd$pixel_id),
+    n_pixels_summary  = nrow(pixel_summary),
+    signal            = "anoms_mean (derivatives deferred — anomalies-only first pass)",
+    runtime_minutes   = as.numeric(Sys.time() - t_section, units = "mins"),
+    created           = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+  )
+
+  out <- list(
+    pixel_week_sd = pixel_week_sd,
+    pixel_summary = pixel_summary,
+    eco_summary   = eco_summary,
+    meta          = meta
+  )
+
+  cat(sprintf("\nSaving %s...\n", basename(out_file)))
+  saveRDS_validated(out, out_file, compress = "xz")
+  cat(sprintf("  wrote %.2f MB in %.1f min total\n",
+              file.size(out_file) / 1e6,
+              meta$runtime_minutes))
+
+  # --- Quick summary ---
+  cat("\n--- Ecoregion within/across SD ratio (sorted by median ratio asc) ---\n")
+  print(eco_summary)
+
+  cat("\n--- Interpretation guide ---\n")
+  cat("  ratio << 1:  weekly aggregation preserves the signal (use weekly cache for Section B)\n")
+  cat("  ratio ≈ 1:   within-week variability comparable to across-week (daily Section B justified)\n")
+  cat("  ratio > 1:   within-week noise dominates (daily Section B essential; or weekly mean is sound)\n")
+
+  invisible(out)
+}
+
+# ==============================================================================
+# SECTION: continuous_spei
+#
+# Validate the NDVI-anomaly indicator against continuous SPEI (independent
+# meteorological reference; less lagged than USDM; continuous, not binned).
+# The operational question: does our pixel-level indicator track meteorological
+# drought across the Midwest space-time panel?
+#
+# Two model variants per (stratum × spei_window × signal):
+#   pooled:    feols(signal_z ~ spei_z,                    cluster = ~pixel_id)
+#   isowk_fe:  feols(signal_z ~ spei_z | iso_week,         cluster = ~pixel_id)
+#
+# Rationale for NOT using iso_year × iso_week FE (the standard panel default):
+# our upstream pipeline already removes per-pixel climatology (anom = year_fit
+# − norm_fit) and per-pixel scale (z-standardization in step [2] below). SPEI
+# is already z-scored per pixel × week-of-year against a 42-year climatology.
+# Both sides of the regression are deviations from "what would be normal at
+# this pixel in this week." Adding year×week FE absorbs regional drought
+# events ("week 30 of 2012 was dry across the whole Midwest") — which is
+# precisely the signal we want to validate. The pooled model is the operational
+# headline. The iso_week-FE variant adds mild seasonal control (allowing
+# intercept to shift by week-of-year) without stripping the regional drought
+# signal. Pixel FE is redundant with per-pixel z-standardization.
+#
+# Per-pixel slope map: closed-form covariance per pixel (data.table by-group,
+# skipping lm() overhead at 129K × 15 fits = ~1.9M slopes). Single time series
+# per pixel — no FE involved.
+#
+# Permutation null: 5 reps default (overridable via --null-reps=N). Shuffles
+# SPEI within (pixel × season) to preserve marginal distributions while
+# breaking the SPEI–NDVI relationship. Re-fits POOLED model only (skipping
+# iso_week FE for null to halve runtime).
+#
+# Outputs in continuous_spei_<scope>.rds:
+#   fit_table        — per (stratum × window × signal × model_type): β, SE, t,
+#                      p, r2_within, n_obs, n_pixels (12 × 3 × 5 × 2 = 360 rows)
+#   slope_map        — per (pixel × window × signal): slope, intercept,
+#                      r2, n_weeks  (~1.9M rows)
+#   slope_map_summary — per (L2_code × window × signal): median slope, IQR,
+#                      % positive, % with t > 2  (~ 11 × 3 × 5 = 165 rows)
+#   residual_diag    — headline cell residuals binned by season × ecoregion
+#   null_summary     — per-cell observed_β, null_mean_β, null_sd_β, z_score
+#                      (pooled-model cells only)
+#   meta             — scope, n_reps, runtime, signal_set, etc.
+# ==============================================================================
+
+#' Per-pixel z-standardize a set of anomaly columns. Adds new columns named
+#' in `z_cols` (same length as `anom_cols`). Drops pixels with sd=0 or
+#' n_valid < min_valid_weeks in ANY signal (signal-by-signal union).
+#'
+#' Returns the data.table modified in place. Reports n dropped per signal.
+#'
+#' Lifted from v3 categorical_usdm inline pattern; shared across analysis
+#' sections so future helpers (e.g., event_detection) don't re-implement it.
+zstandardize_signals_per_pixel <- function(dt, anom_cols, z_cols,
+                                           min_valid_weeks = 30L) {
+  stopifnot(length(anom_cols) == length(z_cols),
+            all(anom_cols %in% names(dt)))
+  drop_px <- integer(0)
+  for (i in seq_along(anom_cols)) {
+    col_anom <- anom_cols[i]
+    col_z    <- z_cols[i]
+    cat(sprintf("  [%s → %s] ", col_anom, col_z))
+
+    stats <- dt[!is.na(get(col_anom)), .(
+      mu_pix  = mean(get(col_anom)),
+      sd_pix  = sd(get(col_anom)),
+      n_valid = .N
+    ), by = pixel_id]
+
+    drop_this <- stats[n_valid < min_valid_weeks | sd_pix == 0 | is.na(sd_pix),
+                       pixel_id]
+    drop_px <- union(drop_px, drop_this)
+    cat(sprintf("dropping %d pixels (σ=0 or n<%d)\n",
+                length(drop_this), min_valid_weeks))
+
+    dt[stats, `:=`(mu_pix = i.mu_pix, sd_pix = i.sd_pix), on = "pixel_id"]
+    dt[, (col_z) := (get(col_anom) - mu_pix) / sd_pix]
+    dt[, c("mu_pix", "sd_pix") := NULL]
+  }
+  cat(sprintf("  total unique drop list: %d pixels\n", length(drop_px)))
+  if (length(drop_px) > 0L) dt <- dt[!pixel_id %in% drop_px]
+  invisible(drop_px)  # return the drop list; caller can re-bind dt if needed
+}
+
+#' Fit one feols regression cell. Returns a single-row data.table.
+#' model_type ∈ {"pooled", "isowk_fe"}.
+#'   pooled:    feols(signal_z ~ spei_col,                cluster = ~pixel_id)
+#'   isowk_fe:  feols(signal_z ~ spei_col | iso_week,     cluster = ~pixel_id)
+fit_fe_spei_one_cell <- function(dt_sub, spei_col, signal_col,
+                                 stratum_label, model_type) {
+  stopifnot(model_type %in% c("pooled", "isowk_fe"))
+
+  fml <- if (model_type == "pooled") {
+    as.formula(sprintf("%s ~ %s", signal_col, spei_col))
+  } else {
+    as.formula(sprintf("%s ~ %s | iso_week", signal_col, spei_col))
+  }
+
+  # Use is.finite() — drops both NA and ±Inf. SPEI cache has rare ±Inf
+  # rows (~0.001% for spei_13w; the SPEI package emits these when the fitted
+  # CDF lands at exactly 0 or 1 for extreme observations). See
+  # [[spei-cache-inf-quirk]] memory.
+  ok <- dt_sub[is.finite(get(signal_col)) & is.finite(get(spei_col))]
+  if (nrow(ok) < 1000L) {
+    return(data.table(stratum = stratum_label, spei_col = spei_col,
+                      signal_col = signal_col, model_type = model_type,
+                      beta = NA_real_, se = NA_real_, t = NA_real_,
+                      p = NA_real_, r2_within = NA_real_,
+                      n_obs = nrow(ok), n_pixels = uniqueN(ok$pixel_id),
+                      note = "skipped: n_obs < 1000"))
+  }
+
+  fit <- tryCatch(
+    fixest::feols(fml, data = ok, cluster = ~pixel_id, notes = FALSE),
+    error = function(e) e
+  )
+  if (inherits(fit, "error")) {
+    return(data.table(stratum = stratum_label, spei_col = spei_col,
+                      signal_col = signal_col, model_type = model_type,
+                      beta = NA_real_, se = NA_real_, t = NA_real_,
+                      p = NA_real_, r2_within = NA_real_,
+                      n_obs = nrow(ok), n_pixels = uniqueN(ok$pixel_id),
+                      note = paste("feols error:", conditionMessage(fit))))
+  }
+
+  cf  <- fit$coeftable
+  est <- cf[spei_col, "Estimate"]
+  se  <- cf[spei_col, "Std. Error"]
+  tv  <- cf[spei_col, "t value"]
+  pv  <- cf[spei_col, "Pr(>|t|)"]
+  r2w <- if (model_type == "pooled") {
+    fixest::r2(fit, "r2")
+  } else {
+    fixest::r2(fit, "wr2")  # within-r2 when FE present
+  }
+
+  data.table(stratum    = stratum_label,
+             spei_col   = spei_col,
+             signal_col = signal_col,
+             model_type = model_type,
+             beta       = est,
+             se         = se,
+             t          = tv,
+             p          = pv,
+             r2_within  = as.numeric(r2w),
+             n_obs      = nrow(ok),
+             n_pixels   = uniqueN(ok$pixel_id),
+             note       = "")
+}
+
+#' Loop the (stratum × spei_window × signal × model_type) grid and return one
+#' big fit table. Uses data.table keyed indexing for cheap stratum subsets.
+run_fe_regression_grid <- function(dt, eco_codes, spei_cols, signal_cols,
+                                   model_types = c("pooled", "isowk_fe")) {
+  setkey(dt, L2_code)  # cheap stratum subsetting
+
+  strata <- c(eco_codes, "midwest_aggregate")
+  rows <- vector("list", length(strata) * length(spei_cols) *
+                          length(signal_cols) * length(model_types))
+  idx <- 0L
+  total <- length(rows)
+
+  for (stratum in strata) {
+    is_mw <- stratum == "midwest_aggregate"
+    sub <- if (is_mw) dt else dt[.(stratum), nomatch = NULL]
+    n_px_str <- uniqueN(sub$pixel_id)
+    cat(sprintf("  [%s] n_obs=%s n_pixels=%d\n",
+                stratum, format(nrow(sub), big.mark = ","), n_px_str))
+
+    for (sp_col in spei_cols) {
+      for (sg_col in signal_cols) {
+        for (mt in model_types) {
+          idx <- idx + 1L
+          rows[[idx]] <- fit_fe_spei_one_cell(sub, sp_col, sg_col,
+                                              stratum, mt)
+        }
+      }
+    }
+    rm(sub); gc(verbose = FALSE)
+  }
+  rbindlist(rows, use.names = TRUE, fill = TRUE)
+}
+
+#' Per-pixel slope of signal ~ spei via closed-form covariance (skip lm()).
+#' Returns one row per (pixel_id × spei_col × signal_col).
+fit_pixel_slope_map <- function(dt, spei_cols, signal_cols,
+                                min_valid_weeks = 30L) {
+  out_list <- vector("list", length(spei_cols) * length(signal_cols))
+  idx <- 0L
+  for (sp in spei_cols) {
+    for (sg in signal_cols) {
+      idx <- idx + 1L
+      cat(sprintf("  [%s vs %s] ", sg, sp))
+      slopes <- dt[is.finite(get(sp)) & is.finite(get(sg)),
+                   {
+                     n  <- .N
+                     if (n < 2L) {
+                       list(slope = NA_real_, intercept = NA_real_,
+                            r2 = NA_real_, n_weeks = n)
+                     } else {
+                       mx <- mean(get(sp))
+                       my <- mean(get(sg))
+                       dx <- get(sp) - mx
+                       dy <- get(sg) - my
+                       vx <- sum(dx * dx) / (n - 1L)
+                       cv <- sum(dx * dy) / (n - 1L)
+                       vy <- sum(dy * dy) / (n - 1L)
+                       vx_ok <- !is.na(vx) && vx > 0
+                       vy_ok <- !is.na(vy) && vy > 0
+                       slope <- if (vx_ok) cv / vx else NA_real_
+                       r2    <- if (vx_ok && vy_ok) (cv * cv) / (vx * vy) else NA_real_
+                       list(slope = slope,
+                            intercept = if (!is.na(slope)) my - slope * mx else NA_real_,
+                            r2 = r2,
+                            n_weeks = n)
+                     }
+                   },
+                   by = pixel_id]
+      slopes <- slopes[n_weeks >= min_valid_weeks]
+      slopes[, `:=`(spei_col = sp, signal_col = sg)]
+      cat(sprintf("%d pixels (>=%d weeks)\n", nrow(slopes), min_valid_weeks))
+      out_list[[idx]] <- slopes
+    }
+  }
+  rbindlist(out_list, use.names = TRUE)
+}
+
+#' Per (L2 × spei_col × signal_col) summary of the per-pixel slope distribution.
+summarize_slope_map <- function(slope_map, eco_lookup) {
+  m <- merge(slope_map,
+             eco_lookup[, .(pixel_id, L2_code, L2_name)],
+             by = "pixel_id", all.x = TRUE)
+  m[, .(n_pixels        = .N,
+        median_slope    = median(slope, na.rm = TRUE),
+        q25_slope       = quantile(slope, 0.25, na.rm = TRUE),
+        q75_slope       = quantile(slope, 0.75, na.rm = TRUE),
+        pct_positive    = 100 * mean(slope > 0, na.rm = TRUE),
+        median_r2       = median(r2, na.rm = TRUE)),
+    by = .(L2_code, L2_name, spei_col, signal_col)][order(L2_code, spei_col, signal_col)]
+}
+
+#' Compute residuals from one headline pooled fit, binned by season × eco.
+#' Cheap diagnostic for omitted seasonality structure.
+#'
+#' Computes residuals manually from fitted coefficients (intercept + slope * x)
+#' rather than via residuals(fit) — guarantees row alignment with the input
+#' data. fixest can drop additional rows internally (singletons, etc.) that
+#' break a length-based assignment via residuals(fit).
+compute_residual_diagnostics_spei <- function(dt, spei_col, signal_col) {
+  ok <- dt[is.finite(get(signal_col)) & is.finite(get(spei_col))]
+  if (nrow(ok) < 1000L) {
+    cat(sprintf("  WARN: only %d rows for residual diag; skipping\n", nrow(ok)))
+    return(data.table())
+  }
+  fit <- fixest::feols(as.formula(sprintf("%s ~ %s", signal_col, spei_col)),
+                       data = ok, cluster = ~pixel_id, notes = FALSE)
+  intercept <- as.numeric(fit$coefficients[["(Intercept)"]])
+  slope     <- as.numeric(fit$coefficients[[spei_col]])
+  ok[, predicted := intercept + slope * get(spei_col)]
+  ok[, resid     := get(signal_col) - predicted]
+  ok[, season    := month_to_season(lubridate::month(week_start))]
+  out <- ok[, .(n          = .N,
+                mean_resid = mean(resid),
+                sd_resid   = sd(resid),
+                p25        = quantile(resid, 0.25),
+                p75        = quantile(resid, 0.75)),
+            by = .(L2_code, season)]
+  out[order(L2_code, season)]
+}
+
+#' Permutation null. For each rep: shuffle SPEI within (pixel × season) and
+#' re-fit the POOLED model on the same (stratum × spei_window × signal) grid.
+#' Aggregates to per-cell observed-vs-null β z-score.
+run_fe_permutation_null_spei <- function(dt, eco_codes, spei_cols, signal_cols,
+                                         n_reps = 5L, seed_base = 8675309L) {
+  if (n_reps <= 0L) {
+    cat("  (null_reps = 0; skipping permutation null)\n")
+    return(NULL)
+  }
+  if (!"season" %in% names(dt)) {
+    dt[, season := month_to_season(lubridate::month(week_start))]
+  }
+
+  null_rows <- vector("list", n_reps)
+  for (rep in seq_len(n_reps)) {
+    set.seed(seed_base + rep)
+    cat(sprintf("\n  --- null rep %d/%d ---\n", rep, n_reps))
+    cat("    shuffling SPEI within (pixel × season)...")
+    t0 <- Sys.time()
+
+    # Shuffle each SPEI column within (pixel, season) blocks
+    for (sp in spei_cols) {
+      dt[, (sp) := sample(get(sp)), by = .(pixel_id, season)]
+    }
+    cat(sprintf(" done (%.1f sec)\n",
+                as.numeric(Sys.time() - t0, units = "secs")))
+
+    cat("    re-fitting pooled grid...\n")
+    rep_fits <- run_fe_regression_grid(dt, eco_codes, spei_cols, signal_cols,
+                                       model_types = "pooled")
+    rep_fits[, rep := rep]
+    null_rows[[rep]] <- rep_fits
+  }
+  null_all <- rbindlist(null_rows, use.names = TRUE)
+  null_all[, .(null_mean_beta = mean(beta, na.rm = TRUE),
+               null_sd_beta   = sd(beta,   na.rm = TRUE),
+               n_reps         = .N),
+           by = .(stratum, spei_col, signal_col)]
+}
+
+section_continuous_spei <- function(scope, null_reps = 5L) {
+  cat("\n=== Section: continuous_spei (scope =", scope,
+      ", null_reps =", null_reps, ") ===\n")
+  stopifnot(scope %in% c("10y", "13y"), is.numeric(null_reps), null_reps >= 0L)
+  null_reps <- as.integer(null_reps)
+
+  in_file  <- if (scope == "10y") config$align_out_10y       else config$align_out_13y
+  out_file <- if (scope == "10y") config$continuous_spei_10y else config$continuous_spei_13y
+
+  if (!file.exists(in_file)) {
+    stop("Cache file missing: ", in_file,
+         "\n  Run --section=align_weekly --scope=", scope, " first.")
+  }
+  if (!requireNamespace("fixest", quietly = TRUE)) {
+    stop("fixest not installed. Run install.packages('fixest') in container.")
+  }
+  cat(sprintf("Input:  %s (%.1f GB)\n", basename(in_file), file.size(in_file) / 1e9))
+  cat(sprintf("Output: %s\n", basename(out_file)))
+
+  t_section <- Sys.time()
+
+  ANOM_COLS    <- c("ndvi_anom_mean",
+                    "deriv_w03_anom_mean", "deriv_w07_anom_mean",
+                    "deriv_w14_anom_mean", "deriv_w30_anom_mean")
+  SIGNAL_NAMES <- c("ndvi_z",
+                    "deriv_w03_z", "deriv_w07_z", "deriv_w14_z", "deriv_w30_z")
+  SPEI_COLS    <- c("spei_4w", "spei_13w", "spei_26w")
+  HEADLINE_CELL <- list(spei = "spei_13w", signal = "ndvi_z")
+  MIN_VALID_WEEKS <- 30L
+
+  # --- 1. Load cache, slim columns ---
+  cat("\n[1] Load align_weekly cache, slim columns...\n")
+  dt <- as.data.table(readRDS_retry(in_file))
+  cat(sprintf("  raw: %s rows × %d cols\n",
+              format(nrow(dt), big.mark = ","), ncol(dt)))
+  keep_cols <- c("pixel_id", "iso_year", "iso_week", "week_start",
+                 ANOM_COLS, SPEI_COLS, "L2_code", "L2_name")
+  dt <- dt[, ..keep_cols]
+  gc(verbose = FALSE)
+
+  n_px_in <- uniqueN(dt$pixel_id)
+  cat(sprintf("  pixel count: %d (expected %d)\n", n_px_in, EXPECTED_VALID_PIXELS))
+  if (n_px_in != EXPECTED_VALID_PIXELS) {
+    cat(sprintf("  WARN: pixel drift %d (see feedback_pixel_count_invariant)\n",
+                n_px_in - EXPECTED_VALID_PIXELS))
+  }
+
+  # --- 2. Per-pixel z-standardize NDVI signals ---
+  cat("\n[2] Per-pixel z-standardize 5 NDVI signals...\n")
+  setorder(dt, pixel_id, week_start)
+  drop_px <- zstandardize_signals_per_pixel(dt, ANOM_COLS, SIGNAL_NAMES,
+                                            min_valid_weeks = MIN_VALID_WEEKS)
+  if (length(drop_px) > 0L) dt <- dt[!pixel_id %in% drop_px]
+  dt[, (ANOM_COLS) := NULL]
+  gc(verbose = FALSE)
+  cat(sprintf("  after drops: %s rows × %d pixels\n",
+              format(nrow(dt), big.mark = ","), uniqueN(dt$pixel_id)))
+
+  # --- 3. Observed FE regression grid (pooled + iso_week FE) ---
+  cat("\n[3] Observed FE regression grid (pooled + iso_week)...\n")
+  cat("    12 strata × 3 spei × 5 signals × 2 models = 360 fits expected\n")
+  eco_codes <- sort(unique(dt$L2_code[!is.na(dt$L2_code)]))
+  cat(sprintf("    eco_codes (%d): %s\n", length(eco_codes),
+              paste(eco_codes, collapse = ", ")))
+  t_fit <- Sys.time()
+  fit_table <- run_fe_regression_grid(dt, eco_codes, SPEI_COLS, SIGNAL_NAMES,
+                                      model_types = c("pooled", "isowk_fe"))
+  cat(sprintf("  observed grid fit in %.1f min\n",
+              as.numeric(Sys.time() - t_fit, units = "mins")))
+
+  # --- 4. Per-pixel slope map ---
+  cat("\n[4] Per-pixel slope map (closed-form covariance)...\n")
+  t_slope <- Sys.time()
+  slope_map <- fit_pixel_slope_map(dt, SPEI_COLS, SIGNAL_NAMES,
+                                   min_valid_weeks = MIN_VALID_WEEKS)
+  cat(sprintf("  %s slope rows in %.1f min\n",
+              format(nrow(slope_map), big.mark = ","),
+              as.numeric(Sys.time() - t_slope, units = "mins")))
+
+  cat("  Summarizing slope map by ecoregion...\n")
+  eco_lookup <- as.data.table(readRDS_retry(config$ecoregion_lookup))
+  slope_map_summary <- summarize_slope_map(slope_map, eco_lookup)
+
+  # --- 5. Residual diagnostics on headline cell ---
+  cat(sprintf("\n[5] Residual diagnostics for headline (%s ~ %s, pooled)...\n",
+              HEADLINE_CELL$signal, HEADLINE_CELL$spei))
+  rm(eco_lookup); gc(verbose = FALSE)
+  residual_diag <- compute_residual_diagnostics_spei(
+    dt, HEADLINE_CELL$spei, HEADLINE_CELL$signal)
+
+  # --- 6. Permutation null (pooled model only) ---
+  cat(sprintf("\n[6] Permutation null (%d reps, pooled model only)...\n", null_reps))
+  t_null <- Sys.time()
+  null_summary <- run_fe_permutation_null_spei(dt, eco_codes, SPEI_COLS,
+                                               SIGNAL_NAMES,
+                                               n_reps = null_reps)
+  cat(sprintf("  null done in %.1f min\n",
+              as.numeric(Sys.time() - t_null, units = "mins")))
+
+  # Join null to observed pooled rows
+  if (!is.null(null_summary)) {
+    obs_pooled <- fit_table[model_type == "pooled",
+                            .(stratum, spei_col, signal_col, obs_beta = beta)]
+    null_summary <- merge(null_summary, obs_pooled,
+                          by = c("stratum", "spei_col", "signal_col"),
+                          all = TRUE)
+    null_summary[, z_score := (obs_beta - null_mean_beta) / null_sd_beta]
+    setcolorder(null_summary, c("stratum", "spei_col", "signal_col",
+                                "obs_beta", "null_mean_beta", "null_sd_beta",
+                                "n_reps", "z_score"))
+  }
+
+  # --- 7. Assemble + save ---
+  meta <- list(
+    scope             = scope,
+    scope_years       = if (scope == "10y") 2016:2025 else 2013:2025,
+    null_reps         = null_reps,
+    model_types       = c("pooled", "isowk_fe"),
+    headline_cell     = HEADLINE_CELL,
+    signal_set        = SIGNAL_NAMES,
+    spei_set          = SPEI_COLS,
+    min_valid_weeks   = MIN_VALID_WEEKS,
+    dropped_pixels    = length(drop_px),
+    runtime_minutes   = as.numeric(Sys.time() - t_section, units = "mins"),
+    created           = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+  )
+
+  out <- list(
+    fit_table         = fit_table,
+    slope_map         = slope_map,
+    slope_map_summary = slope_map_summary,
+    residual_diag     = residual_diag,
+    null_summary      = null_summary,
+    meta              = meta
+  )
+
+  cat(sprintf("\nSaving %s...\n", basename(out_file)))
+  saveRDS_validated(out, out_file, compress = "xz")
+  cat(sprintf("  wrote %.2f MB in %.1f min total\n",
+              file.size(out_file) / 1e6,
+              meta$runtime_minutes))
+
+  # --- Quick summary ---
+  cat("\n--- Quick summary: midwest_aggregate × spei_13w ---\n")
+  mw <- fit_table[stratum == "midwest_aggregate" & spei_col == "spei_13w"]
+  for (sig in SIGNAL_NAMES) {
+    p <- mw[signal_col == sig & model_type == "pooled"]
+    i <- mw[signal_col == sig & model_type == "isowk_fe"]
+    cat(sprintf("  %-14s  pooled β=%+.3f (p=%.1e r2=%.3f) | isowk β=%+.3f (p=%.1e r2w=%.3f)\n",
+                sig,
+                if (nrow(p)) p$beta else NA, if (nrow(p)) p$p else NA,
+                if (nrow(p)) p$r2_within else NA,
+                if (nrow(i)) i$beta else NA, if (nrow(i)) i$p else NA,
+                if (nrow(i)) i$r2_within else NA))
+  }
+  cat("\n--- Per-ecoregion pooled β (headline: ndvi_z ~ spei_13w) ---\n")
+  print(fit_table[spei_col == "spei_13w" & signal_col == "ndvi_z" &
+                  model_type == "pooled",
+                  .(stratum, beta = round(beta, 4), se = round(se, 4),
+                    p = signif(p, 2), r2_within = round(r2_within, 4),
+                    n_pixels)][order(-beta)])
+
+  invisible(out)
+}
+
+# ==============================================================================
+# SECTION: event_detection
+#
+# Anchored on USDM transitions, measure the lead/lag of our NDVI signals.
+# Uses weekly grain (per Section C diagnostic gate decision: within-week SD is
+# only 22-35% of across-week SD, so weekly aggregation preserves the signal).
+#
+# Events tracked:
+#   onset:    none → D0 (dm_max = -1 → 0)        — earliest USDM signal
+#   recovery: any drought → none (≥0 → -1)       — exit signal
+#
+# Two grains of events:
+#   per-pixel events:        chronological transitions per pixel. ~10-15M rows.
+#                            For spatial maps of lead/lag.
+#   ecoregion-aggregate:     per (L2 × week), in_drought fraction change ≥
+#                            MAJORITY_DELTA = 0.10. Catches coordinated regional
+#                            events. (User initially suggested ≥50%; that's
+#                            structurally rare in 4 km USDM data.)
+#
+# Signal fire detection (weekly grain):
+#   For each (pixel × signal × z × K), find runs of K consecutive weeks where
+#   signal_z ≤ -z (onset direction) or ≥ +z (recovery direction). First week
+#   of a qualifying run = the fire time. ndvi_z + 4 derivative windows = 5
+#   signals.
+#
+# Operating-point sweep:
+#   z_threshold  ∈ {1.0, 1.5, 2.0}                — magnitude threshold
+#   K (weeks)    ∈ {1, 2, 4}                      — sustained-weeks requirement
+#   lead_window  ∈ {4, 8, 12} weeks               — search radius around event
+#   5 NDVI signals × 2 directions                 — magnitude + 4 derivatives
+#
+# Total ops per direction: 5 signals × 3 z × 3 K = 45 fire tables per dir,
+# 90 across dirs. × 3 lead_windows for matching = 270 op-points per stratum.
+#
+# Per-cell skill: hit_rate, FAR (false alarms per pixel-year), median lead_weeks
+# + percentile distribution, n_events.
+#
+# Permutation null: 5 reps default. Shuffle event dates within (pixel × season)
+# and re-match to (unchanged) fires. Fires don't need re-detection.
+#
+# Outputs in event_detection_<scope>.rds:
+#   events_pixel       — per-pixel USDM transitions
+#   events_ecoregion   — ecoregion-aggregate events
+#   skill_pixel        — per (L2 × event_type × signal × op_point) skill
+#   skill_ecoregion    — same shape, ecoregion-aggregate events
+#   lead_distributions — percentile distribution of lead_weeks per cell
+#   pixel_event_map    — per pixel × event_type × headline op_point (for maps)
+#   null_summary       — per-cell observed vs null skill metrics
+#   meta               — scope, op_points, runtime, etc.
+# ==============================================================================
+
+# Headline op-points used for pixel_event_map (two ops chosen post-hoc;
+# spatial maps kept only at these ops to control output size). Magnitude
+# (ndvi_z) and 2-week derivative (deriv_w14_z) so we can compare magnitude
+# vs derivative spatial patterns directly.
+EVENT_HEADLINES <- list(
+  list(signal = "ndvi_z",      z = 1.5, K = 2L, lead_window = 8L),
+  list(signal = "deriv_w14_z", z = 1.5, K = 2L, lead_window = 8L)
+)
+
+#' Build per-pixel USDM transitions. Returns one row per transition.
+#'   event_type ∈ {"onset", "recovery"}
+#'   onset:    usdm_lag = -1, usdm_curr ≥ 0  (none → any drought, captures D0+)
+#'   recovery: usdm_lag ≥ 0, usdm_curr = -1  (any drought → none)
+build_pixel_events <- function(usdm_dt) {
+  setorder(usdm_dt, pixel_id, iso_year, iso_week)
+  usdm_dt[, usdm_lag := shift(usdm, 1L, type = "lag"), by = pixel_id]
+
+  onset_dt <- usdm_dt[!is.na(usdm_lag) & usdm_lag == -1L & usdm >= 0L,
+                      .(pixel_id, iso_year, iso_week, week_start,
+                        event_type = "onset", usdm_pre = usdm_lag,
+                        usdm_post = usdm)]
+  recov_dt <- usdm_dt[!is.na(usdm_lag) & usdm_lag >= 0L & usdm == -1L,
+                      .(pixel_id, iso_year, iso_week, week_start,
+                        event_type = "recovery", usdm_pre = usdm_lag,
+                        usdm_post = usdm)]
+  rbindlist(list(onset_dt, recov_dt), use.names = TRUE)
+}
+
+#' Build ecoregion-aggregate events from per-pixel USDM trace. For each
+#' (L2 × week), compute the in_drought fraction; an aggregate event = week
+#' where the week-over-week change in that fraction exceeds majority_delta.
+#'   onset:    +majority_delta (in_drought fraction rises by ≥10pp w/w)
+#'   recovery: -majority_delta (in_drought fraction falls by ≥10pp w/w)
+build_ecoregion_events <- function(usdm_dt, majority_delta = 0.10) {
+  setorder(usdm_dt, L2_code, iso_year, iso_week)
+  weekly_frac <- usdm_dt[!is.na(L2_code) & !is.na(usdm),
+                         .(in_drought_frac = mean(usdm >= 0L),
+                           n_pixels        = .N),
+                         by = .(L2_code, L2_name, iso_year, iso_week, week_start)]
+  setorder(weekly_frac, L2_code, iso_year, iso_week)
+  weekly_frac[, frac_lag := shift(in_drought_frac, 1L, type = "lag"), by = L2_code]
+  weekly_frac[, delta := in_drought_frac - frac_lag]
+
+  onset_rows <- weekly_frac[!is.na(delta) & delta >= majority_delta,
+                            .(L2_code, L2_name, iso_year, iso_week, week_start,
+                              event_type = "onset",
+                              in_drought_pre = frac_lag,
+                              in_drought_post = in_drought_frac,
+                              delta)]
+  recov_rows <- weekly_frac[!is.na(delta) & delta <= -majority_delta,
+                            .(L2_code, L2_name, iso_year, iso_week, week_start,
+                              event_type = "recovery",
+                              in_drought_pre = frac_lag,
+                              in_drought_post = in_drought_frac,
+                              delta)]
+  rbindlist(list(onset_rows, recov_rows), use.names = TRUE)
+}
+
+#' Detect signal fires per pixel: runs of K consecutive weeks where signal
+#' satisfies the threshold in the given direction. Returns one row per
+#' (pixel × fire_week_start). fire_week_start = the FIRST week of the run.
+#'
+#' For very large K relative to a pixel's record, no fires fire. Memory-safe:
+#' uses data.table's rleid pattern within pixel groups.
+detect_signal_fires_weekly <- function(dt, signal_col, z_threshold,
+                                       sustained_weeks, direction) {
+  stopifnot(direction %in% c("onset", "recovery"))
+  setorder(dt, pixel_id, iso_year, iso_week)
+
+  threshold_test <- if (direction == "onset") {
+    quote(is.finite(get(signal_col)) & get(signal_col) <= -z_threshold)
+  } else {
+    quote(is.finite(get(signal_col)) & get(signal_col) >= z_threshold)
+  }
+
+  # Per pixel: find rleid-runs of TRUE, keep those with length >= K, fire week
+  # is the first of the run.
+  fires <- dt[, {
+    flag <- eval(threshold_test)
+    if (!any(flag, na.rm = TRUE)) {
+      data.table()
+    } else {
+      run_id  <- rleid(flag)
+      run_len <- ave(seq_along(run_id), run_id, FUN = length)
+      qual    <- which(flag & run_len >= sustained_weeks)
+      if (length(qual) == 0L) {
+        data.table()
+      } else {
+        # Keep only the START of each qualifying run
+        run_starts <- qual[!duplicated(run_id[qual])]
+        data.table(iso_year   = iso_year[run_starts],
+                   iso_week   = iso_week[run_starts],
+                   week_start = week_start[run_starts])
+      }
+    }
+  }, by = pixel_id]
+  fires
+}
+
+#' Match signal fires to events. For each event (pixel × event_date), find the
+#' nearest fire within +/- lead_window_weeks. lead_weeks = event_week - fire_week
+#' (positive = NDVI led USDM event; negative = NDVI lagged).
+#'
+#' Returns matches data.table with one row per event:
+#'   pixel_id, event_iso_year, event_iso_week, event_week_start, event_type,
+#'   hit (logical), lead_weeks, n_fires_in_window
+match_fires_to_events <- function(events_dt, fires_dt, lead_window_weeks) {
+  if (nrow(fires_dt) == 0L) {
+    out <- copy(events_dt)
+    out[, `:=`(hit = FALSE, lead_weeks = NA_integer_, n_fires_in_window = 0L)]
+    return(out)
+  }
+
+  # Compute a numeric week index per pixel for non-equi join
+  events_dt[, ev_idx  := as.integer(week_start)]
+  fires_dt[,  fr_idx  := as.integer(week_start)]
+
+  # Inner foverlaps would require interval representations; use a manual
+  # data.table per-pixel sub-search instead. Cheap because each pixel has
+  # few events (~5-15) and few fires (~5-30) over 10y.
+  # Build pixel-keyed list and search per event.
+  setkey(fires_dt, pixel_id, fr_idx)
+
+  match_one <- function(pid, ev_idx_vec) {
+    fires_pid <- fires_dt[.(pid), nomatch = 0L]
+    if (nrow(fires_pid) == 0L) {
+      return(list(rep(FALSE, length(ev_idx_vec)),
+                  rep(NA_integer_, length(ev_idx_vec)),
+                  rep(0L, length(ev_idx_vec))))
+    }
+    n_fires_window <- integer(length(ev_idx_vec))
+    lead_weeks_vec <- integer(length(ev_idx_vec))
+    hit_vec        <- logical(length(ev_idx_vec))
+    fr_idx_pid <- fires_pid$fr_idx
+    for (i in seq_along(ev_idx_vec)) {
+      delta_days <- ev_idx_vec[i] - fr_idx_pid
+      within <- abs(delta_days) <= lead_window_weeks * 7L
+      n_fires_window[i] <- sum(within)
+      if (n_fires_window[i] == 0L) {
+        hit_vec[i]        <- FALSE
+        lead_weeks_vec[i] <- NA_integer_
+      } else {
+        # Nearest fire wins (smallest |delta|); positive lead_weeks = NDVI led
+        best <- which.min(abs(delta_days[within]))
+        win_idx <- which(within)[best]
+        hit_vec[i]        <- TRUE
+        lead_weeks_vec[i] <- as.integer(round(delta_days[win_idx] / 7))
+      }
+    }
+    list(hit_vec, lead_weeks_vec, n_fires_window)
+  }
+
+  events_out <- copy(events_dt)
+  # data.table per-group apply
+  res <- events_out[, {
+    m <- match_one(pixel_id[1], ev_idx)
+    list(hit = m[[1]], lead_weeks = m[[2]], n_fires_in_window = m[[3]])
+  }, by = pixel_id]
+  events_out[, `:=`(hit = res$hit,
+                    lead_weeks = res$lead_weeks,
+                    n_fires_in_window = res$n_fires_in_window)]
+  events_out[, ev_idx := NULL]
+  fires_dt[,  fr_idx := NULL]
+  events_out
+}
+
+#' Proper false-alarm count: fires that do NOT have ANY event within
+#' ±lead_window_weeks. Symmetric to match_fires_to_events but starting from
+#' fires instead of events. Returns per-pixel false-alarm count (not rate).
+count_false_alarms <- function(fires_dt, events_dt, lead_window_weeks) {
+  if (nrow(fires_dt) == 0L) {
+    return(data.table(pixel_id = integer(0), false_alarms = integer(0)))
+  }
+  if (nrow(events_dt) == 0L) {
+    # No events at all → every fire is a false alarm
+    fa <- fires_dt[, .(false_alarms = .N), by = pixel_id]
+    return(fa)
+  }
+
+  fires_dt[, fr_idx := as.integer(week_start)]
+  events_dt[, ev_idx := as.integer(week_start)]
+  setkey(events_dt, pixel_id)
+  lead_days <- lead_window_weeks * 7L
+
+  # Per-pixel: for each fire, check if any event within ±lead_days
+  fa_per_pixel <- fires_dt[, {
+    events_pid <- events_dt[.(pixel_id[1]), nomatch = 0L]
+    if (nrow(events_pid) == 0L) {
+      .(false_alarms = .N)
+    } else {
+      ev_idx_pid <- events_pid$ev_idx
+      is_fa <- vapply(fr_idx, function(fi) {
+        !any(abs(fi - ev_idx_pid) <= lead_days)
+      }, logical(1))
+      .(false_alarms = sum(is_fa))
+    }
+  }, by = pixel_id]
+
+  fires_dt[, fr_idx := NULL]
+  events_dt[, ev_idx := NULL]
+  fa_per_pixel
+}
+
+#' Summarize per (L2 × event_type × signal × op_point): hit_rate, false-alarm
+#' count (fires NOT matched to any event), median lead_weeks, percentile
+#' distribution, n_events. Proper FAR = count_false_alarms / n_fires.
+summarize_lead_skill <- function(matches_dt, fires_dt, events_dir_full,
+                                 eco_lookup,
+                                 signal_col, z_threshold, sustained_weeks,
+                                 lead_window_weeks, direction,
+                                 grain = c("pixel", "ecoregion")) {
+  grain <- match.arg(grain)
+  if (grain == "pixel") {
+    m <- merge(matches_dt, eco_lookup[, .(pixel_id, L2_code, L2_name)],
+               by = "pixel_id", all.x = TRUE)
+    by_cols <- c("L2_code", "L2_name", "event_type")
+  } else {
+    m <- matches_dt
+    by_cols <- c("L2_code", "L2_name", "event_type")
+  }
+
+  skill <- m[!is.na(L2_code), .(
+    n_events     = .N,
+    n_hits       = sum(hit, na.rm = TRUE),
+    hit_rate     = mean(hit, na.rm = TRUE),
+    median_lead  = if (any(hit, na.rm = TRUE)) as.numeric(median(lead_weeks[hit], na.rm = TRUE)) else NA_real_,
+    mean_lead    = if (any(hit, na.rm = TRUE)) as.numeric(mean(lead_weeks[hit],   na.rm = TRUE)) else NA_real_,
+    p10_lead     = if (any(hit, na.rm = TRUE)) as.numeric(quantile(lead_weeks[hit], 0.10, na.rm = TRUE)) else NA_real_,
+    p25_lead     = if (any(hit, na.rm = TRUE)) as.numeric(quantile(lead_weeks[hit], 0.25, na.rm = TRUE)) else NA_real_,
+    p75_lead     = if (any(hit, na.rm = TRUE)) as.numeric(quantile(lead_weeks[hit], 0.75, na.rm = TRUE)) else NA_real_,
+    p90_lead     = if (any(hit, na.rm = TRUE)) as.numeric(quantile(lead_weeks[hit], 0.90, na.rm = TRUE)) else NA_real_,
+    pct_lead_pos = if (any(hit, na.rm = TRUE)) as.numeric(mean(lead_weeks[hit] > 0, na.rm = TRUE)) else NA_real_
+  ), by = by_cols]
+
+  # Proper FAR: per-pixel count_false_alarms aggregated to ecoregion
+  if (grain == "pixel") {
+    fa_per_pixel <- count_false_alarms(fires_dt, events_dir_full, lead_window_weeks)
+    fa_per_pixel_eco <- merge(fa_per_pixel,
+                              eco_lookup[, .(pixel_id, L2_code, L2_name)],
+                              by = "pixel_id", all.x = TRUE)
+    fa_per_eco <- fa_per_pixel_eco[!is.na(L2_code),
+                                   .(false_alarms = sum(false_alarms)),
+                                   by = .(L2_code, L2_name)]
+    fires_with_eco <- merge(fires_dt,
+                            eco_lookup[, .(pixel_id, L2_code, L2_name)],
+                            by = "pixel_id", all.x = TRUE)
+    nfires_per_eco <- fires_with_eco[!is.na(L2_code), .(n_fires = .N),
+                                     by = .(L2_code, L2_name)]
+    fa_eco <- merge(fa_per_eco, nfires_per_eco,
+                    by = c("L2_code", "L2_name"), all = TRUE)
+    skill <- merge(skill, fa_eco, by = c("L2_code", "L2_name"), all.x = TRUE)
+    skill[, false_alarm_rate := false_alarms / n_fires]
+  } else {
+    skill[, `:=`(n_fires = NA_integer_, false_alarms = NA_integer_,
+                 false_alarm_rate = NA_real_)]
+  }
+
+  skill[, `:=`(signal_col      = signal_col,
+               z_threshold     = z_threshold,
+               sustained_weeks = sustained_weeks,
+               lead_window     = lead_window_weeks,
+               direction       = direction,
+               grain           = grain)]
+  skill
+}
+
+#' Match fires to ecoregion-aggregate events. For each eco-aggregate event
+#' (L2 × week), find fires (from any pixel in that L2) within ±lead_window.
+#' "Hit" = at least MAJORITY_DELTA fraction of L2's pixels fired in window
+#' (mirrors how the eco event itself was defined).
+match_fires_to_eco_events <- function(events_eco_dt, fires_dt, eco_lookup,
+                                      lead_window_weeks,
+                                      majority_delta = 0.10) {
+  if (nrow(fires_dt) == 0L || nrow(events_eco_dt) == 0L) {
+    out <- copy(events_eco_dt)
+    out[, `:=`(hit = FALSE, lead_weeks = NA_integer_,
+               n_fires_in_window = 0L, frac_pixels_firing = 0)]
+    return(out)
+  }
+
+  # Join L2_code to fires + count eco size
+  fires_e <- merge(fires_dt, eco_lookup[, .(pixel_id, L2_code)],
+                   by = "pixel_id")
+  eco_sizes <- eco_lookup[, .N, by = L2_code]
+  setnames(eco_sizes, "N", "eco_n_pixels")
+
+  fires_e[, fr_idx := as.integer(week_start)]
+  events_out <- copy(events_eco_dt)
+  events_out[, ev_idx := as.integer(week_start)]
+  lead_days <- lead_window_weeks * 7L
+
+  # Pre-index fires by L2 for cheap subsetting
+  setkey(fires_e, L2_code)
+
+  res <- events_out[, {
+    l2 <- L2_code[1]
+    fp <- fires_e[.(l2), nomatch = 0L]
+    if (nrow(fp) == 0L) {
+      list(n_fires_in_window = rep(0L, .N),
+           n_pixels_firing   = rep(0L, .N),
+           lead_weeks        = rep(NA_integer_, .N))
+    } else {
+      n_fires_w <- integer(.N)
+      n_pix_w   <- integer(.N)
+      lead_w    <- integer(.N)
+      ev_ix     <- ev_idx
+      for (i in seq_len(.N)) {
+        delta_days <- ev_ix[i] - fp$fr_idx
+        within <- abs(delta_days) <= lead_days
+        n_fires_w[i] <- sum(within)
+        if (n_fires_w[i] > 0L) {
+          n_pix_w[i] <- uniqueN(fp$pixel_id[within])
+          # Median lead across firing pixels (positive = NDVI led)
+          lead_w[i] <- as.integer(round(median(delta_days[within]) / 7))
+        } else {
+          n_pix_w[i] <- 0L
+          lead_w[i]  <- NA_integer_
+        }
+      }
+      list(n_fires_in_window = n_fires_w,
+           n_pixels_firing   = n_pix_w,
+           lead_weeks        = lead_w)
+    }
+  }, by = L2_code]
+
+  events_out[, `:=`(n_fires_in_window = res$n_fires_in_window,
+                    n_pixels_firing   = res$n_pixels_firing,
+                    lead_weeks        = res$lead_weeks)]
+  events_out <- merge(events_out, eco_sizes, by = "L2_code", all.x = TRUE)
+  events_out[, frac_pixels_firing := n_pixels_firing / eco_n_pixels]
+  events_out[, hit := frac_pixels_firing >= majority_delta]
+  events_out[, ev_idx := NULL]
+  events_out
+}
+
+#' Process one direction × (signal × z × K) cell, iterating across leads.
+#' Detects fires ONCE per (signal × z × K × direction), then iterates lead
+#' windows for matching + FAR. ~3x speedup over per-lead fire detection.
+process_signal_cell <- function(dt, events_pixel, events_eco, eco_lookup,
+                                signal_col, z_threshold, sustained_weeks,
+                                lead_windows, direction, majority_delta = 0.10) {
+  # Detect fires once
+  fires <- detect_signal_fires_weekly(dt, signal_col, z_threshold,
+                                       sustained_weeks, direction)
+  if (nrow(fires) == 0L) {
+    cat(sprintf("    [%s z=%g K=%d %s] 0 fires\n",
+                signal_col, z_threshold, sustained_weeks, direction))
+    return(list(skill_pixel = list(), skill_eco = list(), headline = list(),
+                fires_cache = NULL))
+  }
+
+  events_dir_pixel <- events_pixel[event_type == direction]
+  events_dir_eco   <- events_eco[event_type == direction]
+
+  pix_results <- vector("list", length(lead_windows))
+  eco_results <- vector("list", length(lead_windows))
+  hdl_results <- list()
+
+  for (i in seq_along(lead_windows)) {
+    lead <- lead_windows[i]
+    # Per-pixel match + FAR
+    matches_pix <- match_fires_to_events(events_dir_pixel, fires, lead)
+    pix_results[[i]] <- summarize_lead_skill(matches_pix, fires,
+                                             events_dir_pixel, eco_lookup,
+                                             signal_col, z_threshold,
+                                             sustained_weeks, lead, direction,
+                                             grain = "pixel")
+    # Eco match
+    matches_eco <- match_fires_to_eco_events(events_dir_eco, fires, eco_lookup,
+                                             lead, majority_delta)
+    eco_results[[i]] <- summarize_lead_skill(matches_eco, fires,
+                                             events_dir_eco, eco_lookup,
+                                             signal_col, z_threshold,
+                                             sustained_weeks, lead, direction,
+                                             grain = "ecoregion")
+    # Headline check
+    is_headline <- vapply(EVENT_HEADLINES, function(h) {
+      signal_col == h$signal && z_threshold == h$z &&
+        sustained_weeks == h$K && lead == h$lead_window
+    }, logical(1))
+    if (any(is_headline)) {
+      hdl_results[[length(hdl_results) + 1L]] <-
+        matches_pix[, .(pixel_id, headline_signal = signal_col,
+                        event_type = direction, hit, lead_weeks)]
+    }
+  }
+
+  # Return fires too — fires_cache is used by null re-match. Each (signal × z ×
+  # K × dir) fire set is paired with all its lead windows.
+  fires_cache_entries <- lapply(lead_windows, function(lead) {
+    list(fires = fires, signal_col = signal_col,
+         z_threshold = z_threshold, sustained_weeks = sustained_weeks,
+         lead_window_weeks = lead, direction = direction)
+  })
+
+  list(skill_pixel = pix_results,
+       skill_eco   = eco_results,
+       headline    = hdl_results,
+       fires_cache = fires_cache_entries)
+}
+
+#' Main op-point grid loop. Iterates (signal × z × K × direction) and
+#' processes all lead_windows inside via process_signal_cell. Returns skill
+#' tables, headline maps, AND fires_cache for the null re-match path.
+run_event_grid <- function(dt, events_pixel, events_eco, eco_lookup,
+                           signals, z_thresholds, K_weeks, lead_windows,
+                           directions = c("onset", "recovery"),
+                           majority_delta = 0.10) {
+  n_cells <- length(signals) * length(z_thresholds) * length(K_weeks) *
+             length(directions)
+  total_ops <- n_cells * length(lead_windows)
+  cat(sprintf("  %d (signal × z × K × dir) cells × %d leads = %d total op-points\n",
+              n_cells, length(lead_windows), total_ops))
+
+  skill_pix_list <- list()
+  skill_eco_list <- list()
+  headline_list  <- list()
+  fires_cache    <- list()
+  cell_idx <- 0L
+  t_start <- Sys.time()
+
+  for (sig in signals) {
+    for (z in z_thresholds) {
+      for (K in K_weeks) {
+        for (dir_ in directions) {
+          cell_idx <- cell_idx + 1L
+          res <- process_signal_cell(dt, events_pixel, events_eco, eco_lookup,
+                                     sig, z, K, lead_windows, dir_,
+                                     majority_delta = majority_delta)
+          skill_pix_list <- c(skill_pix_list, res$skill_pixel)
+          skill_eco_list <- c(skill_eco_list, res$skill_eco)
+          headline_list  <- c(headline_list,  res$headline)
+          if (!is.null(res$fires_cache)) {
+            fires_cache <- c(fires_cache, res$fires_cache)
+          }
+          if (cell_idx %% 6L == 0L) {
+            elapsed <- as.numeric(Sys.time() - t_start, units = "mins")
+            cat(sprintf("    cell %d/%d (%.1f min, ETA %.1f min)\n",
+                        cell_idx, n_cells, elapsed,
+                        elapsed * (n_cells - cell_idx) / cell_idx))
+          }
+        }
+      }
+    }
+  }
+  cat(sprintf("  observed grid: %d cells (%d ops) in %.1f min\n",
+              cell_idx, total_ops,
+              as.numeric(Sys.time() - t_start, units = "mins")))
+
+  list(skill_pixel     = rbindlist(skill_pix_list, use.names = TRUE, fill = TRUE),
+       skill_ecoregion = rbindlist(skill_eco_list, use.names = TRUE, fill = TRUE),
+       headline_map    = if (length(headline_list))
+                           rbindlist(headline_list, use.names = TRUE, fill = TRUE)
+                         else data.table(),
+       fires_cache     = fires_cache)
+}
+
+#' Permutation null: shuffle event dates within (pixel × season) and re-match
+#' to (unchanged) fires. Fires don't need re-detection — they're a property of
+#' the NDVI signal, not the USDM target. Each rep re-runs match + summarize for
+#' all op-points. Output: per-cell observed vs null mean hit_rate / median_lead.
+run_event_permutation_null <- function(dt, events_pixel, fires_cache,
+                                       eco_lookup, n_reps, seed_base = 8675309L) {
+  if (n_reps <= 0L) {
+    cat("  (null_reps = 0; skipping permutation null)\n")
+    return(NULL)
+  }
+  if (!"season" %in% names(events_pixel)) {
+    events_pixel[, season := month_to_season(lubridate::month(week_start))]
+  }
+
+  null_skill_list <- list()
+  for (rep in seq_len(n_reps)) {
+    set.seed(seed_base + rep)
+    cat(sprintf("\n  --- null rep %d/%d ---\n", rep, n_reps))
+    t0 <- Sys.time()
+
+    # Shuffle event dates within (pixel × season).
+    ev_shuf <- copy(events_pixel)
+    ev_shuf[, week_start := sample(week_start), by = .(pixel_id, season)]
+    cat(sprintf("    shuffle done (%.1f sec); matching...\n",
+                as.numeric(Sys.time() - t0, units = "secs")))
+
+    rep_skill <- vector("list", length(fires_cache))
+    for (i in seq_along(fires_cache)) {
+      f <- fires_cache[[i]]
+      ev_dir <- ev_shuf[event_type == f$direction]
+      matches <- match_fires_to_events(ev_dir, f$fires, f$lead_window_weeks)
+      sk <- summarize_lead_skill(matches, f$fires, ev_dir, eco_lookup,
+                                 f$signal_col, f$z_threshold, f$sustained_weeks,
+                                 f$lead_window_weeks, f$direction, grain = "pixel")
+      sk[, rep := rep]
+      rep_skill[[i]] <- sk
+    }
+    null_skill_list[[rep]] <- rbindlist(rep_skill, use.names = TRUE, fill = TRUE)
+    cat(sprintf("    rep %d done in %.1f min\n", rep,
+                as.numeric(Sys.time() - t0, units = "mins")))
+  }
+
+  all_null <- rbindlist(null_skill_list, use.names = TRUE, fill = TRUE)
+  all_null[, .(null_mean_hit_rate    = mean(hit_rate, na.rm = TRUE),
+               null_sd_hit_rate      = sd(hit_rate,   na.rm = TRUE),
+               null_mean_median_lead = mean(median_lead, na.rm = TRUE),
+               null_sd_median_lead   = sd(median_lead,   na.rm = TRUE),
+               n_reps                = .N),
+           by = .(L2_code, event_type, signal_col, z_threshold, sustained_weeks,
+                  lead_window, direction)]
+}
+
+section_event_detection <- function(scope, null_reps = 5L) {
+  cat("\n=== Section: event_detection (scope =", scope,
+      ", null_reps =", null_reps, ", grain = WEEKLY) ===\n")
+  stopifnot(scope %in% c("10y", "13y"), is.numeric(null_reps), null_reps >= 0L)
+  null_reps <- as.integer(null_reps)
+
+  in_file  <- if (scope == "10y") config$align_out_10y        else config$align_out_13y
+  out_file <- if (scope == "10y") config$event_detection_10y  else config$event_detection_13y
+  if (!file.exists(in_file)) {
+    stop("Cache file missing: ", in_file,
+         "\n  Run --section=align_weekly --scope=", scope, " first.")
+  }
+  cat(sprintf("Input:  %s (%.1f GB)\n", basename(in_file), file.size(in_file) / 1e9))
+  cat(sprintf("Output: %s\n", basename(out_file)))
+
+  t_section <- Sys.time()
+
+  ANOM_COLS    <- c("ndvi_anom_mean",
+                    "deriv_w03_anom_mean", "deriv_w07_anom_mean",
+                    "deriv_w14_anom_mean", "deriv_w30_anom_mean")
+  SIGNAL_NAMES <- c("ndvi_z",
+                    "deriv_w03_z", "deriv_w07_z", "deriv_w14_z", "deriv_w30_z")
+  Z_THRESHOLDS <- c(1.0, 1.5, 2.0)
+  K_WEEKS      <- c(1L, 2L, 4L)
+  LEAD_WINDOWS <- c(4L, 8L, 12L)
+  MAJORITY_DELTA  <- 0.10
+  MIN_VALID_WEEKS <- 30L
+
+  # --- 1. Load cache, slim, z-standardize ---
+  cat("\n[1] Load cache, slim, z-standardize 5 NDVI signals...\n")
+  dt <- as.data.table(readRDS_retry(in_file))
+  keep_cols <- c("pixel_id", "iso_year", "iso_week", "week_start",
+                 ANOM_COLS, "usdm", "L2_code", "L2_name")
+  dt <- dt[, ..keep_cols]
+  gc(verbose = FALSE)
+
+  drop_px <- zstandardize_signals_per_pixel(dt, ANOM_COLS, SIGNAL_NAMES,
+                                            min_valid_weeks = MIN_VALID_WEEKS)
+  if (length(drop_px) > 0L) dt <- dt[!pixel_id %in% drop_px]
+  dt[, (ANOM_COLS) := NULL]
+  gc(verbose = FALSE)
+
+  # --- 2. Build USDM events (pixel + ecoregion-aggregate) ---
+  cat("\n[2] Build USDM events (pixel + ecoregion-aggregate)...\n")
+  events_pixel <- build_pixel_events(dt[, .(pixel_id, iso_year, iso_week,
+                                            week_start, usdm)])
+  cat(sprintf("  Per-pixel events: %s onset + %s recovery\n",
+              format(sum(events_pixel$event_type == "onset"), big.mark = ","),
+              format(sum(events_pixel$event_type == "recovery"), big.mark = ",")))
+
+  events_eco <- build_ecoregion_events(
+    dt[, .(pixel_id, iso_year, iso_week, week_start, usdm, L2_code, L2_name)],
+    majority_delta = MAJORITY_DELTA)
+  cat(sprintf("  Eco-aggregate events (≥%.0f%% w/w shift): %d onset + %d recovery\n",
+              100 * MAJORITY_DELTA,
+              sum(events_eco$event_type == "onset"),
+              sum(events_eco$event_type == "recovery")))
+
+  eco_lookup <- as.data.table(readRDS_retry(config$ecoregion_lookup))
+
+  # --- 3. Observed op-point grid ---
+  cat("\n[3] Observed op-point grid...\n")
+  grid_out <- run_event_grid(dt, events_pixel, events_eco, eco_lookup,
+                             signals       = SIGNAL_NAMES,
+                             z_thresholds  = Z_THRESHOLDS,
+                             K_weeks       = K_WEEKS,
+                             lead_windows  = LEAD_WINDOWS)
+
+  # --- 4. Lead distributions table (sliced from skill_pixel) ---
+  cat("\n[4] Lead distribution table (per cell percentiles)...\n")
+  lead_distributions <- grid_out$skill_pixel[, .(
+    L2_code, L2_name, event_type, signal_col, z_threshold, sustained_weeks,
+    lead_window, direction, n_events, n_hits, hit_rate,
+    p10_lead, p25_lead, median_lead, p75_lead, p90_lead,
+    mean_lead, pct_lead_pos
+  )]
+
+  # --- 5. Permutation null (reuses fires_cache from grid run — no re-detection) ---
+  cat(sprintf("\n[5] Permutation null (re-match against %d cached fire-tables)...\n",
+              length(grid_out$fires_cache)))
+  null_summary <- run_event_permutation_null(dt, events_pixel,
+                                             grid_out$fires_cache,
+                                             eco_lookup, n_reps = null_reps)
+
+  # --- 6. Assemble + save ---
+  meta <- list(
+    scope               = scope,
+    scope_years         = if (scope == "10y") 2016:2025 else 2013:2025,
+    null_reps           = null_reps,
+    grain               = "weekly",
+    signals             = SIGNAL_NAMES,
+    z_thresholds        = Z_THRESHOLDS,
+    K_weeks             = K_WEEKS,
+    lead_windows        = LEAD_WINDOWS,
+    majority_delta      = MAJORITY_DELTA,
+    event_headline      = EVENT_HEADLINE,
+    dropped_pixels      = length(drop_px),
+    runtime_minutes     = as.numeric(Sys.time() - t_section, units = "mins"),
+    created             = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+  )
+
+  out <- list(
+    events_pixel       = events_pixel,
+    events_ecoregion   = events_eco,
+    skill_pixel        = grid_out$skill_pixel,
+    skill_ecoregion    = grid_out$skill_ecoregion,
+    lead_distributions = lead_distributions,
+    pixel_event_map    = grid_out$headline_map,
+    null_summary       = null_summary,
+    meta               = meta
+  )
+
+  cat(sprintf("\nSaving %s...\n", basename(out_file)))
+  saveRDS_validated(out, out_file, compress = "xz")
+  cat(sprintf("  wrote %.2f MB in %.1f min total\n",
+              file.size(out_file) / 1e6, meta$runtime_minutes))
+
+  # --- Quick summary ---
+  cat("\n--- Quick summary: hit rate per ecoregion (ndvi_z, z=1.5, K=2, lead=8w) ---\n")
+  q <- grid_out$skill_pixel[signal_col == "ndvi_z" & z_threshold == 1.5 &
+                            sustained_weeks == 2L & lead_window == 8L &
+                            !L2_code %in% c("0.0", "8.5")]
+  print(q[order(direction, -hit_rate),
+          .(L2_code, event_type, n_events, hit_rate = round(hit_rate, 3),
+            median_lead, false_alarm_rate = round(false_alarm_rate, 3))])
+
+  invisible(out)
 }
 
 section_qc <- function(scope) {
@@ -1253,20 +2590,23 @@ if (length(section_arg) == 0L) {
 } else {
 
 cat(sprintf("Section: %s | Scope: %s%s\n", section_arg, scope_arg,
-            if (section_arg %in% c("categorical_usdm", "all"))
+            if (section_arg %in% c("categorical_usdm", "continuous_spei",
+                                   "event_detection", "all"))
               sprintf(" | null_reps: %d", null_reps) else ""))
 
 switch(section_arg,
-  align_weekly      = section_align_weekly(scope_arg),
-  categorical_usdm  = section_categorical_usdm(scope_arg, null_reps = null_reps),
-  continuous_spei   = section_continuous_spei(scope_arg),
-  event_detection   = section_event_detection(scope_arg),
-  qc                = section_qc(scope_arg),
+  align_weekly             = section_align_weekly(scope_arg),
+  categorical_usdm         = section_categorical_usdm(scope_arg, null_reps = null_reps),
+  within_week_diagnostic   = section_within_week_diagnostic(scope_arg),
+  continuous_spei          = section_continuous_spei(scope_arg, null_reps = null_reps),
+  event_detection          = section_event_detection(scope_arg, null_reps = null_reps),
+  qc                       = section_qc(scope_arg),
   all = {
     section_align_weekly(scope_arg)
     section_categorical_usdm(scope_arg, null_reps = null_reps)
-    section_continuous_spei(scope_arg)
-    section_event_detection(scope_arg)
+    section_within_week_diagnostic(scope_arg)
+    section_continuous_spei(scope_arg, null_reps = null_reps)
+    section_event_detection(scope_arg, null_reps = null_reps)
     section_qc(scope_arg)
   },
   stop("Unknown section: ", section_arg)
