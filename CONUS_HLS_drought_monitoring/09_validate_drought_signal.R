@@ -115,6 +115,11 @@ config <- list(
   within_week_sd_13y   = file.path(paths$validation_data, "within_week_sd_13y.rds"),
   continuous_spei_10y  = file.path(paths$validation_data, "continuous_spei_10y.rds"),
   continuous_spei_13y  = file.path(paths$validation_data, "continuous_spei_13y.rds"),
+  continuous_spei_nlcd_10y = file.path(paths$validation_data, "continuous_spei_nlcd_10y.rds"),
+  continuous_spei_nlcd_13y = file.path(paths$validation_data, "continuous_spei_nlcd_13y.rds"),
+  nlcd_pixel_lookup    = file.path(paths$gam_models, "valid_pixels_nlcd2019.rds"),
+  nlcd_modal_frac_threshold   = 0.60,
+  nlcd_min_pixels_per_stratum = 500L,
   event_detection_10y  = file.path(paths$validation_data, "event_detection_10y.rds"),
   event_detection_13y  = file.path(paths$validation_data, "event_detection_13y.rds")
 )
@@ -1544,18 +1549,25 @@ fit_fe_spei_one_cell <- function(dt_sub, spei_col, signal_col,
 
 #' Loop the (stratum × spei_window × signal × model_type) grid and return one
 #' big fit table. Uses data.table keyed indexing for cheap stratum subsets.
+#'
+#' key_col / include_aggregate: added 2026-06-12 for the NLCD-stratified
+#' section. Defaults preserve original Section A behavior (key on L2_code,
+#' append a midwest_aggregate stratum). For the LC section we key on a fused
+#' "L2|LC|dom" column and skip the aggregate.
 run_fe_regression_grid <- function(dt, eco_codes, spei_cols, signal_cols,
-                                   model_types = c("pooled", "isowk_fe")) {
-  setkey(dt, L2_code)  # cheap stratum subsetting
+                                   model_types       = c("pooled", "isowk_fe"),
+                                   key_col           = "L2_code",
+                                   include_aggregate = TRUE) {
+  setkeyv(dt, key_col)  # cheap stratum subsetting
 
-  strata <- c(eco_codes, "midwest_aggregate")
+  strata <- if (include_aggregate) c(eco_codes, "midwest_aggregate") else eco_codes
   rows <- vector("list", length(strata) * length(spei_cols) *
                           length(signal_cols) * length(model_types))
   idx <- 0L
   total <- length(rows)
 
   for (stratum in strata) {
-    is_mw <- stratum == "midwest_aggregate"
+    is_mw <- include_aggregate && stratum == "midwest_aggregate"
     sub <- if (is_mw) dt else dt[.(stratum), nomatch = NULL]
     n_px_str <- uniqueN(sub$pixel_id)
     cat(sprintf("  [%s] n_obs=%s n_pixels=%d\n",
@@ -1700,6 +1712,220 @@ run_fe_permutation_null_spei <- function(dt, eco_codes, spei_cols, signal_cols,
                null_sd_beta   = sd(beta,   na.rm = TRUE),
                n_reps         = .N),
            by = .(stratum, spei_col, signal_col)]
+}
+
+# ------------------------------------------------------------------------------
+# LC interaction helpers (used by section_continuous_spei_nlcd)
+# ------------------------------------------------------------------------------
+
+#' Fit one ecoregion x dom x spei x signal x model interaction cell.
+#'
+#' Fits feols(signal ~ spei + i(nlcd_juliana, spei, ref="crop") [| iso_week]).
+#' Returns (long) per-LC slopes + a single-row wald test that ALL slope-offsets
+#' from the reference are jointly zero — i.e., "do slopes differ across LCs?"
+#'
+#' Reference LC is "crop" when present; otherwise the most common LC in the
+#' subset. If only one LC is present after the min-N filter, returns NA rows
+#' with a note.
+fit_lc_interaction_one_cell <- function(dt_sub, spei_col, signal_col,
+                                        L2_label, dom_label, model_type,
+                                        lc_col           = "nlcd_juliana",
+                                        min_pixels_per_lc = 500L) {
+  stopifnot(model_type %in% c("pooled", "isowk_fe"))
+
+  ok <- dt_sub[is.finite(get(signal_col)) & is.finite(get(spei_col)) &
+               !is.na(get(lc_col))]
+
+  # Filter to LCs that meet the min-pixel floor within this ecoregion x dom cell.
+  lc_n <- ok[, .(n_pixels = uniqueN(pixel_id)), by = c(lc_col)]
+  keep_lcs <- lc_n[n_pixels >= min_pixels_per_lc][[lc_col]]
+  ok <- ok[get(lc_col) %in% keep_lcs]
+  # Drop unused factor levels so feols doesn't choke.
+  ok[, (lc_col) := droplevels(factor(get(lc_col)))]
+
+  na_row <- function(note, slopes_dt = NULL, wald_dt = NULL) {
+    if (is.null(slopes_dt)) {
+      slopes_dt <- data.table(
+        L2_code = L2_label, dom_filter = dom_label,
+        spei_col = spei_col, signal_col = signal_col, model_type = model_type,
+        lc_level = NA_character_,
+        beta = NA_real_, se = NA_real_, t = NA_real_, p = NA_real_,
+        n_obs = nrow(ok), n_pixels = uniqueN(ok$pixel_id), note = note
+      )
+    }
+    if (is.null(wald_dt)) {
+      wald_dt <- data.table(
+        L2_code = L2_label, dom_filter = dom_label,
+        spei_col = spei_col, signal_col = signal_col, model_type = model_type,
+        wald_chi2 = NA_real_, wald_df = NA_integer_, wald_p = NA_real_,
+        n_lc_levels = length(keep_lcs), note = note
+      )
+    }
+    list(slopes = slopes_dt, wald = wald_dt)
+  }
+
+  if (length(keep_lcs) < 2L) {
+    return(na_row(sprintf("skipped: only %d LC(s) >= %d pixels",
+                          length(keep_lcs), min_pixels_per_lc)))
+  }
+  if (nrow(ok) < 1000L) {
+    return(na_row(sprintf("skipped: n_obs %d < 1000", nrow(ok))))
+  }
+
+  # Pick reference LC: prefer "crop"; otherwise the most common in this subset.
+  ref_lc <- if ("crop" %in% keep_lcs) {
+    "crop"
+  } else {
+    lc_n[get(lc_col) %in% keep_lcs][order(-n_pixels)][[lc_col]][1]
+  }
+
+  fml <- if (model_type == "pooled") {
+    as.formula(sprintf("%s ~ %s + i(%s, %s, ref=\"%s\")",
+                       signal_col, spei_col, lc_col, spei_col, ref_lc))
+  } else {
+    as.formula(sprintf("%s ~ %s + i(%s, %s, ref=\"%s\") | iso_week",
+                       signal_col, spei_col, lc_col, spei_col, ref_lc))
+  }
+
+  fit <- tryCatch(
+    fixest::feols(fml, data = ok, cluster = ~pixel_id, notes = FALSE),
+    error = function(e) e
+  )
+  if (inherits(fit, "error")) {
+    return(na_row(paste("feols error:", conditionMessage(fit))))
+  }
+
+  cf <- fit$coeftable
+  # Reference slope = the bare spei_col coefficient.
+  ref_beta <- cf[spei_col, "Estimate"]
+  ref_se   <- cf[spei_col, "Std. Error"]
+  ref_t    <- cf[spei_col, "t value"]
+  ref_p    <- cf[spei_col, "Pr(>|t|)"]
+
+  # Offsets named like "nlcd_juliana::forest:spei_13w"
+  offset_pattern <- sprintf("^%s::", lc_col)
+  offset_rows    <- grep(offset_pattern, rownames(cf), value = TRUE)
+  # Per-LC slope = reference + offset; reference itself is one of the rows.
+  slopes <- vector("list", length(keep_lcs))
+  for (i in seq_along(keep_lcs)) {
+    lev <- as.character(keep_lcs[i])
+    if (lev == ref_lc) {
+      slopes[[i]] <- data.table(
+        L2_code = L2_label, dom_filter = dom_label,
+        spei_col = spei_col, signal_col = signal_col, model_type = model_type,
+        lc_level = lev,
+        beta = ref_beta, se = ref_se, t = ref_t, p = ref_p,
+        n_obs = nrow(ok), n_pixels = uniqueN(ok[get(lc_col) == lev]$pixel_id),
+        note = "reference"
+      )
+    } else {
+      # Find this LC's offset row (name contains ":<lev>:" or ends with ":<lev>")
+      lc_row <- offset_rows[grepl(sprintf("::%s:", lev), offset_rows, fixed = TRUE)]
+      if (length(lc_row) != 1L) {
+        slopes[[i]] <- data.table(
+          L2_code = L2_label, dom_filter = dom_label,
+          spei_col = spei_col, signal_col = signal_col, model_type = model_type,
+          lc_level = lev, beta = NA_real_, se = NA_real_, t = NA_real_, p = NA_real_,
+          n_obs = nrow(ok), n_pixels = uniqueN(ok[get(lc_col) == lev]$pixel_id),
+          note = sprintf("coef row not found (%d matches)", length(lc_row))
+        )
+        next
+      }
+      off_b <- cf[lc_row, "Estimate"]
+      off_p <- cf[lc_row, "Pr(>|t|)"]
+      # The interaction's own t/p is for the OFFSET being zero, not the slope itself.
+      # We surface offset SE/p here; per-LC absolute slope is reference + offset.
+      slopes[[i]] <- data.table(
+        L2_code = L2_label, dom_filter = dom_label,
+        spei_col = spei_col, signal_col = signal_col, model_type = model_type,
+        lc_level = lev,
+        beta = ref_beta + off_b,
+        se   = cf[lc_row, "Std. Error"],  # SE of offset (interpretation: vs ref)
+        t    = cf[lc_row, "t value"],
+        p    = off_p,                      # p of offset (vs ref)
+        n_obs = nrow(ok), n_pixels = uniqueN(ok[get(lc_col) == lev]$pixel_id),
+        note = sprintf("offset_from_%s", ref_lc)
+      )
+    }
+  }
+  slopes_dt <- rbindlist(slopes, use.names = TRUE)
+
+  # Wald: jointly test all offsets == 0 (i.e., all per-LC slopes == reference slope).
+  if (length(offset_rows) >= 1L) {
+    w <- tryCatch(fixest::wald(fit, keep = offset_rows, print = FALSE),
+                  error = function(e) e)
+    wald_dt <- if (inherits(w, "error")) {
+      data.table(L2_code = L2_label, dom_filter = dom_label,
+                 spei_col = spei_col, signal_col = signal_col, model_type = model_type,
+                 wald_chi2 = NA_real_, wald_df = NA_integer_, wald_p = NA_real_,
+                 n_lc_levels = length(keep_lcs),
+                 note = paste("wald error:", conditionMessage(w)))
+    } else {
+      data.table(L2_code = L2_label, dom_filter = dom_label,
+                 spei_col = spei_col, signal_col = signal_col, model_type = model_type,
+                 wald_chi2 = as.numeric(w$stat),
+                 wald_df   = as.integer(w$df1),
+                 wald_p    = as.numeric(w$p),
+                 n_lc_levels = length(keep_lcs),
+                 note = "")
+    }
+  } else {
+    wald_dt <- data.table(
+      L2_code = L2_label, dom_filter = dom_label,
+      spei_col = spei_col, signal_col = signal_col, model_type = model_type,
+      wald_chi2 = NA_real_, wald_df = NA_integer_, wald_p = NA_real_,
+      n_lc_levels = length(keep_lcs),
+      note = "no offset terms (single LC?)"
+    )
+  }
+
+  list(slopes = slopes_dt, wald = wald_dt)
+}
+
+#' Loop the LC-interaction grid over (eco × dom × spei × signal × model).
+#' Returns a list with $interaction_table (long, one row per lc_level) and
+#' $wald_table (one row per cell). dom variants: "all" = no filter; "dom" =
+#' only pixels with modal_frac >= modal_frac_threshold.
+run_lc_interaction_grid <- function(dt, eco_codes, spei_cols, signal_cols,
+                                    model_types          = c("pooled", "isowk_fe"),
+                                    lc_col               = "nlcd_juliana",
+                                    dom_variants         = c("all", "dom"),
+                                    modal_frac_threshold = 0.60,
+                                    min_pixels_per_lc    = 500L) {
+  stopifnot("L2_code" %in% names(dt), lc_col %in% names(dt),
+            "modal_frac" %in% names(dt))
+  slopes_list <- list()
+  wald_list   <- list()
+
+  for (eco in eco_codes) {
+    sub_eco <- dt[L2_code == eco]
+    if (nrow(sub_eco) == 0L) {
+      cat(sprintf("  [eco %s] no rows; skipping\n", eco))
+      next
+    }
+    for (dom in dom_variants) {
+      sub <- if (dom == "dom") sub_eco[modal_frac >= modal_frac_threshold] else sub_eco
+      cat(sprintf("  [eco %s | dom=%s] n_obs=%s n_pixels=%d\n",
+                  eco, dom, format(nrow(sub), big.mark = ","),
+                  uniqueN(sub$pixel_id)))
+      for (sp in spei_cols) {
+        for (sg in signal_cols) {
+          for (mt in model_types) {
+            out <- fit_lc_interaction_one_cell(sub, sp, sg, eco, dom, mt,
+                                               lc_col = lc_col,
+                                               min_pixels_per_lc = min_pixels_per_lc)
+            slopes_list[[length(slopes_list) + 1L]] <- out$slopes
+            wald_list  [[length(wald_list)   + 1L]] <- out$wald
+          }
+        }
+      }
+    }
+  }
+
+  list(
+    interaction_table = rbindlist(slopes_list, use.names = TRUE, fill = TRUE),
+    wald_table        = rbindlist(wald_list,   use.names = TRUE, fill = TRUE)
+  )
 }
 
 section_continuous_spei <- function(scope, null_reps = 5L) {
@@ -1863,6 +2089,279 @@ section_continuous_spei <- function(scope, null_reps = 5L) {
                   .(stratum, beta = round(beta, 4), se = round(se, 4),
                     p = signif(p, 2), r2_within = round(r2_within, 4),
                     n_pixels)][order(-beta)])
+
+  invisible(out)
+}
+
+# ==============================================================================
+# SECTION: continuous_spei_nlcd
+#
+# LC-stratified extension of section_continuous_spei. Tests whether the
+# 9.2 (Temperate Prairies / corn belt) SPEI reversal is a cropland effect
+# by decomposing each targeted ecoregion into crop / forest / grassland strata.
+#
+# Two complementary analyses:
+#   (1) Per-stratum fits — 10 targeted (L2_code x nlcd_juliana) cells, each
+#       run with and without a modal_frac >= 0.60 dominance filter. Reuses
+#       run_fe_regression_grid via a fused stratum_key column ("9.2|crop|all").
+#   (2) Interaction model — per (ecoregion x dom x spei x signal x model_type),
+#       fit signal ~ spei + i(nlcd_juliana, spei, ref="crop") [| iso_week]
+#       and Wald-test whether the per-LC slopes differ from the reference.
+#
+# Null model skipped on first pass (null_reps=0); re-run later if needed.
+#
+# Output: continuous_spei_nlcd_<scope>.rds with fit_table_lc + interaction_table
+#         + wald_table + meta. See plan for full schema.
+# ==============================================================================
+
+# Targeted (L2_code x nlcd_juliana) cells — hypothesis-driven subset, NOT the
+# full 11x5 cross. See plan for the rationale per cell.
+TARGETED_LC_STRATA <- data.table(
+  L2_code      = c("9.2", "9.2", "9.2",
+                   "9.4",
+                   "8.4", "8.4",
+                   "9.3",
+                   "8.1", "8.1", "8.1"),
+  nlcd_juliana = c("crop", "forest", "grassland",
+                   "grassland",
+                   "forest", "crop",
+                   "grassland",
+                   "forest", "crop", "grassland")
+)
+# Ecoregions to fit the LC-interaction model on.
+INTERACTION_ECOREGIONS <- c("9.2", "9.4", "8.4", "9.3", "8.1")
+
+section_continuous_spei_nlcd <- function(scope, null_reps = 0L) {
+  cat("\n=== Section: continuous_spei_nlcd (scope =", scope,
+      ", null_reps =", null_reps, ") ===\n")
+  stopifnot(scope %in% c("10y", "13y"), is.numeric(null_reps), null_reps >= 0L)
+  null_reps <- as.integer(null_reps)
+
+  in_file  <- if (scope == "10y") config$align_out_10y           else config$align_out_13y
+  out_file <- if (scope == "10y") config$continuous_spei_nlcd_10y else config$continuous_spei_nlcd_13y
+
+  if (!file.exists(in_file)) {
+    stop("Cache file missing: ", in_file,
+         "\n  Run --section=align_weekly --scope=", scope, " first.")
+  }
+  if (!file.exists(config$nlcd_pixel_lookup)) {
+    stop("NLCD pixel lookup missing: ", config$nlcd_pixel_lookup,
+         "\n  Run 00b_extract_nlcd_2019.R first.")
+  }
+  if (!requireNamespace("fixest", quietly = TRUE)) {
+    stop("fixest not installed.")
+  }
+  cat(sprintf("Input:  %s (%.1f GB)\n", basename(in_file), file.size(in_file) / 1e9))
+  cat(sprintf("NLCD:   %s\n", basename(config$nlcd_pixel_lookup)))
+  cat(sprintf("Output: %s\n", basename(out_file)))
+
+  t_section <- Sys.time()
+
+  ANOM_COLS    <- c("ndvi_anom_mean",
+                    "deriv_w03_anom_mean", "deriv_w07_anom_mean",
+                    "deriv_w14_anom_mean", "deriv_w30_anom_mean")
+  SIGNAL_NAMES <- c("ndvi_z",
+                    "deriv_w03_z", "deriv_w07_z", "deriv_w14_z", "deriv_w30_z")
+  SPEI_COLS    <- c("spei_4w", "spei_13w", "spei_26w")
+  MIN_VALID_WEEKS <- 30L
+
+  # --- 1. Load cache, slim columns (same as section_continuous_spei) ---
+  cat("\n[1] Load align_weekly cache, slim columns...\n")
+  dt <- as.data.table(readRDS_retry(in_file))
+  cat(sprintf("  raw: %s rows x %d cols\n",
+              format(nrow(dt), big.mark = ","), ncol(dt)))
+  keep_cols <- c("pixel_id", "iso_year", "iso_week", "week_start",
+                 ANOM_COLS, SPEI_COLS, "L2_code", "L2_name")
+  dt <- dt[, ..keep_cols]
+  gc(verbose = FALSE)
+
+  n_px_in <- uniqueN(dt$pixel_id)
+  cat(sprintf("  pixel count: %d (expected %d)\n", n_px_in, EXPECTED_VALID_PIXELS))
+
+  # --- 2. Join NLCD info (pre-flight: no NA after join) ---
+  cat("\n[2] Join nlcd_juliana + modal_frac from valid_pixels_nlcd2019.rds...\n")
+  v_nlcd <- as.data.table(readRDS_retry(config$nlcd_pixel_lookup))
+  stopifnot(all(c("pixel_id", "nlcd_juliana", "modal_frac") %in% names(v_nlcd)))
+  dt <- merge(dt, v_nlcd[, .(pixel_id, nlcd_juliana, modal_frac)],
+              by = "pixel_id", all.x = TRUE)
+  n_na <- sum(is.na(dt$nlcd_juliana))
+  if (n_na > 0L) {
+    stop(sprintf("Join drift: %d rows have NA nlcd_juliana. Pixel set mismatch ",
+                 n_na),
+         "between align_weekly cache and valid_pixels_nlcd2019.rds.")
+  }
+  cat(sprintf("  joined; LC distribution (rows): %s\n",
+              paste(sprintf("%s=%s", names(table(dt$nlcd_juliana)),
+                            format(as.integer(table(dt$nlcd_juliana)),
+                                   big.mark = ",")),
+                    collapse = ", ")))
+  rm(v_nlcd); gc(verbose = FALSE)
+
+  # --- 3. z-standardize signals per pixel (same as Section A) ---
+  cat("\n[3] z-standardize 5 NDVI signals...\n")
+  setorder(dt, pixel_id, week_start)
+  drop_px <- zstandardize_signals_per_pixel(dt, ANOM_COLS, SIGNAL_NAMES,
+                                            min_valid_weeks = MIN_VALID_WEEKS)
+  if (length(drop_px) > 0L) dt <- dt[!pixel_id %in% drop_px]
+  dt[, (ANOM_COLS) := NULL]
+  gc(verbose = FALSE)
+  cat(sprintf("  after drops: %s rows x %d pixels\n",
+              format(nrow(dt), big.mark = ","), uniqueN(dt$pixel_id)))
+
+  # --- 4. Build fused stratum_key columns for per-stratum grid ---
+  cat("\n[4] Build stratum_key columns...\n")
+  # Make a key on (L2, LC) -> "L2|LC" for fast targeted assignment.
+  TARGETED_LC_STRATA[, key := paste(L2_code, nlcd_juliana, sep = "|")]
+  dt[, lc_eco_key := paste(L2_code, nlcd_juliana, sep = "|")]
+  targeted_set <- TARGETED_LC_STRATA$key
+  dt[, stratum_key_all := fifelse(lc_eco_key %in% targeted_set,
+                                  paste(lc_eco_key, "all", sep = "|"),
+                                  NA_character_)]
+  dt[, stratum_key_dom := fifelse(lc_eco_key %in% targeted_set &
+                                  modal_frac >= config$nlcd_modal_frac_threshold,
+                                  paste(lc_eco_key, "dom", sep = "|"),
+                                  NA_character_)]
+  dt[, lc_eco_key := NULL]
+
+  n_all <- dt[, .N, by = stratum_key_all][!is.na(stratum_key_all)]
+  cat("  Targeted strata (all) row counts:\n")
+  print(n_all[order(stratum_key_all)])
+  n_dom <- dt[, .N, by = stratum_key_dom][!is.na(stratum_key_dom)]
+  cat("  Targeted strata (dom) row counts:\n")
+  print(n_dom[order(stratum_key_dom)])
+
+  # --- 5. Per-stratum FE regression grid (TWO calls: all + dom) ---
+  cat(sprintf("\n[5] Per-stratum grid: %d strata (all+dom) x %d spei x %d signals x 2 models\n",
+              length(targeted_set) * 2L, length(SPEI_COLS), length(SIGNAL_NAMES)))
+  t_fit <- Sys.time()
+
+  dt_all <- dt[!is.na(stratum_key_all)]
+  fit_all <- run_fe_regression_grid(
+    dt_all,
+    eco_codes         = sort(unique(dt_all$stratum_key_all)),
+    spei_cols         = SPEI_COLS,
+    signal_cols       = SIGNAL_NAMES,
+    model_types       = c("pooled", "isowk_fe"),
+    key_col           = "stratum_key_all",
+    include_aggregate = FALSE
+  )
+  rm(dt_all); gc(verbose = FALSE)
+
+  dt_dom <- dt[!is.na(stratum_key_dom)]
+  fit_dom <- run_fe_regression_grid(
+    dt_dom,
+    eco_codes         = sort(unique(dt_dom$stratum_key_dom)),
+    spei_cols         = SPEI_COLS,
+    signal_cols       = SIGNAL_NAMES,
+    model_types       = c("pooled", "isowk_fe"),
+    key_col           = "stratum_key_dom",
+    include_aggregate = FALSE
+  )
+  rm(dt_dom); gc(verbose = FALSE)
+
+  fit_table_lc <- rbindlist(list(fit_all, fit_dom), use.names = TRUE, fill = TRUE)
+  # Parse the fused stratum back into (L2_code, nlcd_juliana, dom_filter).
+  parts <- tstrsplit(fit_table_lc$stratum, "|", fixed = TRUE)
+  fit_table_lc[, `:=`(L2_code      = parts[[1]],
+                      nlcd_juliana = parts[[2]],
+                      dom_filter   = parts[[3]])]
+  setcolorder(fit_table_lc, c("stratum", "L2_code", "nlcd_juliana", "dom_filter",
+                              "spei_col", "signal_col", "model_type",
+                              "beta", "se", "t", "p", "r2_within",
+                              "n_obs", "n_pixels", "note"))
+  cat(sprintf("  per-stratum grid: %d rows in %.1f min\n",
+              nrow(fit_table_lc),
+              as.numeric(Sys.time() - t_fit, units = "mins")))
+
+  # --- 6. LC interaction grid (per ecoregion) ---
+  cat(sprintf("\n[6] Interaction grid: %d eco x 2 dom x %d spei x %d signals x 2 models\n",
+              length(INTERACTION_ECOREGIONS), length(SPEI_COLS), length(SIGNAL_NAMES)))
+  t_int <- Sys.time()
+  int_out <- run_lc_interaction_grid(
+    dt,
+    eco_codes            = INTERACTION_ECOREGIONS,
+    spei_cols            = SPEI_COLS,
+    signal_cols          = SIGNAL_NAMES,
+    model_types          = c("pooled", "isowk_fe"),
+    lc_col               = "nlcd_juliana",
+    dom_variants         = c("all", "dom"),
+    modal_frac_threshold = config$nlcd_modal_frac_threshold,
+    min_pixels_per_lc    = config$nlcd_min_pixels_per_stratum
+  )
+  cat(sprintf("  interaction grid: %d slope rows + %d wald rows in %.1f min\n",
+              nrow(int_out$interaction_table), nrow(int_out$wald_table),
+              as.numeric(Sys.time() - t_int, units = "mins")))
+
+  # --- 7. Tier-1 sanity check (warn-only) ---
+  sanity_row <- fit_table_lc[stratum == "9.4|grassland|all" &
+                             spei_col == "spei_13w" & signal_col == "ndvi_z" &
+                             model_type == "pooled"]
+  cat("\n[7] Tier-1 sanity (9.4|grassland|all x spei_13w x ndvi_z x pooled):\n")
+  if (nrow(sanity_row) == 1L && !is.na(sanity_row$beta)) {
+    in_range <- sanity_row$beta >= 0.16 && sanity_row$beta <= 0.21
+    cat(sprintf("  beta = %+.4f  (expect [+0.16, +0.21] vs Section A's +0.184)\n",
+                sanity_row$beta))
+    if (!in_range) {
+      cat("  WARN: LC-stratified 9.4|grassland beta diverges from Section A baseline.\n")
+    }
+  } else {
+    cat("  WARN: sanity row not present or NA — investigate.\n")
+  }
+
+  # --- 8. Assemble + save ---
+  meta <- list(
+    scope             = scope,
+    scope_years       = if (scope == "10y") 2016:2025 else 2013:2025,
+    targeted_strata   = TARGETED_LC_STRATA,
+    interaction_ecoregions = INTERACTION_ECOREGIONS,
+    nlcd_modal_frac_threshold   = config$nlcd_modal_frac_threshold,
+    nlcd_min_pixels_per_stratum = config$nlcd_min_pixels_per_stratum,
+    null_reps         = null_reps,    # 0 on first pass
+    model_types       = c("pooled", "isowk_fe"),
+    signal_set        = SIGNAL_NAMES,
+    spei_set          = SPEI_COLS,
+    min_valid_weeks   = MIN_VALID_WEEKS,
+    dropped_pixels    = length(drop_px),
+    runtime_minutes   = as.numeric(Sys.time() - t_section, units = "mins"),
+    created           = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+  )
+
+  out <- list(
+    fit_table_lc      = fit_table_lc,
+    interaction_table = int_out$interaction_table,
+    wald_table        = int_out$wald_table,
+    meta              = meta
+  )
+
+  cat(sprintf("\nSaving %s...\n", basename(out_file)))
+  saveRDS_validated(out, out_file, compress = "xz")
+  cat(sprintf("  wrote %.2f MB in %.1f min total\n",
+              file.size(out_file) / 1e6, meta$runtime_minutes))
+
+  # --- Quick summary ---
+  cat("\n--- Per-stratum betas (headline: ndvi_z ~ spei_13w, pooled) ---\n")
+  print(fit_table_lc[spei_col == "spei_13w" & signal_col == "ndvi_z" &
+                     model_type == "pooled",
+                     .(stratum, beta = round(beta, 4), se = round(se, 4),
+                       p = signif(p, 2), r2_within = round(r2_within, 4),
+                       n_pixels, note)][order(beta)])
+
+  cat("\n--- Wald 'slopes differ' test (headline: spei_13w x ndvi_z x pooled) ---\n")
+  print(int_out$wald_table[spei_col == "spei_13w" & signal_col == "ndvi_z" &
+                           model_type == "pooled",
+                           .(L2_code, dom_filter,
+                             wald_chi2 = round(wald_chi2, 1),
+                             wald_df, wald_p = signif(wald_p, 3),
+                             n_lc_levels, note)])
+
+  cat("\n--- Per-LC slopes for 9.2 (corn belt, headline cell, pooled) ---\n")
+  print(int_out$interaction_table[L2_code == "9.2" & spei_col == "spei_13w" &
+                                  signal_col == "ndvi_z" & model_type == "pooled",
+                                  .(dom_filter, lc_level,
+                                    beta = round(beta, 4),
+                                    se   = round(se, 4),
+                                    p    = signif(p, 2),
+                                    n_pixels, note)])
 
   invisible(out)
 }
@@ -2591,6 +3090,7 @@ if (length(section_arg) == 0L) {
 
 cat(sprintf("Section: %s | Scope: %s%s\n", section_arg, scope_arg,
             if (section_arg %in% c("categorical_usdm", "continuous_spei",
+                                   "continuous_spei_nlcd",
                                    "event_detection", "all"))
               sprintf(" | null_reps: %d", null_reps) else ""))
 
@@ -2599,6 +3099,7 @@ switch(section_arg,
   categorical_usdm         = section_categorical_usdm(scope_arg, null_reps = null_reps),
   within_week_diagnostic   = section_within_week_diagnostic(scope_arg),
   continuous_spei          = section_continuous_spei(scope_arg, null_reps = null_reps),
+  continuous_spei_nlcd     = section_continuous_spei_nlcd(scope_arg, null_reps = null_reps),
   event_detection          = section_event_detection(scope_arg, null_reps = null_reps),
   qc                       = section_qc(scope_arg),
   all = {
@@ -2606,6 +3107,7 @@ switch(section_arg,
     section_categorical_usdm(scope_arg, null_reps = null_reps)
     section_within_week_diagnostic(scope_arg)
     section_continuous_spei(scope_arg, null_reps = null_reps)
+    section_continuous_spei_nlcd(scope_arg, null_reps = null_reps)
     section_event_detection(scope_arg, null_reps = null_reps)
     section_qc(scope_arg)
   },
