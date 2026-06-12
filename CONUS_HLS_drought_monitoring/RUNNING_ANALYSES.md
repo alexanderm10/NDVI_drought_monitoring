@@ -1,12 +1,66 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-12 ~10:15 CDT — Phase 6 framing sharpened to *NDVI monitor skill against typical operational drought measures (USDM, SPEI)*. Lead/lag is a diagnostic byproduct, NOT the question. NLCD 2019 16-class extracted to all 129,310 valid pixels via new `00b_extract_nlcd_2019.R` + `valid_pixels_nlcd2019.rds`. Next: extend `09 section_continuous_spei` to add `nlcd_juliana` × `L2_code` cross-stratification to test the corn-belt-reversal-is-crops hypothesis.
+**Updated**: 2026-06-12 ~14:30 CDT — Phase 6 LC-stratification (`continuous_spei_nlcd`) COMPLETE for both targeted (10-cell, 44 min) and full-grid (11 eco × 3 LC, 57 min) runs. **Corn-belt reversal CONFIRMED as crop-driven** (9.2 β_crop=-0.100, β_grass=-0.007, Wald χ²=2685). Four-mechanism operational story emerges: WORKS / SILENT / REVERSES-CROP / REVERSES-GRASS. Memory updated; see [[continuous-spei-nlcd-findings]].
 
 ## Active run
 
 (none)
 
-## Session Summary (2026-06-12) — Phase 6 framing sharpened + NLCD 2019 extraction (00b)
+## Session Summary (2026-06-12 afternoon) — section_continuous_spei_nlcd built + run twice
+
+### Built the new section (parallel to Section A)
+- Added `section_continuous_spei_nlcd(scope, null_reps=0L)` to `09_validate_drought_signal.R` (~506 lines added).
+- Reuses `fit_fe_spei_one_cell` and `run_fe_regression_grid` unchanged. One small additive change to the grid runner: `key_col` and `include_aggregate` args (defaults preserve Section A behavior).
+- New helpers: `fit_lc_interaction_one_cell` + `run_lc_interaction_grid`. Fits `feols(signal ~ spei + i(nlcd_juliana, spei, ref="crop") [| iso_week])` per (eco × dom × spei × signal × model). Per-LC absolute slopes derived as reference + offset; Wald-tests whether offsets are jointly zero.
+- Fixest API smoke-test settled on `feols(y ~ x + i(g, x, ref="a"))` + `fixest::wald(fit, keep=c("g::b:x", "g::c:x"))` for the "slopes differ" hypothesis. `hypotheses()` not in this fixest version; `wald(..., "g::")` defaults to "any slope nonzero" not "slopes differ" — caught and worked around.
+- CLI: `--section=continuous_spei_nlcd`. Skips null model by default (`null_reps=0`); can rerun later with null if needed.
+
+### Targeted-grid run (10 cells, ~44 min wall, 2026-06-12 11:45)
+- 10 hypothesis-driven (L2 × LC) cells: 9.2 × {crop, forest, grassland}, 9.4 × grassland, 8.4 × {forest, crop}, 9.3 × grassland, 8.1 × {forest, crop, grassland}. Both dom variants (modal_frac ≥ 0.60 + all) = 20 strata.
+- 5 ecoregions for interaction: 9.2, 9.4, 8.4, 9.3, 8.1.
+- Per-stratum grid: 600 fits in 9.1 min. Interaction grid: 300 fits in 27 min.
+- **Sanity check WARN fired** — spec error in my range, not a real divergence. I picked spei_13w as headline, but Section A's 9.4 was spei_26w (β=+0.184). For spei_26w the grass-only β=+0.195 — actually STRONGER than the full-eco baseline. Caught and acknowledged before reporting.
+- **Headline confirmed**: 9.2 crop β=-0.142 (-0.152 with dom filter), 9.2 grass β=-0.048. Wald χ²=2685, p≈0. Corn-belt-is-crops hypothesis supported.
+
+### Full-grid run (all 11 eco × 3 LC, ~57 min wall, 2026-06-12 13:17)
+- Replaced `TARGETED_LC_STRATA` constant with dynamic full-grid derivation inside the section. `LC_STRATA_LEVELS = c("crop", "forest", "grassland")` (dropped urban_* + other — small N in rural Midwest; not the operational question for an ag monitor).
+- 33 cells in cross; 30 with rows (3 eco × LC cells are empty in our domain).
+- Per-stratum grid: 1,770 fits in 19.7 min. Interaction grid: 660 fits across 11 ecoregions in 30.5 min.
+- Sanity check passed cleanly with the spei_26w-targeted range.
+- Output `/data/validation/continuous_spei_nlcd_10y.rds` (95 KB) — overwrote the targeted-run version (superset).
+
+### Headline findings (full grid, spei_26w × ndvi_z × pooled, dom=all)
+
+Four operational signatures, NOT three:
+
+| Group | Ecoregions | LC pattern | Mechanism |
+|---|---|---|---|
+| **WORKS** | 9.4, 6.2, 9.3-grass | All LCs positive (9.4: crop +0.16, forest +0.19, grass +0.20) | Pure semiarid rangeland response |
+| **SILENT** | 8.2, 8.3, 8.4 (Plains + Ozark) | Uniformly small-negative (-0.02 to -0.05) | Water-buffered |
+| **REVERSES — crop** | 9.2 (corn belt) | crop -0.100, grass -0.007 (clean LC contrast) | Irrigation + planting/harvest masking |
+| **REVERSES — grass** | 5.2, 8.1 (Mixed Wood) | All negative, **grass is WORST** (5.2: crop -0.060, forest -0.070, grass -0.100) | Different mechanism — possibly snow contamination of dormant grass NDVI |
+
+### Specific resolutions
+- **9.3 mystery**: Section A's Tier-1 9.3 was entirely grass (β=+0.063); crop and forest are ~0. 9.3 IS Tier-1, but only for grasslands.
+- **9.4 robustness**: LC restriction slightly STRENGTHENS the signal (grass-only +0.195 > full-eco +0.182). Section A baseline holds.
+- **8.4 Ozark silence**: decomposes to mild forest negativity (-0.047, n=5,969) + tiny crop sample (n=94 NS).
+- **Statistical robustness**: every ecoregion with ≥2 LCs at the 500-pixel floor shows Wald-significant LC modulation (p << 0.001).
+
+### Open scientific question (raised by this run)
+**8.1 + 5.2 "grass-worst reversal" mechanism**. Different from 9.2 corn-belt. Both are northern boreal-influenced Mixed Wood ecoregions. Hypothesis: dormant-season snow contamination differentially affects northern grass NDVI. Could test via seasonal subsetting (DJF excluded) or by stratifying within DOY ranges. Flagged for follow-up.
+
+### Memory updated
+- New: [[continuous-spei-nlcd-findings]]
+- Updated: [[section-a-findings]] (notes the LC-stratified follow-up supersedes the ecoregion-only interpretation)
+- Updated: [[phase6-validation-status]] (continuous_spei_nlcd now in the "complete" list; next-work list updated)
+- Updated: MEMORY.md index
+
+### Next session pickup
+- **categorical_usdm LC rerun** — currently ecoregion-only; would surface whether v3 ecoregion heterogeneity is LC-mediated too. Same shape of analysis on USDM side as continuous_spei_nlcd did for SPEI side.
+- **section_event_detection** — paused 2026-06-11 for framing redesign; resume under [[phase6-question-is-skill]] framing. Should stratify by (ecoregion × LC) from the start given the four-mechanism story.
+- **8.1 + 5.2 grass-worst mechanism** — seasonal-subset diagnostic to test the snow-contamination hypothesis.
+
+## Session Summary (2026-06-12 morning) — Phase 6 framing sharpened + NLCD 2019 extraction (00b)
 
 ### Phase 6 framing — third pass (lock this one in)
 - The question is **skill of NDVI monitor against typical drought measures (USDM, SPEI)**. Full stop.

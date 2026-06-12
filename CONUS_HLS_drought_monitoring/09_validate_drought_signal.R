@@ -2114,22 +2114,12 @@ section_continuous_spei <- function(scope, null_reps = 5L) {
 #         + wald_table + meta. See plan for full schema.
 # ==============================================================================
 
-# Targeted (L2_code x nlcd_juliana) cells — hypothesis-driven subset, NOT the
-# full 11x5 cross. See plan for the rationale per cell.
-TARGETED_LC_STRATA <- data.table(
-  L2_code      = c("9.2", "9.2", "9.2",
-                   "9.4",
-                   "8.4", "8.4",
-                   "9.3",
-                   "8.1", "8.1", "8.1"),
-  nlcd_juliana = c("crop", "forest", "grassland",
-                   "grassland",
-                   "forest", "crop",
-                   "grassland",
-                   "forest", "crop", "grassland")
-)
-# Ecoregions to fit the LC-interaction model on.
-INTERACTION_ECOREGIONS <- c("9.2", "9.4", "8.4", "9.3", "8.1")
+# LC strata cross is built dynamically inside section_continuous_spei_nlcd:
+# full eco x {crop, forest, grassland}. urban_* and "other" are excluded —
+# they're <5% of valid pixels in rural Midwest and not the operational
+# question for an ag drought monitor. The 500-pixel floor in
+# fit_lc_interaction_one_cell skips any (eco x LC) cell with too few pixels.
+LC_STRATA_LEVELS <- c("crop", "forest", "grassland")
 
 section_continuous_spei_nlcd <- function(scope, null_reps = 0L) {
   cat("\n=== Section: continuous_spei_nlcd (scope =", scope,
@@ -2208,12 +2198,20 @@ section_continuous_spei_nlcd <- function(scope, null_reps = 0L) {
   cat(sprintf("  after drops: %s rows x %d pixels\n",
               format(nrow(dt), big.mark = ","), uniqueN(dt$pixel_id)))
 
-  # --- 4. Build fused stratum_key columns for per-stratum grid ---
-  cat("\n[4] Build stratum_key columns...\n")
-  # Make a key on (L2, LC) -> "L2|LC" for fast targeted assignment.
-  TARGETED_LC_STRATA[, key := paste(L2_code, nlcd_juliana, sep = "|")]
+  # --- 4. Build full (eco x LC) cross + fused stratum_key columns ---
+  cat("\n[4] Build stratum_key columns (full eco x {crop,forest,grassland} cross)...\n")
+  eco_codes_all <- sort(unique(dt$L2_code[!is.na(dt$L2_code)]))
+  LC_STRATA <- as.data.table(expand.grid(
+    L2_code      = eco_codes_all,
+    nlcd_juliana = LC_STRATA_LEVELS,
+    stringsAsFactors = FALSE
+  ))
+  LC_STRATA[, key := paste(L2_code, nlcd_juliana, sep = "|")]
+  cat(sprintf("  built %d (eco x LC) cells across %d ecoregions x %d LC classes\n",
+              nrow(LC_STRATA), length(eco_codes_all), length(LC_STRATA_LEVELS)))
+
   dt[, lc_eco_key := paste(L2_code, nlcd_juliana, sep = "|")]
-  targeted_set <- TARGETED_LC_STRATA$key
+  targeted_set <- LC_STRATA$key
   dt[, stratum_key_all := fifelse(lc_eco_key %in% targeted_set,
                                   paste(lc_eco_key, "all", sep = "|"),
                                   NA_character_)]
@@ -2223,12 +2221,19 @@ section_continuous_spei_nlcd <- function(scope, null_reps = 0L) {
                                   NA_character_)]
   dt[, lc_eco_key := NULL]
 
-  n_all <- dt[, .N, by = stratum_key_all][!is.na(stratum_key_all)]
-  cat("  Targeted strata (all) row counts:\n")
-  print(n_all[order(stratum_key_all)])
-  n_dom <- dt[, .N, by = stratum_key_dom][!is.na(stratum_key_dom)]
-  cat("  Targeted strata (dom) row counts:\n")
-  print(n_dom[order(stratum_key_dom)])
+  # Cells with <500 pixels in the SUBSET stage will be skipped by the per-cell
+  # n_obs < 1000 floor in fit_fe_spei_one_cell — print a coverage summary so we
+  # can see which (eco x LC) cells got dropped.
+  cov_all <- dt[, .(n_obs = .N, n_pixels = uniqueN(pixel_id)),
+                by = stratum_key_all][!is.na(stratum_key_all)]
+  cat(sprintf("  Stratum coverage (all): %d strata with row counts:\n",
+              nrow(cov_all)))
+  print(cov_all[order(-n_pixels)])
+  cov_dom <- dt[, .(n_obs = .N, n_pixels = uniqueN(pixel_id)),
+                by = stratum_key_dom][!is.na(stratum_key_dom)]
+  cat(sprintf("  Stratum coverage (dom): %d strata with row counts:\n",
+              nrow(cov_dom)))
+  print(cov_dom[order(-n_pixels)])
 
   # --- 5. Per-stratum FE regression grid (TWO calls: all + dom) ---
   cat(sprintf("\n[5] Per-stratum grid: %d strata (all+dom) x %d spei x %d signals x 2 models\n",
@@ -2273,13 +2278,13 @@ section_continuous_spei_nlcd <- function(scope, null_reps = 0L) {
               nrow(fit_table_lc),
               as.numeric(Sys.time() - t_fit, units = "mins")))
 
-  # --- 6. LC interaction grid (per ecoregion) ---
+  # --- 6. LC interaction grid (per ecoregion, FULL — all eco_codes_all) ---
   cat(sprintf("\n[6] Interaction grid: %d eco x 2 dom x %d spei x %d signals x 2 models\n",
-              length(INTERACTION_ECOREGIONS), length(SPEI_COLS), length(SIGNAL_NAMES)))
+              length(eco_codes_all), length(SPEI_COLS), length(SIGNAL_NAMES)))
   t_int <- Sys.time()
   int_out <- run_lc_interaction_grid(
     dt,
-    eco_codes            = INTERACTION_ECOREGIONS,
+    eco_codes            = eco_codes_all,
     spei_cols            = SPEI_COLS,
     signal_cols          = SIGNAL_NAMES,
     model_types          = c("pooled", "isowk_fe"),
@@ -2292,14 +2297,16 @@ section_continuous_spei_nlcd <- function(scope, null_reps = 0L) {
               nrow(int_out$interaction_table), nrow(int_out$wald_table),
               as.numeric(Sys.time() - t_int, units = "mins")))
 
-  # --- 7. Tier-1 sanity check (warn-only) ---
+  # --- 7. Sanity vs Section A (warn-only) ---
+  # Section A's best 9.4 cell was spei_26w (β=+0.184). LC-restricted version
+  # should be at least as positive (full ecoregion dilutes the grass signal).
   sanity_row <- fit_table_lc[stratum == "9.4|grassland|all" &
-                             spei_col == "spei_13w" & signal_col == "ndvi_z" &
+                             spei_col == "spei_26w" & signal_col == "ndvi_z" &
                              model_type == "pooled"]
-  cat("\n[7] Tier-1 sanity (9.4|grassland|all x spei_13w x ndvi_z x pooled):\n")
+  cat("\n[7] Sanity (9.4|grassland|all x spei_26w x ndvi_z x pooled):\n")
   if (nrow(sanity_row) == 1L && !is.na(sanity_row$beta)) {
-    in_range <- sanity_row$beta >= 0.16 && sanity_row$beta <= 0.21
-    cat(sprintf("  beta = %+.4f  (expect [+0.16, +0.21] vs Section A's +0.184)\n",
+    in_range <- sanity_row$beta >= 0.16 && sanity_row$beta <= 0.25
+    cat(sprintf("  beta = %+.4f  (expect [+0.16, +0.25] vs Section A's +0.182)\n",
                 sanity_row$beta))
     if (!in_range) {
       cat("  WARN: LC-stratified 9.4|grassland beta diverges from Section A baseline.\n")
@@ -2312,8 +2319,9 @@ section_continuous_spei_nlcd <- function(scope, null_reps = 0L) {
   meta <- list(
     scope             = scope,
     scope_years       = if (scope == "10y") 2016:2025 else 2013:2025,
-    targeted_strata   = TARGETED_LC_STRATA,
-    interaction_ecoregions = INTERACTION_ECOREGIONS,
+    lc_strata         = LC_STRATA,
+    interaction_ecoregions = eco_codes_all,
+    lc_strata_levels  = LC_STRATA_LEVELS,
     nlcd_modal_frac_threshold   = config$nlcd_modal_frac_threshold,
     nlcd_min_pixels_per_stratum = config$nlcd_min_pixels_per_stratum,
     null_reps         = null_reps,    # 0 on first pass
@@ -2338,30 +2346,39 @@ section_continuous_spei_nlcd <- function(scope, null_reps = 0L) {
   cat(sprintf("  wrote %.2f MB in %.1f min total\n",
               file.size(out_file) / 1e6, meta$runtime_minutes))
 
-  # --- Quick summary ---
-  cat("\n--- Per-stratum betas (headline: ndvi_z ~ spei_13w, pooled) ---\n")
+  # --- Quick summary: print full headline-cell tables across all eco x LC ---
+  options(datatable.print.nrows = 200L, datatable.print.topn = 200L)
+
+  cat("\n--- Full per-stratum table (headline cell: spei_13w x ndvi_z x pooled), sorted by beta ---\n")
   print(fit_table_lc[spei_col == "spei_13w" & signal_col == "ndvi_z" &
                      model_type == "pooled",
                      .(stratum, beta = round(beta, 4), se = round(se, 4),
                        p = signif(p, 2), r2_within = round(r2_within, 4),
                        n_pixels, note)][order(beta)])
 
-  cat("\n--- Wald 'slopes differ' test (headline: spei_13w x ndvi_z x pooled) ---\n")
+  cat("\n--- Same, but spei_26w (Section A's headline for 9.4) ---\n")
+  print(fit_table_lc[spei_col == "spei_26w" & signal_col == "ndvi_z" &
+                     model_type == "pooled",
+                     .(stratum, beta = round(beta, 4), se = round(se, 4),
+                       p = signif(p, 2), r2_within = round(r2_within, 4),
+                       n_pixels, note)][order(beta)])
+
+  cat("\n--- Full Wald 'slopes differ' table (headline: spei_13w x ndvi_z x pooled), sorted by chi2 ---\n")
   print(int_out$wald_table[spei_col == "spei_13w" & signal_col == "ndvi_z" &
                            model_type == "pooled",
                            .(L2_code, dom_filter,
                              wald_chi2 = round(wald_chi2, 1),
                              wald_df, wald_p = signif(wald_p, 3),
-                             n_lc_levels, note)])
+                             n_lc_levels, note)][order(-wald_chi2)])
 
-  cat("\n--- Per-LC slopes for 9.2 (corn belt, headline cell, pooled) ---\n")
-  print(int_out$interaction_table[L2_code == "9.2" & spei_col == "spei_13w" &
+  cat("\n--- Full per-LC slopes table (headline: spei_13w x ndvi_z x pooled, dom=all) ---\n")
+  print(int_out$interaction_table[dom_filter == "all" & spei_col == "spei_13w" &
                                   signal_col == "ndvi_z" & model_type == "pooled",
-                                  .(dom_filter, lc_level,
+                                  .(L2_code, lc_level,
                                     beta = round(beta, 4),
                                     se   = round(se, 4),
                                     p    = signif(p, 2),
-                                    n_pixels, note)])
+                                    n_pixels, note)][order(L2_code, lc_level)])
 
   invisible(out)
 }
