@@ -1,10 +1,64 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-12 ~14:30 CDT — Phase 6 LC-stratification (`continuous_spei_nlcd`) COMPLETE for both targeted (10-cell, 44 min) and full-grid (11 eco × 3 LC, 57 min) runs. **Corn-belt reversal CONFIRMED as crop-driven** (9.2 β_crop=-0.100, β_grass=-0.007, Wald χ²=2685). Four-mechanism operational story emerges: WORKS / SILENT / REVERSES-CROP / REVERSES-GRASS. Memory updated; see [[continuous-spei-nlcd-findings]].
+**Updated**: 2026-06-12 ~17:55 CDT — 5-LC chain COMPLETE. `continuous_spei_nlcd` (66.2 min) + `categorical_usdm_nlcd` (95.0 min) both ran 5-LC schema with urban_dense + urban_diffuse. Outputs: `continuous_spei_nlcd_10y.rds` (124K, overwrote yesterday's 3-LC) and `usdm_confusion_nlcd_10y.rds` (1.59 MB, new file). **Headline new finding**: SPEI shows clean 9.2 corn-belt urban-density split (dense −0.072 joins crop reversal, diffuse −0.008 behaves like grass), USDM does not (both urban tiers ~−0.045 in 9.2). Broader SPEI-vs-USDM discrepancies in 8.4 (USDM-WORKS, SPEI-SILENT) and 8.2 grass (USDM ρ=−0.171, SPEI mild −0.030). Full writeup in [PHASE6_VALIDATION_MEMO.md](PHASE6_VALIDATION_MEMO.md) "Phase 6 Update: LC Stratification".
 
 ## Active run
 
 (none)
+
+## Session Summary (2026-06-12 afternoon) — 5-LC chain complete
+
+### Pivot: urban_dense + urban_diffuse added mid-session
+- Initial design (morning): `LC_STRATA_LEVELS = c("crop","forest","grassland")` with rationale "not the operational question for an ag monitor"
+- User caught this mid-launch ("we should make sure we're capturing the different urbanicities") — project is "Urban Ecological Drought", so dropping urban was wrong
+- Scoping: 4 NLCD urban classes collapse to 2 tiers along the 50%-impervious break: `urban_dense` = urban_high + urban_med (737 px Midwest); `urban_diffuse` = urban_low + urban_open (1,833 px). Per-class statistically infeasible (urban_high has only 28 px Midwest-wide); single "urban" loses the operationally-relevant impervious-cover gradient.
+- Implementation: one-line `collapse_urban_to_2tier()` helper called right after the NLCD join in each section. Updated `LC_STRATA_LEVELS` constant + comment block. Killed in-flight 3-LC categorical_usdm_nlcd run and relaunched both sections sequentially with 5-LC schema.
+
+### Helper refactor
+- `run_two_track_sweep` + `run_two_track_correlation` (v3 helpers) gained `key_col` + `include_aggregate` args, defaulting to `"L2_code"` + `TRUE` for backward compatibility with existing v3 `categorical_usdm`. New LC sections pass fused stratum_key columns + `include_aggregate=FALSE`.
+- `run_two_track_correlation` also gained `progress_every` + `label` args (added post-run after the 59-min silent step [7] caught us by surprise — Spearman ranking on 11M-row strata is expensive).
+- New section function: `section_categorical_usdm_nlcd`. ~390 lines added. Mirror of `section_continuous_spei_nlcd` structure. Skips LC-interaction Wald test (no clean single-equation analog for skill metrics) and permutation null (first-pass default `null_reps=0`). Output: `usdm_confusion_nlcd_<scope>.rds` with `skill_binary_lc`, `skill_ordinal_lc`, `correlation_binary_lc`, `correlation_ordinal_lc`, `meta`.
+
+### SPEI 5-LC (66.2 min, 2026-06-12 16:19)
+- Per-stratum grid: 2,550 fits in 25.4 min (50 strata × 3 spei × 5 signals × 2 models, doubled for all+dom variants)
+- LC-interaction grid: 1,230 slope + 660 wald rows in 33.1 min
+- **Four-mechanism story holds + new urban findings**:
+  - **9.2 corn belt — urban_dense joins crop reversal** (dense β=−0.072***, n=91; diffuse β=−0.008 ns, n=214; crop β=−0.100***; grass β=−0.007). High-impervious surfaces behave like managed cropland; low-impervious like natural vegetation. ONLY ecoregion where dense/diffuse meaningfully diverge.
+  - **9.4 (WORKS) urban tracks the eco** (dense +0.169***, diffuse +0.195***, consistent with crop/grass/forest all +0.16-0.20)
+  - **8.2/8.3 (SILENT) urban small-negative like everything else**
+  - **8.1/5.2 (REVERSES-GRASS) urban mildly negative, not as bad as grass** (grass still worst)
+
+### USDM 5-LC (95.0 min, 2026-06-12 17:54)
+- Skill sweep: 17K binary + 50K ordinal rows in 27.2 min
+- Correlation sweep: 1.7K binary + 1.7K ordinal rows in 59.1 min (silent — progress logging added afterward)
+- **Headline: SPEI-vs-USDM discrepancy is itself the finding**
+  - **9.4 WORKS replicates**: all-LC positive ρ (+0.014 to +0.054), but 3-4× smaller magnitude than SPEI β. Expected signature of USDM being a lagging analyst-curated product.
+  - **9.2 REVERSES replicates direction**: all LCs negative ρ. BUT the SPEI-side density split is ABSENT on USDM (both urban tiers ~−0.045, not differentiated). USDM's coarse categorical can't see the surface-management gradient SPEI picks up.
+  - **8.4 Ozark — SPEI SILENT, USDM WORKS**: USDM ρ all positive, best urban_dense +0.148 (small N), grass +0.042 (n=184K, solid). USDM analysts see something in 8.4 the meteorological signal doesn't.
+  - **8.2 Plains grass — SPEI mild −0.030, USDM strong −0.171** (n=16K within-drought weeks). Mystery — opposite direction of agreement than expected.
+  - **8.2 urban_dense intensification HSS = +0.020 at n=223K** — the most statistically-solid urban skill cell in the table. Small but real.
+
+### Lessons captured for next session
+- Urban two-tier (dense/diffuse) schema worked cleanly; both sections share `collapse_urban_to_2tier()` so any future urban-schema refinement applies atomically
+- `run_two_track_correlation` silent for 59 min was a real annoyance — fixed (progress_every added)
+- The four-mechanism SPEI typology and the USDM categorical signature give different answers in 8.4 and 8.2 — those discrepancies are the next round of mechanism questions
+- Back-burner: 2-stage 4km→finer-res workflow ([[two-stage-resolution-idea]]) — the 9.2 SPEI-vs-USDM urban-density disagreement is exactly the kind of subpixel-mixing story that motivates Stage 2
+
+### Files modified
+- `09_validate_drought_signal.R`: +~440 lines (new section + helper refactor + collapse_urban_to_2tier + progress_every)
+- `PHASE6_VALIDATION_MEMO.md`: +~330 lines ("Phase 6 Update: LC Stratification" section)
+- `RUNNING_ANALYSES.md`: this section
+- Memory: `two-stage-resolution-idea` (new), pending: `continuous-spei-nlcd-findings` update + `usdm-confusion-nlcd-findings` (new)
+
+### Next session pickup
+- Headline figures: four-mechanism map, SPEI-vs-USDM agreement scatter, corn-belt decomposition, 8.4 Ozark deep dive
+- 8.1+5.2 grass-worst DJF-excluded diagnostic
+- 8.4 Ozark "USDM-WORKS-but-SPEI-SILENT" investigation (what are analysts using?)
+- 8.2 grass mystery (small-N check at K=1, K=2)
+- Section B `event_detection` revival under skill framing with (eco × LC) stratification
+- Stage-2 finer-res candidate: 9.2 urban-density mechanism
+
+
 
 ## Session Summary (2026-06-12 afternoon) — section_continuous_spei_nlcd built + run twice
 

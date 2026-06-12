@@ -446,3 +446,231 @@ See memory `phase6-extension-candidates`. Top three:
 - `RUNNING_ANALYSES.md`: full session summary at top
 - `PHASE6_VALIDATION_MEMO.md`: this section
 - Six memory entries (see Memory additions in RUNNING_ANALYSES)
+
+---
+
+# Phase 6 Update: LC Stratification (2026-06-12)
+
+This section continues the live memo from 2026-06-12, after a substantial NLCD-land-cover stratification arc. The Phase 6 framing also sharpened to **skill of NDVI monitor against typical drought measures (USDM, SPEI)** — full stop. Not "does NDVI lead?", not "does USDM lag?" Lead/lag are diagnostic byproducts (memory: `phase6-question-is-skill`).
+
+## NLCD 2019 16-class extraction (`00b_extract_nlcd_2019.R`)
+
+The legacy land-cover lookup (`valid_pixels_landcover_filtered.rds`) inherited from the GDO wildfire project uses a 9-class "US Labeled Ecosystems" collapse where Forest=4 and Herbaceous=8 lump crop + grass + pasture together. That schema **cannot distinguish crop from grassland** — which makes it impossible to test the leading hypothesis for the 9.2 Temperate Prairies SPEI reversal ("it's a cropland effect: irrigation + planting/harvest masking").
+
+Built a parallel per-pixel lookup `valid_pixels_nlcd2019.rds` from standard NLCD 2019 16-class (manual ScienceBase download, 1.32 GB, 30m CONUS, EPSG:5070). Resampled to the 4 km HLS grid via `terra::segregate + aggregate(fun="mean")`: segregate splits to per-class 0/1 layers, aggregate→mean gives the class fraction at 4 km, `which.max + max` give modal class + dominance fraction in one pass.
+
+**Output columns** (added to existing pixel_id × x × y):
+- `nlcd_code_2019` — raw 16-class integer
+- `nlcd_juliana` — collapsed string: {crop, forest, grassland, urban_high/med/low/open, other}. Juliana's collapse spec; NLCD 90 Woody Wetlands folds into `forest` per her empirical test in Chicago (memory: `forest-wet-collapses-to-forest`).
+- `modal_frac` — 0..1, the modal class's coverage fraction at 4 km
+- `nlcd_dominant` — logical, `modal_frac >= 0.60`
+
+**Midwest LC distribution** (n=129,310 valid pixels): crop 47.4%, grassland 28.4%, forest 20.0%, other 2.2%, urban_* 1.95%.
+
+**Dominance distribution**: ~64% of crop, 67% of grassland, 30% of forest cells have `modal_frac ≥ 0.60`. Forests have lower dominance because Midwest forest exists in a mixed crop/forest mosaic at 4 km.
+
+**Legacy vs new disagreement is substantial**: legacy "8 Herbaceous" splits 53/42 crop/grassland under NLCD 2019. Legacy "4 Forest" splits 47/40 forest / (crop + grassland) — i.e., half of "legacy forest" at 4 km modal is actually ag-dominated. Two different upstream rasters; treat as complementary, not interchangeable. Legacy lookup is **untouched** — the pipeline invariant (`EXPECTED_VALID_PIXELS`) is preserved.
+
+**One-character bug caught mid-session**: initial run used `segregate(other=NA)` and produced all-1.0 dominance fractions with ~77% of pixels mis-classified as NLCD 11 (Open Water). Cause: with `other=NA`, each per-class layer is "1 where this class, NA elsewhere"; `aggregate(fun="mean", na.rm=TRUE)` then averages to exactly 1.0 wherever the class is present, and `which.max` ties on the first listed class (11=Open Water). Fix: `other=0L`. One character. Memory: `segregate-other-zero-not-na`.
+
+## Section A++ (`continuous_spei_nlcd`) — 3-LC four-mechanism story
+
+LC-stratified extension of `continuous_spei`. Decomposes each ecoregion into crop / forest / grassland strata. Same fixest FE-regression machinery (`fit_fe_spei_one_cell` + `run_fe_regression_grid`) operating on a **fused stratum_key** column (`paste(L2_code, nlcd_juliana, dom_filter, sep="|")`); the per-stratum and LC-interaction grids share the same `run_fe_regression_grid` via a new `key_col` argument that defaults to `"L2_code"` for backward compatibility with v3 categorical_usdm.
+
+**LC-interaction model** (per ecoregion × dom × spei × signal × model): `feols(signal_z ~ spei + i(nlcd_juliana, spei, ref="crop") [| iso_week])` with `fixest::wald(fit, keep=c("nlcd_juliana::forest:spei", "nlcd_juliana::grassland:spei"))` to test "do the per-LC slopes differ from crop's slope?". Per-LC absolute slopes are derived as reference + offset.
+
+Two dominance variants throughout: `all` (every pixel in the stratum) and `dom` (`modal_frac >= 0.60`).
+
+### Headline finding: the 3-LC story reveals FOUR operational signatures, not three
+
+| Signature | Ecoregions | LC pattern (spei_26w × ndvi_z × pooled) | Mechanism |
+|---|---|---|---|
+| **WORKS** | 9.4 (S Central Semiarid Prairies), 6.2 (W Cordillera), 9.3-grass | All LCs positive (9.4: crop +0.16, forest +0.19, grass +0.20) | Pure semiarid rangeland response |
+| **SILENT** | 8.2 (Central USA Plains), 8.3 (SE USA Plains), 8.4 (Ozark/Ouachita) | Uniformly small-negative (−0.02 to −0.05) across LCs | Water-buffered |
+| **REVERSES-CROP** | 9.2 (Temperate Prairies / corn belt) | crop −0.100, grass −0.007 (clean LC contrast). Wald χ²=2685, p≈0 | Irrigation + planting/harvest masking |
+| **REVERSES-GRASS** | 5.2 (Mixed Wood Shield), 8.1 (Mixed Wood Plains) | All negative, **grass is WORST** (5.2: crop −0.060, forest −0.070, grass −0.100) | Different mechanism — likely dormant-season snow contamination of northern grass NDVI |
+
+**Specific resolutions provided by LC stratification**:
+- **9.3 mystery**: Section A's Tier-1 9.3 was entirely grass (β=+0.063); crop and forest are ~0. 9.3 IS Tier-1, but only for grasslands.
+- **9.4 robustness**: LC restriction slightly STRENGTHENS the signal (grass-only +0.195 > full-eco +0.182). Section A baseline holds.
+- **8.4 Ozark silence**: decomposes to mild forest negativity (−0.047, n=5,969) + tiny crop sample (n=94 NS).
+
+**Statistical robustness**: every ecoregion with ≥2 LCs at the 500-pixel floor shows Wald-significant LC modulation (p << 0.001).
+
+**Open question raised**: the 8.1 + 5.2 "grass-worst reversal" mechanism — different from 9.2 corn-belt. Both are northern boreal-influenced Mixed Wood ecoregions. Hypothesis: dormant-season snow contamination differentially affects northern grass NDVI. Could test via DJF-excluded subset. Flagged for follow-up (memory: `phase6-next-session-plan`).
+
+## Section A++ (5-LC, urban-stratified) — what dense vs diffuse urban reveals
+
+**Schema pivot 2026-06-12 afternoon**: extended `LC_STRATA_LEVELS` from 3 → 5 LCs to include urban, motivated by the project's "Urban Ecological Drought" framing. The 4 NLCD urban classes collapse to 2 tiers along the 50%-impervious break (NLCD's natural med/low boundary):
+
+- `urban_dense` = urban_high (≥80% impervious) + urban_med (50-79%) → 737 px Midwest-wide
+- `urban_diffuse` = urban_low (20-49% impervious) + urban_open (<20%) → 1,833 px
+
+Per-class is statistically infeasible (urban_high has only 28 px Midwest-wide). Single "urban" would lose the operationally-relevant impervious-cover gradient.
+
+**Implementation**: one-line `collapse_urban_to_2tier()` helper called right after the NLCD join in each section. Rewrites `nlcd_juliana` in memory; `valid_pixels_nlcd2019.rds` on disk untouched.
+
+**Dominance handling**: kept the global 60% modal_frac floor. Urban essentially never crosses it (urban_dense_dom ≈ 38 px Midwest, urban_diffuse_dom ≈ 8 px) because 4 km cells are rarely 60% pure dense urban anywhere in CONUS. Urban therefore carries meaningful sample only in the `all` track. Downstream readers filter urban `dom` rows by n_pixel_weeks.
+
+**Sample size reach by ecoregion** (`all` track, n_pixels):
+- urban_dense: 8.2 (431), 8.1 (100), 9.2 (91), 8.3 (62), 9.4 (31); rest <30
+- urban_diffuse: 8.2 (705), 8.1 (564), 8.3 (217), 9.2 (214), 9.4 (65); rest <20
+
+Only the LC-interaction `wald` test uses a 500-pixel floor; urban_diffuse crosses it in 8.1 + 8.2 + 8.3 + 9.2; urban_dense doesn't cross it anywhere. Per-stratum fits and skill metrics are unfloored at the run level; readers filter on n_pixel_weeks for statistical confidence.
+
+### Urban headline findings (spei_26w × ndvi_z × pooled, `all` track)
+
+| Eco | Eco signature | urban_dense β (n) | urban_diffuse β (n) | Reference LCs in this eco |
+|---|---|---|---|---|
+| **9.4** | WORKS | **+0.169*** (31) | **+0.195*** (65) | crop +0.164, grass +0.195, forest +0.193 |
+| **9.2** | REVERSES-CROP | **−0.072*** (91) | **−0.008** ns (214) | crop −0.100, grass −0.007, forest −0.061 |
+| **8.1** | REVERSES-GRASS | −0.043*** (100) | −0.034*** (564) | crop −0.056, grass −0.093, forest −0.068 |
+| **8.2** | SILENT | −0.035*** (431) | −0.031*** (705) | crop −0.040, grass −0.030, forest −0.028 |
+| **8.3** | SILENT | −0.034*** (62) | −0.033*** (217) | crop −0.034, grass −0.013, forest −0.020 |
+| **5.2** | REVERSES-GRASS | −0.095* (5) | −0.078*** (17) | crop −0.060, grass −0.100, forest −0.070 |
+| **6.2** | WORKS | (n<3, NS) | +0.121* (3) | grass +0.101, forest +0.113 |
+| **9.3** | WORKS (grass only) | −0.068** (7) | +0.100* (3) | crop −0.007***, grass +0.063*** |
+| **8.4** | SILENT | (n=8 NS) | −0.049*** (37) | crop NS (n=94), grass −0.032, forest −0.047 |
+
+*** p<0.001, ** p<0.01, * p<0.05, ns p>=0.05
+
+### The smoking-gun result
+
+**In the corn belt (9.2), dense urban joins the crop reversal pattern (β=−0.072***, n=91) while diffuse urban behaves like grass (β=−0.008 ns, n=214)**. The crop slope is −0.100, the grass slope is −0.007 — and urban_dense lands much closer to crop than to grass, while urban_diffuse lands almost exactly on grass.
+
+This is consistent with a "managed-surface" interpretation:
+- **High-impervious urban behaves like managed cropland** under drought — both have substantial water management (irrigation for crops, mowing/landscaping/lawn watering for dense urban), and both have NDVI dynamics that don't track water-balance deficit linearly
+- **Low-impervious urban behaves like the natural vegetation mosaic** it sits within — suburban parks and low-density development with substantial canopy/grass tracks SPEI the same way grasslands in the corn belt do (essentially flat)
+
+This is the **only ecoregion** where dense and diffuse urban diverge meaningfully. Everywhere else (8.1, 8.2, 8.3 in particular, with the largest urban samples), they're within each other's error bars and consistent with the eco-wide pattern.
+
+### What urban DOES NOT change
+
+The four-mechanism operational story (WORKS / SILENT / REVERSES-CROP / REVERSES-GRASS) survives intact. Urban refines but does not supersede:
+- WORKS ecoregions (9.4, 6.2): urban tracks the eco-wide positive pattern. No new mechanism.
+- SILENT ecoregions (8.2, 8.3, 8.4): urban tracks the eco-wide small-negative pattern. No new mechanism.
+- REVERSES-GRASS (5.2, 8.1): urban shows mild negative, not the grass-worst pattern. Snow-contamination hypothesis still applies to grass, not to urban.
+- REVERSES-CROP (9.2): urban DENSE joins the crop reversal — this **extends** the operational story for 9.2 from "it's cropland" to "it's managed surfaces broadly," but doesn't change the headline.
+
+### What urban DOES change
+
+- **Opens an impervious-cover / UHI hypothesis** for the 9.2 reversal that wasn't accessible at 3-LC: dense urban surfaces in the corn belt don't just match crops in impervious behavior — they share whatever drought-response mechanism applies to managed surfaces broadly. Urban heat island confounds, evaporative-cooling loss, lawn-irrigation maintenance — all consistent.
+- **Provides a urban-vs-rural contrast within ecoregion**: in 9.2 specifically, comparing 9.2|urban_dense (−0.072) to 9.2|grass (−0.007) shows a 65× larger negative response in dense urban than in adjacent natural grass cover. That's the kind of contrast that motivates the eventual finer-resolution second-stage analysis (memory: `two-stage-resolution-idea`).
+- **Statistical honesty caveat**: urban_dense samples are small in most ecoregions (only 8.2 crosses 100 px). The 9.2 dense-urban finding rests on n=91; not tiny but not bulletproof either. The pattern is consistent across ecoregions in *direction* (dense urban tracks the eco-wide pattern; the only divergent case is 9.2 where it joins crop instead of grass), which is the more robust finding than any single β estimate.
+
+## Implementation notes
+
+- **Schema refactor risk**: both `section_continuous_spei_nlcd` and `section_categorical_usdm_nlcd` now share `collapse_urban_to_2tier()` + `LC_STRATA_LEVELS`. Any future schema change applies to both atomically. The valid_pixels_nlcd2019.rds on disk is the source of truth at 9-class resolution; the 2-tier collapse happens per-run in memory.
+- **Sweep helpers** (`run_two_track_sweep`, `run_two_track_correlation`) gained `key_col` + `include_aggregate` args with backward-compatible defaults (`L2_code`, `TRUE`). v3 `section_categorical_usdm` is unchanged in behavior. New LC sections call with the fused `stratum_key_*` columns + `include_aggregate=FALSE` (no midwest_aggregate per LC).
+- **`section_categorical_usdm_nlcd`** intentionally does NOT include an LC-interaction Wald test (unlike `continuous_spei_nlcd`). There's no clean single-equation analog for skill metrics — POD/FAR/HSS aren't slopes, so a slope-differ test doesn't transfer. Per-stratum (eco × LC) skill + correlation tables tell the LC story directly; downstream LC contrasts done by hand.
+- **Stale log strings**: both section functions still print `"crop,forest,grassland"` in the `[5] Build stratum_key columns` log line. The actual strata logic uses `LC_STRATA_LEVELS` (correct, 5-LC). Cosmetic fix queued for next commit.
+
+## Section A++ runtime (5-LC, 2026-06-12)
+
+| Phase | Wall time | Output |
+|---|---|---|
+| Per-stratum grid (50 strata `all` + dom variants) | 25.4 min | 2,550 rows |
+| LC-interaction grid (11 eco × 2 dom × 3 spei × 5 signals × 2 models) | 33.1 min | 1,230 slope rows + 660 wald rows |
+| Save + summary | <1 min | `continuous_spei_nlcd_10y.rds` (95K xz) |
+| **Total** | **66.2 min** | (vs 57 min for 3-LC; ~1.16× scaling) |
+
+## Section II++ (`categorical_usdm_nlcd`) — COMPLETE in 95 min (2026-06-12 17:54)
+
+**Design**: mirror of `continuous_spei_nlcd` on the USDM side. Same eco × LC fused stratum_key + dominance variants. Reuses v3's `run_two_track_sweep` (binary + ordinal skill: POD/FAR/HSS) + `run_two_track_correlation` (Spearman ρ), both now generalized to the LC stratification via `key_col`.
+
+**Skipped on first pass** (matches `continuous_spei_nlcd`):
+- Permutation null (default `null_reps=0`)
+- Contingency tables (with LC dim the cell count explodes; not the headline)
+- LC-interaction Wald test (no clean analog for skill metrics)
+
+**Output**: `/data/validation/usdm_confusion_nlcd_10y.rds` (1.59 MB xz) with `skill_binary_lc`, `skill_ordinal_lc`, `correlation_binary_lc`, `correlation_ordinal_lc`, `meta`.
+
+**Runtime breakdown** (95 min total):
+- Steps [1]-[5] data prep + stratum build: ~9 min
+- Step [6] skill sweep (110 strata × 4K × 5 signals × 2 dom-variants): 27.2 min
+- Step [7] Spearman correlation: 59.1 min — SLOWER than expected because cor(method="spearman") on 11M-row strata is expensive, and the helper has no progress logging. Cosmetic bug filed (todo): add `progress_every` print to `run_two_track_correlation`.
+- Steps [8]-[11] parse + sanity + save + summary: <1 min
+
+### Within-drought Spearman ρ headline (K=4, ndvi_z, `all` track)
+
+Sign convention: ρ = cor(−NDVI_z, USDM_change). Positive ρ = NDVI below-normal precedes USDM intensifying = SKILL. Negative ρ = NDVI ABOVE-normal precedes USDM intensifying = REVERSED.
+
+| Eco | Eco SPEI signature | USDM ρ range (LCs) | Most positive LC | Most negative LC | Consistency with SPEI? |
+|---|---|---|---|---|---|
+| **9.4** | WORKS | [+0.014, +0.054] | urban_dense +0.054, urban_diffuse +0.054 | grass +0.014 | **Replicates** (all positive, smaller magnitude) |
+| **6.2** | WORKS | [−0.001, +0.022] | urban_diffuse +0.022 | grass −0.001 | Replicates (weakly) |
+| **8.4** | SILENT (on SPEI) | [+0.016, +0.148] | **urban_dense +0.148** (n=727, noisy) | forest +0.016 | **DISCREPANCY** — looks WORKS on USDM |
+| **8.3** | SILENT | [−0.071, +0.060] | urban_dense +0.060, crop +0.021 | grass −0.071 | **Partial discrepancy** — grass negative, others positive |
+| **8.2** | SILENT | [−0.171, −0.063] | urban_dense −0.063 | **grass −0.171** (worst in table) | Discrepancy — much more negative than SPEI suggested |
+| **9.2** | REVERSES-CROP | [−0.096, −0.043] | urban_diffuse −0.043 | forest −0.096 | **Replicates direction**, but mechanism differs (forest worst on USDM; crop worst on SPEI) |
+| **8.1** | REVERSES-GRASS | [−0.062, −0.019] | urban_diffuse −0.019 | grass −0.062 | Replicates (grass-worst within reasonable range) |
+| **5.2** | REVERSES-GRASS | [−0.106, −0.027] | urban_dense −0.027 | urban_diffuse −0.106 | Replicates direction |
+| **9.3** | WORKS (grass only) | [−0.117, −0.029] | urban_diffuse −0.029 | urban_dense −0.117 (n=1.7K) | **Inverted** — grass +0.063 SPEI vs grass −0.041 USDM |
+
+### The USDM-vs-SPEI discrepancy is the story
+
+The four-mechanism SPEI typology does **NOT cleanly replicate on USDM**. Three patterns of disagreement:
+
+1. **SILENT-on-SPEI becomes WORKS-on-USDM in 8.4 (Ozark)**: SPEI showed 8.4 with mild forest negativity (−0.047, n=5,969). USDM shows 8.4 with positive ρ across all LCs, best at urban_dense +0.148 (small N, suspect) and grass +0.042 (n=184K, solid). USDM consensus seems to track something in 8.4 that the meteorological water-balance integration misses.
+
+2. **SILENT-on-SPEI becomes SHARPLY-NEGATIVE-on-USDM in 8.2 (Central USA Plains)**: 8.2|grass shows ρ=−0.171 on USDM (the worst cell in the table), with reasonable N (16K within-drought weeks). On SPEI 8.2|grass was a mild −0.03. This is opposite of 8.4 — USDM thinks 8.2|grass is doing the *opposite* of what NDVI says.
+
+3. **WORKS replicates everywhere but magnitudes shrink ~3-4× from SPEI to USDM**: 9.4 SPEI β ranges +0.16 to +0.20; 9.4 USDM ρ ranges +0.01 to +0.05. This is the *expected* signature of USDM being a lagging analyst-curated product — the meteorological signal (SPEI) is strong and clean, while the categorical USDM-side signal is weaker and noisier because expert judgement on weekly bins adds latency and binarization noise.
+
+The discrepancies are themselves diagnostic: they identify ecoregions where USDM is "seeing" something different from raw water-balance (8.4 mesic forest, 8.2 plains agriculture). These are candidate cells for follow-up investigation of what USDM's expert consensus is picking up that SPEI alone misses.
+
+### Urban findings for USDM
+
+| Eco | urban_dense ρ (n) | urban_diffuse ρ (n) | Note |
+|---|---|---|---|
+| 9.4 | +0.054 (8,574) | +0.054 (17,260) | Both urban tiers track the eco-wide positive ρ. Density doesn't differentiate. |
+| 9.2 | −0.050 (20,339) | −0.043 (46,697) | Mildly negative for both — **does NOT show the SPEI-side density split** (where dense joined crop reversal at −0.072 and diffuse behaved like grass at −0.008). On USDM both urban tiers behave similarly. |
+| 8.1 | −0.028 (13,591) | −0.019 (79,357) | Mild negative, urban_diffuse slightly less negative than urban_dense |
+| 8.2 | −0.063 (61,059) | −0.086 (98,308) | Both moderately negative — does NOT show grass's −0.171 extreme |
+| 8.3 | +0.060 (7,804) | +0.012 (26,745) | **urban_dense slightly positive** — possibly an artifact of small N (7,804 is borderline) |
+| 8.4 | **+0.148 (727)** | **+0.098 (4,704)** | Suspect — both n's small. But the sign is consistent across both urban tiers and with grass/crop in 8.4, so the direction is reproducible even if the magnitude is unstable. |
+
+**Urban headline contrasted with SPEI**:
+- The **9.2 corn-belt density split (dense reverses, diffuse doesn't) — present on SPEI, absent on USDM**. SPEI saw urban_dense at −0.072 (matching crop −0.100) and urban_diffuse at −0.008 (matching grass −0.007). USDM sees both urban tiers at ~−0.045, not differentiating. This is one of the cases where SPEI's fine-grained water-balance picks up surface-management gradients that USDM's coarse expert categorical does not.
+- The **WORKS pattern in 9.4 replicates for urban on USDM** — urban_dense +0.054, urban_diffuse +0.054 are consistent with each other and with grass/crop/forest in the same eco (all weakly positive). Urban in a WORKS eco tracks the eco.
+- **8.2 urban_dense intensification HSS = +0.020 at n=223K** is the most solid urban-skill cell in the table — a small but statistically-real positive intensification signal in dense urban areas of the Central Plains. Worth a follow-up look on what's distinctive about 8.2 dense-urban response.
+
+### Skill metric tables (intensification + recovery, K=4, ndvi_z, dom=all)
+
+Selected highlights (full tables in `skill_binary_lc` slot of the RDS):
+
+**Intensification HSS top 6 (z=−1.5, big-N cells only, n>50K)**:
+| Stratum | HSS | POD | FAR | n |
+|---|---|---|---|---|
+| 8.4 grass | +0.025 | 0.092 | 0.878 | 531K |
+| 8.2 grass | +0.022 | 0.089 | 0.897 | 82K |
+| 8.2 urban_dense | +0.020 | 0.077 | 0.892 | 223K |
+| 8.2 urban_diffuse | +0.019 | 0.079 | 0.894 | 365K |
+| 8.3 grass | +0.015 | 0.085 | 0.900 | 962K |
+| 8.2 crop | +0.012 | 0.074 | 0.894 | 5.98M |
+
+**Recovery HSS top 5 (z=+1.5, big-N cells only, n>50K)**:
+| Stratum | HSS | POD | FAR | n |
+|---|---|---|---|---|
+| 6.2 forest | +0.030 | 0.115 | 0.930 | 233K |
+| 6.2 grass | +0.027 | 0.111 | 0.939 | 206K |
+| 8.2 crop | +0.012 | 0.072 | 0.900 | 5.98M |
+| 8.4 grass | +0.010 | 0.063 | 0.899 | 531K |
+| 8.2 urban_diffuse | +0.009 | 0.067 | 0.910 | 365K |
+
+Overall skill remains low (HSS <0.06 even for the best cells), consistent with v3 categorical_usdm headline that NDVI provides modest categorical drought-state skill against USDM. The LC stratification reveals *where* the modest skill concentrates: grasslands in the central Plains (8.2, 8.3, 8.4) for intensification, forest+grass in the Western Cordillera (6.2) for recovery, with 8.2 urban tiers being competitive.
+
+## What to do next
+
+1. **Headline figures** (memory: `phase6-next-session-plan`, item "figure candidates"):
+   - Four-mechanism eco map with urban tiers overlaid
+   - Per-eco LC strip chart for both SPEI β and USDM ρ side-by-side
+   - SPEI-vs-USDM agreement scatterplot (β on x, ρ on y, colored by LC, sized by N) — direct visualization of the discrepancies
+   - Corn-belt 9.2 decomposition: bar chart showing crop / forest / grass / urban_dense / urban_diffuse for both SPEI β and USDM ρ
+   - 8.4 Ozark "USDM-WORKS-but-SPEI-SILENT" detail figure
+2. **8.1 + 5.2 grass-worst diagnostic**: DJF-excluded re-run to test snow contamination hypothesis. Now informed by USDM: 8.1 USDM also shows grass-worst (−0.062), so the pattern isn't a SPEI-only artifact.
+3. **8.4 Ozark deep dive**: why does USDM see drought-tracking skill here while SPEI shows nothing? Check whether USDM analysts in this region rely on signals other than precipitation deficit (vegetation appearance, streamflow, soil moisture maps).
+4. **8.2 grass mystery**: SPEI mild negative (−0.030), USDM strongly negative (−0.171). What's driving the divergence? Could be small N artifact (16K is modest) — verify by adding K=1, K=2 to the LC version.
+5. **Cross-section reproduction figure (QC)**: for each (eco × LC) cell where both SPEI and USDM agree on sign, confirm the direction. List the disagree cells with rank-ordered importance.
+6. **Section B event_detection**: revive under skill framing with (eco × LC) stratification baked in. Now with explicit hypotheses from the SPEI vs USDM 5-LC comparison.
+7. **Eventually, Stage-2 finer-resolution analysis**: 30m HLS for flagged drought areas to parse subpixel structure (memory: `two-stage-resolution-idea`). The 9.2 urban-density split on SPEI but not USDM is a leading candidate for Stage-2 — what's happening at sub-4km scale that the categorical analyst-product smears over?

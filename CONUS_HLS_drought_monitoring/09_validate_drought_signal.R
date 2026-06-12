@@ -117,6 +117,8 @@ config <- list(
   continuous_spei_13y  = file.path(paths$validation_data, "continuous_spei_13y.rds"),
   continuous_spei_nlcd_10y = file.path(paths$validation_data, "continuous_spei_nlcd_10y.rds"),
   continuous_spei_nlcd_13y = file.path(paths$validation_data, "continuous_spei_nlcd_13y.rds"),
+  usdm_confusion_nlcd_10y  = file.path(paths$validation_data, "usdm_confusion_nlcd_10y.rds"),
+  usdm_confusion_nlcd_13y  = file.path(paths$validation_data, "usdm_confusion_nlcd_13y.rds"),
   nlcd_pixel_lookup    = file.path(paths$gam_models, "valid_pixels_nlcd2019.rds"),
   nlcd_modal_frac_threshold   = 0.60,
   nlcd_min_pixels_per_stratum = 500L,
@@ -560,21 +562,32 @@ sweep_z <- function(sig_vec, obs_yes_vec, n_total, z_thresholds, z_op,
 
 # Run the two-track skill sweep (binary + ordinal) across all
 # (stratum × K × signal). Returns list(binary = dt, ordinal = dt). Used by
-# both the observed run and each null rep. Strata: each of the L2_code values
-# in `eco_codes` plus "midwest_aggregate" (NA L2_code).
+# both the observed run and each null rep.
+#
+# Strata: each value in `eco_codes` matched against dt[[key_col]], optionally
+# plus "midwest_aggregate" (NA stratum_id when include_aggregate = TRUE).
+# `key_col` defaults to "L2_code" for backward compatibility with v3
+# section_categorical_usdm. The LC-stratified caller passes the fused
+# stratum_key column name (e.g. "stratum_key_all") + include_aggregate = FALSE.
+# The output `L2_code` column always holds the stratum_id (parsed back to
+# (L2_code, nlcd_juliana, dom_filter) by the caller if needed).
 run_two_track_sweep <- function(dt, eco_codes, K_values, signal_names,
                                 z_neg, z_pos, change_pos, change_neg,
-                                progress_every = 25L, label = "obs") {
+                                progress_every = 25L, label = "obs",
+                                key_col           = "L2_code",
+                                include_aggregate = TRUE) {
   binary_rows  <- list()
   ordinal_rows <- list()
-  total_iter   <- (length(eco_codes) + 1L) * length(K_values) * length(signal_names)
+  n_strata     <- length(eco_codes) + as.integer(include_aggregate)
+  total_iter   <- n_strata * length(K_values) * length(signal_names)
   iter         <- 0L
   t_sweep      <- Sys.time()
 
-  strata_list <- c(as.list(eco_codes), list(NA_character_))   # NA = midwest agg
+  strata_list <- if (include_aggregate) c(as.list(eco_codes), list(NA_character_))
+                 else                    as.list(eco_codes)
   for (stratum in strata_list) {
     is_mw <- is.na(stratum)
-    sub_full <- if (is_mw) dt else dt[L2_code == stratum]
+    sub_full <- if (is_mw) dt else dt[get(key_col) == stratum]
     if (nrow(sub_full) == 0L) next
     stratum_type <- if (is_mw) "midwest_aggregate" else "ecoregion"
     L2_label     <- if (is_mw) NA_character_       else as.character(stratum)
@@ -654,18 +667,39 @@ run_two_track_sweep <- function(dt, eco_codes, K_values, signal_names,
 # Run the two-track Spearman correlation sweep — observed run only.
 # Binary correlation uses signed transition indicator (in_drought_lead - in_drought) ∈ {-1,0,+1}.
 # Ordinal correlation uses usdm_change_K restricted to the within-drought subset.
-run_two_track_correlation <- function(dt, eco_codes, K_values, signal_names) {
+# `key_col` + `include_aggregate` work the same way as in run_two_track_sweep.
+# `progress_every` prints a per-stratum log line every N strata; needed because
+# Spearman ranking on 10M-row strata can take ~60 sec per cor() call, and the
+# LC-stratified version of this helper can run 30-60 min silently otherwise.
+# (Caught 2026-06-12 USDM 5-LC run: 59.1 min silent during step [7].)
+run_two_track_correlation <- function(dt, eco_codes, K_values, signal_names,
+                                      key_col           = "L2_code",
+                                      include_aggregate = TRUE,
+                                      progress_every    = 10L,
+                                      label             = "obs") {
   bin_rows <- list()
   ord_rows <- list()
-  strata_list <- c(as.list(eco_codes), list(NA_character_))
+  strata_list <- if (include_aggregate) c(as.list(eco_codes), list(NA_character_))
+                 else                    as.list(eco_codes)
+  n_strata <- length(strata_list)
+  t_sweep  <- Sys.time()
+  iter     <- 0L
 
   for (stratum in strata_list) {
+    iter <- iter + 1L
     is_mw <- is.na(stratum)
-    sub_full <- if (is_mw) dt else dt[L2_code == stratum]
+    sub_full <- if (is_mw) dt else dt[get(key_col) == stratum]
     if (nrow(sub_full) == 0L) next
     stratum_type <- if (is_mw) "midwest_aggregate" else "ecoregion"
     L2_label     <- if (is_mw) NA_character_       else as.character(stratum)
     sub_drought  <- sub_full[in_drought == TRUE]
+
+    if (iter == 1L || iter %% progress_every == 0L || iter == n_strata) {
+      el  <- as.numeric(Sys.time() - t_sweep, units = "mins")
+      eta <- if (iter > 0L) el * (n_strata - iter) / iter else NA_real_
+      cat(sprintf("    [%s] stratum %d/%d (%.1f min elapsed, ETA %.1f min)\n",
+                  label, iter, n_strata, el, eta))
+    }
 
     for (K in K_values) {
       change_col <- sprintf("usdm_change_%d", K)
@@ -2114,12 +2148,50 @@ section_continuous_spei <- function(scope, null_reps = 5L) {
 #         + wald_table + meta. See plan for full schema.
 # ==============================================================================
 
-# LC strata cross is built dynamically inside section_continuous_spei_nlcd:
-# full eco x {crop, forest, grassland}. urban_* and "other" are excluded —
-# they're <5% of valid pixels in rural Midwest and not the operational
-# question for an ag drought monitor. The 500-pixel floor in
-# fit_lc_interaction_one_cell skips any (eco x LC) cell with too few pixels.
-LC_STRATA_LEVELS <- c("crop", "forest", "grassland")
+# LC strata cross is built dynamically inside section_continuous_spei_nlcd
+# AND section_categorical_usdm_nlcd: full eco x 5 LC tiers.
+#
+# Urban schema (2026-06-12): the 4 NLCD urban classes collapse to 2 tiers
+# along the 50%-impervious break (NLCD's natural med/low boundary):
+#   urban_dense   = urban_high (>=80% impervious) + urban_med  (50-79%) -> 737 px Midwest
+#   urban_diffuse = urban_low  (20-49% impervious) + urban_open (<20%)  -> 1,833 px Midwest
+# Per-class is statistically infeasible (urban_high has only 28 px CONUS-wide
+# in our Midwest extent); single "urban" loses the operationally-relevant
+# impervious-cover gradient. The collapse to nlcd_juliana_2tier happens
+# in-section right after the NLCD join, leaving valid_pixels_nlcd2019.rds
+# untouched.
+#
+# "other" is excluded (2.2% of Midwest, no operational interpretation).
+#
+# Dominance handling: the 60% modal_frac floor (the "dom" track) annihilates
+# the urban sample (urban_dense_dom ~38 px, urban_diffuse_dom ~8 px) because
+# 4 km cells are rarely 60% pure dense urban anywhere in CONUS. Urban will
+# therefore only carry meaningful sample in the "all" track. We keep the
+# global 60% threshold rather than per-LC thresholds to avoid special-casing;
+# downstream readers filter urban "dom" rows by n_pixel_weeks.
+#
+# Statistical reach by ecoregion (no dominance filter, n_pixels):
+#   urban_dense:   8.2 (431), 8.1 (100), 9.2 (91), 8.3 (62), rest <50
+#   urban_diffuse: 8.2 (705), 8.1 (564), 8.3 (217), 9.2 (214), rest <100
+# Only 8.1 + 8.2 cross the 500-px floor in fit_lc_interaction_one_cell for
+# urban_diffuse; urban_dense never crosses it. Urban therefore appears in
+# the per-stratum fit_table_lc / skill table but not in the LC-interaction
+# Wald tests for most ecoregions.
+LC_STRATA_LEVELS <- c("crop", "forest", "grassland", "urban_dense", "urban_diffuse")
+
+# Collapse the 4 NLCD urban classes -> 2 tiers (dense/diffuse). Called by both
+# section_continuous_spei_nlcd and section_categorical_usdm_nlcd right after
+# the NLCD join. Mutates dt in place by overwriting nlcd_juliana. Returns
+# invisibly so it can be used inline. "other" + non-urban values pass through.
+collapse_urban_to_2tier <- function(dt, lc_col = "nlcd_juliana") {
+  stopifnot(lc_col %in% names(dt))
+  dt[, (lc_col) := fcase(
+    get(lc_col) %in% c("urban_high", "urban_med"),  "urban_dense",
+    get(lc_col) %in% c("urban_low",  "urban_open"), "urban_diffuse",
+    default = get(lc_col)
+  )]
+  invisible(NULL)
+}
 
 section_continuous_spei_nlcd <- function(scope, null_reps = 0L) {
   cat("\n=== Section: continuous_spei_nlcd (scope =", scope,
@@ -2180,7 +2252,13 @@ section_continuous_spei_nlcd <- function(scope, null_reps = 0L) {
                  n_na),
          "between align_weekly cache and valid_pixels_nlcd2019.rds.")
   }
-  cat(sprintf("  joined; LC distribution (rows): %s\n",
+  cat(sprintf("  joined (raw 9-class); LC distribution (rows): %s\n",
+              paste(sprintf("%s=%s", names(table(dt$nlcd_juliana)),
+                            format(as.integer(table(dt$nlcd_juliana)),
+                                   big.mark = ",")),
+                    collapse = ", ")))
+  collapse_urban_to_2tier(dt)
+  cat(sprintf("  after urban 2-tier collapse; LC distribution (rows): %s\n",
               paste(sprintf("%s=%s", names(table(dt$nlcd_juliana)),
                             format(as.integer(table(dt$nlcd_juliana)),
                                    big.mark = ",")),
@@ -2199,7 +2277,7 @@ section_continuous_spei_nlcd <- function(scope, null_reps = 0L) {
               format(nrow(dt), big.mark = ","), uniqueN(dt$pixel_id)))
 
   # --- 4. Build full (eco x LC) cross + fused stratum_key columns ---
-  cat("\n[4] Build stratum_key columns (full eco x {crop,forest,grassland} cross)...\n")
+  cat("\n[4] Build stratum_key columns (full eco x LC_STRATA_LEVELS cross)...\n")
   eco_codes_all <- sort(unique(dt$L2_code[!is.na(dt$L2_code)]))
   LC_STRATA <- as.data.table(expand.grid(
     L2_code      = eco_codes_all,
@@ -2379,6 +2457,411 @@ section_continuous_spei_nlcd <- function(scope, null_reps = 0L) {
                                     se   = round(se, 4),
                                     p    = signif(p, 2),
                                     n_pixels, note)][order(L2_code, lc_level)])
+
+  invisible(out)
+}
+
+# ==============================================================================
+# SECTION: categorical_usdm_nlcd
+#
+# LC-stratified extension of section_categorical_usdm (v3). Mirror of
+# section_continuous_spei_nlcd, but on the USDM side: decomposes each
+# ecoregion into crop / forest / grassland strata and runs the two-track
+# skill sweep (binary + ordinal) + Spearman correlation on each (eco x LC).
+#
+# Reuses v3 machinery unchanged: build_lead_K, run_two_track_sweep,
+# run_two_track_correlation. Per-cell stratification flows through the
+# `key_col` argument on the two sweep helpers (fused stratum_key column).
+#
+# Two complementary stratum sets:
+#   (1) "all" — every pixel in (eco x LC), no dominance filter
+#   (2) "dom" — modal_frac >= nlcd_modal_frac_threshold (0.60) only
+#
+# Skipped on first pass (matches continuous_spei_nlcd):
+#   - Permutation null (would mirror v3's null loop calling run_two_track_sweep
+#     with shuffled USDM; default null_reps=0 to keep first run < 1 hr)
+#   - Contingency tables (v3 had per-(stratum x sig_bin x usdm_change); with
+#     LC the cell count explodes and isn't the headline)
+#   - LC-interaction model (no clean single-equation analog for skill metrics
+#     -- POD/FAR/HSS aren't slopes, so the Wald test from continuous_spei_nlcd
+#     doesn't transfer)
+#
+# Output: usdm_confusion_nlcd_<scope>.rds
+#   skill_binary_lc         per (eco x LC x K x signal x dir x z_threshold)
+#   skill_ordinal_lc        per (eco x LC x K x signal x dir x z_threshold x usdm_change_threshold)
+#   correlation_binary_lc   per (eco x LC x K x signal)
+#   correlation_ordinal_lc  per (eco x LC x K x signal)
+#   meta                    scope, lc_strata, runtime, etc.
+# ==============================================================================
+
+section_categorical_usdm_nlcd <- function(scope, null_reps = 0L) {
+  cat("\n=== Section: categorical_usdm_nlcd (scope =", scope,
+      ", null_reps =", null_reps, ") ===\n")
+  stopifnot(scope %in% c("10y", "13y"), is.numeric(null_reps), null_reps >= 0L)
+  null_reps <- as.integer(null_reps)
+  if (null_reps > 0L) {
+    cat("  NOTE: null model not implemented in this section on first pass.\n")
+    cat("        null_reps will be stored in meta but no null loop will run.\n")
+    cat("        To enable, mirror v3 section_categorical_usdm's null loop\n")
+    cat("        passing key_col = stratum_key_all / stratum_key_dom.\n")
+  }
+
+  in_file  <- if (scope == "10y") config$align_out_10y           else config$align_out_13y
+  out_file <- if (scope == "10y") config$usdm_confusion_nlcd_10y else config$usdm_confusion_nlcd_13y
+
+  if (!file.exists(in_file)) {
+    stop("Cache file missing: ", in_file,
+         "\n  Run --section=align_weekly --scope=", scope, " first.")
+  }
+  if (!file.exists(config$nlcd_pixel_lookup)) {
+    stop("NLCD pixel lookup missing: ", config$nlcd_pixel_lookup,
+         "\n  Run 00b_extract_nlcd_2019.R first.")
+  }
+  cat(sprintf("Input:  %s (%.1f GB)\n", basename(in_file), file.size(in_file) / 1e9))
+  cat(sprintf("NLCD:   %s\n", basename(config$nlcd_pixel_lookup)))
+  cat(sprintf("Output: %s\n", basename(out_file)))
+
+  t_section <- Sys.time()
+
+  Z_THRESHOLDS_NEG           <- c(-0.5, -1.0, -1.5, -2.0, -2.5)
+  Z_THRESHOLDS_POS           <- c( 0.5,  1.0,  1.5,  2.0,  2.5)
+  USDM_CHANGE_THRESHOLDS_POS <- 1:3
+  USDM_CHANGE_THRESHOLDS_NEG <- -(1:3)
+  K_VALUES                   <- c(1L, 2L, 4L, 8L)
+  MIN_VALID_WEEKS            <- 30L
+
+  ANOM_COLS    <- c("ndvi_anom_mean",
+                    "deriv_w03_anom_mean", "deriv_w07_anom_mean",
+                    "deriv_w14_anom_mean", "deriv_w30_anom_mean")
+  SIGNAL_NAMES <- c("ndvi_z",
+                    "deriv_w03_z", "deriv_w07_z", "deriv_w14_z", "deriv_w30_z")
+
+  # --- 1. Load cache + USDM in-analysis recode (matches v3) -----------------
+  cat("\n[1] Load cache + USDM in-analysis recode...\n")
+  dt <- as.data.table(readRDS_retry(in_file))
+  cat(sprintf("  raw: %s rows x %d cols\n",
+              format(nrow(dt), big.mark = ","), ncol(dt)))
+  keep_cols <- c("pixel_id", "iso_year", "iso_week", "week_start",
+                 ANOM_COLS, "usdm", "L2_code", "L2_name")
+  dt <- dt[, ..keep_cols]
+  dt[, usdm_ord   := as.integer(usdm) + 1L]
+  dt[, in_drought := usdm_ord >= 1L]
+  dt[, usdm := NULL]
+  gc(verbose = FALSE)
+
+  n_px_in <- uniqueN(dt$pixel_id)
+  cat(sprintf("  pixel count: %d (expected %d)\n", n_px_in, EXPECTED_VALID_PIXELS))
+  if (n_px_in != EXPECTED_VALID_PIXELS) {
+    cat(sprintf("  WARN: pixel drift %d (see feedback_pixel_count_invariant)\n",
+                n_px_in - EXPECTED_VALID_PIXELS))
+  }
+  na_rate <- 100 * mean(is.na(dt$usdm_ord))
+  cat(sprintf("  USDM recoded scale {0..5}: %.2f%% None | %.2f%% in_drought | %.2f%% NA\n",
+              100 * mean(dt$usdm_ord == 0L, na.rm = TRUE),
+              100 * mean(dt$in_drought,      na.rm = TRUE),
+              na_rate))
+  if (na_rate > 5.0) {
+    cat(sprintf("  WARN: USDM NA rate %.2f%% exceeds 5%% -- investigate align_weekly join.\n",
+                na_rate))
+  }
+
+  # --- 2. Join NLCD info (matches continuous_spei_nlcd) ---------------------
+  cat("\n[2] Join nlcd_juliana + modal_frac from valid_pixels_nlcd2019.rds...\n")
+  v_nlcd <- as.data.table(readRDS_retry(config$nlcd_pixel_lookup))
+  stopifnot(all(c("pixel_id", "nlcd_juliana", "modal_frac") %in% names(v_nlcd)))
+  dt <- merge(dt, v_nlcd[, .(pixel_id, nlcd_juliana, modal_frac)],
+              by = "pixel_id", all.x = TRUE)
+  n_na <- sum(is.na(dt$nlcd_juliana))
+  if (n_na > 0L) {
+    stop(sprintf("Join drift: %d rows have NA nlcd_juliana. Pixel set mismatch ",
+                 n_na),
+         "between align_weekly cache and valid_pixels_nlcd2019.rds.")
+  }
+  cat(sprintf("  joined (raw 9-class); LC distribution (rows): %s\n",
+              paste(sprintf("%s=%s", names(table(dt$nlcd_juliana)),
+                            format(as.integer(table(dt$nlcd_juliana)),
+                                   big.mark = ",")),
+                    collapse = ", ")))
+  collapse_urban_to_2tier(dt)
+  cat(sprintf("  after urban 2-tier collapse; LC distribution (rows): %s\n",
+              paste(sprintf("%s=%s", names(table(dt$nlcd_juliana)),
+                            format(as.integer(table(dt$nlcd_juliana)),
+                                   big.mark = ",")),
+                    collapse = ", ")))
+  rm(v_nlcd); gc(verbose = FALSE)
+
+  # --- 3. z-standardize 5 NDVI signals --------------------------------------
+  cat("\n[3] z-standardize 5 NDVI signals (per-pixel)...\n")
+  setorder(dt, pixel_id, week_start)
+  drop_px <- zstandardize_signals_per_pixel(dt, ANOM_COLS, SIGNAL_NAMES,
+                                            min_valid_weeks = MIN_VALID_WEEKS)
+  if (length(drop_px) > 0L) dt <- dt[!pixel_id %in% drop_px]
+  dt[, (ANOM_COLS) := NULL]
+  gc(verbose = FALSE)
+  cat(sprintf("  after drops: %s rows x %d pixels\n",
+              format(nrow(dt), big.mark = ","), uniqueN(dt$pixel_id)))
+
+  # --- 4. True lead-K USDM via self-join (matches v3) -----------------------
+  cat(sprintf("\n[4] Build lead-K USDM (true self-join, K = %s)...\n",
+              paste(K_VALUES, collapse = ",")))
+  build_lead_K(dt, K_VALUES)
+
+  for (K in K_VALUES) {
+    change_col <- sprintf("usdm_change_%d", K)
+    onset_col  <- sprintf("onset_%d", K)
+    end_col    <- sprintf("end_%d", K)
+    cat(sprintf("  K=%d: change non-NA %.2f%% | range [%+d, %+d] | onset %.3f%% | end %.3f%%\n",
+                K,
+                100 * mean(!is.na(dt[[change_col]])),
+                min(dt[[change_col]], na.rm = TRUE),
+                max(dt[[change_col]], na.rm = TRUE),
+                100 * mean(dt[[onset_col]], na.rm = TRUE),
+                100 * mean(dt[[end_col]],   na.rm = TRUE)))
+  }
+
+  # --- 5. Build full (eco x LC) cross + fused stratum_key columns -----------
+  cat("\n[5] Build stratum_key columns (full eco x LC_STRATA_LEVELS cross)...\n")
+  eco_codes_all <- sort(unique(dt$L2_code[!is.na(dt$L2_code)]))
+  LC_STRATA <- as.data.table(expand.grid(
+    L2_code      = eco_codes_all,
+    nlcd_juliana = LC_STRATA_LEVELS,
+    stringsAsFactors = FALSE
+  ))
+  LC_STRATA[, key := paste(L2_code, nlcd_juliana, sep = "|")]
+  cat(sprintf("  built %d (eco x LC) cells across %d ecoregions x %d LC classes\n",
+              nrow(LC_STRATA), length(eco_codes_all), length(LC_STRATA_LEVELS)))
+
+  dt[, lc_eco_key := paste(L2_code, nlcd_juliana, sep = "|")]
+  targeted_set <- LC_STRATA$key
+  dt[, stratum_key_all := fifelse(lc_eco_key %in% targeted_set,
+                                  paste(lc_eco_key, "all", sep = "|"),
+                                  NA_character_)]
+  dt[, stratum_key_dom := fifelse(lc_eco_key %in% targeted_set &
+                                  modal_frac >= config$nlcd_modal_frac_threshold,
+                                  paste(lc_eco_key, "dom", sep = "|"),
+                                  NA_character_)]
+  dt[, lc_eco_key := NULL]
+
+  cov_all <- dt[, .(n_obs = .N, n_pixels = uniqueN(pixel_id)),
+                by = stratum_key_all][!is.na(stratum_key_all)]
+  cat(sprintf("  Stratum coverage (all): %d strata with row counts:\n",
+              nrow(cov_all)))
+  print(cov_all[order(-n_pixels)])
+  cov_dom <- dt[, .(n_obs = .N, n_pixels = uniqueN(pixel_id)),
+                by = stratum_key_dom][!is.na(stratum_key_dom)]
+  cat(sprintf("  Stratum coverage (dom): %d strata with row counts:\n",
+              nrow(cov_dom)))
+  print(cov_dom[order(-n_pixels)])
+
+  # --- 6. Two-track skill sweep (TWO calls: all + dom) ----------------------
+  cat(sprintf("\n[6] Skill sweep: %d strata (all+dom) x %d K x %d signals\n",
+              length(targeted_set) * 2L, length(K_VALUES), length(SIGNAL_NAMES)))
+  t_skill <- Sys.time()
+
+  dt_all <- dt[!is.na(stratum_key_all)]
+  obs_all <- run_two_track_sweep(dt_all,
+                                  eco_codes         = sort(unique(dt_all$stratum_key_all)),
+                                  K_values          = K_VALUES,
+                                  signal_names      = SIGNAL_NAMES,
+                                  z_neg             = Z_THRESHOLDS_NEG,
+                                  z_pos             = Z_THRESHOLDS_POS,
+                                  change_pos        = USDM_CHANGE_THRESHOLDS_POS,
+                                  change_neg        = USDM_CHANGE_THRESHOLDS_NEG,
+                                  label             = "obs-all",
+                                  key_col           = "stratum_key_all",
+                                  include_aggregate = FALSE)
+  rm(dt_all); gc(verbose = FALSE)
+
+  dt_dom <- dt[!is.na(stratum_key_dom)]
+  obs_dom <- run_two_track_sweep(dt_dom,
+                                  eco_codes         = sort(unique(dt_dom$stratum_key_dom)),
+                                  K_values          = K_VALUES,
+                                  signal_names      = SIGNAL_NAMES,
+                                  z_neg             = Z_THRESHOLDS_NEG,
+                                  z_pos             = Z_THRESHOLDS_POS,
+                                  change_pos        = USDM_CHANGE_THRESHOLDS_POS,
+                                  change_neg        = USDM_CHANGE_THRESHOLDS_NEG,
+                                  label             = "obs-dom",
+                                  key_col           = "stratum_key_dom",
+                                  include_aggregate = FALSE)
+  rm(dt_dom); gc(verbose = FALSE)
+
+  skill_binary_lc  <- rbindlist(list(obs_all$binary,  obs_dom$binary),
+                                use.names = TRUE, fill = TRUE)
+  skill_ordinal_lc <- rbindlist(list(obs_all$ordinal, obs_dom$ordinal),
+                                use.names = TRUE, fill = TRUE)
+  cat(sprintf("  skill sweep: binary %d rows + ordinal %d rows in %.1f min\n",
+              nrow(skill_binary_lc), nrow(skill_ordinal_lc),
+              as.numeric(Sys.time() - t_skill, units = "mins")))
+
+  # --- 7. Two-track Spearman correlation (TWO calls: all + dom) -------------
+  cat(sprintf("\n[7] Spearman correlation: %d strata (all+dom) x %d K x %d signals\n",
+              length(targeted_set) * 2L, length(K_VALUES), length(SIGNAL_NAMES)))
+  t_corr <- Sys.time()
+
+  dt_all <- dt[!is.na(stratum_key_all)]
+  corr_all <- run_two_track_correlation(dt_all,
+                                         eco_codes         = sort(unique(dt_all$stratum_key_all)),
+                                         K_values          = K_VALUES,
+                                         signal_names      = SIGNAL_NAMES,
+                                         key_col           = "stratum_key_all",
+                                         include_aggregate = FALSE,
+                                         label             = "corr-all")
+  rm(dt_all); gc(verbose = FALSE)
+
+  dt_dom <- dt[!is.na(stratum_key_dom)]
+  corr_dom <- run_two_track_correlation(dt_dom,
+                                         eco_codes         = sort(unique(dt_dom$stratum_key_dom)),
+                                         K_values          = K_VALUES,
+                                         signal_names      = SIGNAL_NAMES,
+                                         key_col           = "stratum_key_dom",
+                                         include_aggregate = FALSE,
+                                         label             = "corr-dom")
+  rm(dt_dom); gc(verbose = FALSE)
+
+  correlation_binary_lc  <- rbindlist(list(corr_all$binary,  corr_dom$binary),
+                                       use.names = TRUE, fill = TRUE)
+  correlation_ordinal_lc <- rbindlist(list(corr_all$ordinal, corr_dom$ordinal),
+                                       use.names = TRUE, fill = TRUE)
+  cat(sprintf("  correlation: binary %d rows + ordinal %d rows in %.1f min\n",
+              nrow(correlation_binary_lc), nrow(correlation_ordinal_lc),
+              as.numeric(Sys.time() - t_corr, units = "mins")))
+
+  # --- 8. Parse fused stratum -> (L2_code, nlcd_juliana, dom_filter) --------
+  # The sweep/correlation helpers write the stratum_id into the L2_code column
+  # (legacy naming). Parse it back to per-source components for downstream use.
+  # L2_name is joined from a per-ecoregion lookup. Done AFTER the parse so the
+  # original stratum_id is preserved in the parse rather than overwritten.
+  cat("\n[8] Parse fused stratum_id back to (L2_code, nlcd_juliana, dom_filter)...\n")
+  L2_name_lookup <- unique(dt[!is.na(L2_code), .(L2_code, L2_name)])
+
+  parse_and_label <- function(tbl) {
+    tbl[, stratum_id := L2_code]   # preserve original fused key
+    parts <- tstrsplit(tbl$stratum_id, "|", fixed = TRUE)
+    tbl[, `:=`(L2_code      = parts[[1]],
+               nlcd_juliana = parts[[2]],
+               dom_filter   = parts[[3]])]
+    tbl <- merge(tbl, L2_name_lookup, by = "L2_code", all.x = TRUE, sort = FALSE)
+    tbl
+  }
+
+  skill_binary_lc        <- parse_and_label(skill_binary_lc)
+  skill_ordinal_lc       <- parse_and_label(skill_ordinal_lc)
+  correlation_binary_lc  <- parse_and_label(correlation_binary_lc)
+  correlation_ordinal_lc <- parse_and_label(correlation_ordinal_lc)
+
+  setcolorder(skill_binary_lc,
+              c("stratum_id", "L2_code", "L2_name", "nlcd_juliana", "dom_filter",
+                "stratum_type", "K", "ndvi_signal",
+                "direction", "z_threshold", "n_pixel_weeks",
+                "tp", "fp", "fn", "tn", "pod", "far", "csi", "hss"))
+  setcolorder(skill_ordinal_lc,
+              c("stratum_id", "L2_code", "L2_name", "nlcd_juliana", "dom_filter",
+                "stratum_type", "K", "ndvi_signal",
+                "direction", "z_threshold", "usdm_change_threshold",
+                "n_pixel_weeks", "tp", "fp", "fn", "tn",
+                "pod", "far", "csi", "hss"))
+  setcolorder(correlation_binary_lc,
+              c("stratum_id", "L2_code", "L2_name", "nlcd_juliana", "dom_filter",
+                "stratum_type", "K", "ndvi_signal",
+                "n_pixel_weeks", "spearman_rho_neg_signal"))
+  setcolorder(correlation_ordinal_lc,
+              c("stratum_id", "L2_code", "L2_name", "nlcd_juliana", "dom_filter",
+                "stratum_type", "K", "ndvi_signal",
+                "n_pixel_weeks", "spearman_rho_neg_signal"))
+  setorder(skill_binary_lc,        L2_code, nlcd_juliana, dom_filter, K, ndvi_signal,
+                                    direction, z_threshold)
+  setorder(skill_ordinal_lc,       L2_code, nlcd_juliana, dom_filter, K, ndvi_signal,
+                                    direction, z_threshold, usdm_change_threshold)
+  setorder(correlation_binary_lc,  L2_code, nlcd_juliana, dom_filter, K, ndvi_signal)
+  setorder(correlation_ordinal_lc, L2_code, nlcd_juliana, dom_filter, K, ndvi_signal)
+
+  # --- 9. Sanity vs v3 (warn-only) ------------------------------------------
+  # v3 categorical_usdm headline within-drought ρ at K=4, ndvi_z, midwest_aggregate
+  # was ~0 (small +/-). LC-stratified should sit in roughly the same range when
+  # weighted-averaged across crop+forest+grass. We don't compute the full
+  # weighted average here; just print 9.2-crop's ρ as a smoke check (expected
+  # negative, since 9.2 reverses on the SPEI side and we expect similar on USDM).
+  cat("\n[9] Sanity check (9.2|crop|all, K=4, ndvi_z within-drought correlation):\n")
+  sanity_row <- correlation_ordinal_lc[L2_code == "9.2" & nlcd_juliana == "crop" &
+                                       dom_filter == "all" & K == 4L &
+                                       ndvi_signal == "ndvi_z"]
+  if (nrow(sanity_row) == 1L && !is.na(sanity_row$spearman_rho_neg_signal)) {
+    cat(sprintf("  rho_neg_signal = %+.4f  (n_pixel_weeks = %s)\n",
+                sanity_row$spearman_rho_neg_signal,
+                format(sanity_row$n_pixel_weeks, big.mark = ",")))
+  } else {
+    cat("  WARN: sanity row not present or NA -- investigate.\n")
+  }
+
+  # --- 10. Assemble + save --------------------------------------------------
+  meta <- list(
+    scope             = scope,
+    scope_years       = if (scope == "10y") 2016:2025 else 2013:2025,
+    version           = "v1_lc_stratified_two_track",
+    lc_strata         = LC_STRATA,
+    lc_strata_levels  = LC_STRATA_LEVELS,
+    nlcd_modal_frac_threshold   = config$nlcd_modal_frac_threshold,
+    nlcd_min_pixels_per_stratum = config$nlcd_min_pixels_per_stratum,
+    n_pixels_in       = n_px_in,
+    n_pixels_dropped  = length(drop_px),
+    n_pixels_kept     = n_px_in - length(drop_px),
+    z_thresholds_negative      = Z_THRESHOLDS_NEG,
+    z_thresholds_positive      = Z_THRESHOLDS_POS,
+    K_values                   = K_VALUES,
+    usdm_change_thresholds_pos = USDM_CHANGE_THRESHOLDS_POS,
+    usdm_change_thresholds_neg = USDM_CHANGE_THRESHOLDS_NEG,
+    min_valid_weeks            = MIN_VALID_WEEKS,
+    signal_set                 = SIGNAL_NAMES,
+    usdm_recode_in_analysis    = "usdm_ord = usdm + 1L; in_drought = usdm_ord >= 1L; raw -1 sentinel = None; D0-D4 = 1-5",
+    lead_K_method              = "self-join on (pixel_id, week_start + 7K) -- NOT running max",
+    null_reps                  = null_reps,
+    null_implementation_note   = "Null model not implemented in this section on first pass; mirror v3 categorical_usdm null loop passing key_col arg if needed",
+    runtime_minutes            = as.numeric(Sys.time() - t_section, units = "mins"),
+    created                    = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+  )
+
+  out <- list(
+    skill_binary_lc        = skill_binary_lc,
+    skill_ordinal_lc       = skill_ordinal_lc,
+    correlation_binary_lc  = correlation_binary_lc,
+    correlation_ordinal_lc = correlation_ordinal_lc,
+    meta                   = meta
+  )
+
+  cat(sprintf("\nSaving %s...\n", basename(out_file)))
+  saveRDS_validated(out, out_file, compress = "xz")
+  cat(sprintf("  wrote %.2f MB in %.1f min total\n",
+              file.size(out_file) / 1e6, meta$runtime_minutes))
+
+  # --- 11. Quick summary ----------------------------------------------------
+  options(datatable.print.nrows = 200L, datatable.print.topn = 200L)
+
+  cat("\n--- Per-stratum within-drought Spearman rho (K=4, ndvi_z, dom=all), sorted by rho ---\n")
+  print(correlation_ordinal_lc[K == 4L & ndvi_signal == "ndvi_z" & dom_filter == "all",
+                                .(L2_code, nlcd_juliana,
+                                  rho = round(spearman_rho_neg_signal, 4),
+                                  n   = n_pixel_weeks)][order(rho)])
+
+  cat("\n--- Per-stratum recovery HSS (K=4, ndvi_z, z=+1.5, dom=all), sorted by HSS ---\n")
+  print(skill_binary_lc[K == 4L & ndvi_signal == "ndvi_z" &
+                         direction == "recovery" & z_threshold == 1.5 &
+                         dom_filter == "all",
+                         .(L2_code, nlcd_juliana,
+                           hss = round(hss, 4),
+                           pod = round(pod, 3),
+                           far = round(far, 3),
+                           n   = n_pixel_weeks)][order(-hss)])
+
+  cat("\n--- Per-stratum intensification HSS (K=4, ndvi_z, z=-1.5, dom=all), sorted by HSS ---\n")
+  print(skill_binary_lc[K == 4L & ndvi_signal == "ndvi_z" &
+                         direction == "intensification" & z_threshold == -1.5 &
+                         dom_filter == "all",
+                         .(L2_code, nlcd_juliana,
+                           hss = round(hss, 4),
+                           pod = round(pod, 3),
+                           far = round(far, 3),
+                           n   = n_pixel_weeks)][order(-hss)])
 
   invisible(out)
 }
@@ -3106,14 +3589,15 @@ if (length(section_arg) == 0L) {
 } else {
 
 cat(sprintf("Section: %s | Scope: %s%s\n", section_arg, scope_arg,
-            if (section_arg %in% c("categorical_usdm", "continuous_spei",
-                                   "continuous_spei_nlcd",
+            if (section_arg %in% c("categorical_usdm", "categorical_usdm_nlcd",
+                                   "continuous_spei", "continuous_spei_nlcd",
                                    "event_detection", "all"))
               sprintf(" | null_reps: %d", null_reps) else ""))
 
 switch(section_arg,
   align_weekly             = section_align_weekly(scope_arg),
   categorical_usdm         = section_categorical_usdm(scope_arg, null_reps = null_reps),
+  categorical_usdm_nlcd    = section_categorical_usdm_nlcd(scope_arg, null_reps = null_reps),
   within_week_diagnostic   = section_within_week_diagnostic(scope_arg),
   continuous_spei          = section_continuous_spei(scope_arg, null_reps = null_reps),
   continuous_spei_nlcd     = section_continuous_spei_nlcd(scope_arg, null_reps = null_reps),
@@ -3122,6 +3606,7 @@ switch(section_arg,
   all = {
     section_align_weekly(scope_arg)
     section_categorical_usdm(scope_arg, null_reps = null_reps)
+    section_categorical_usdm_nlcd(scope_arg, null_reps = null_reps)
     section_within_week_diagnostic(scope_arg)
     section_continuous_spei(scope_arg, null_reps = null_reps)
     section_continuous_spei_nlcd(scope_arg, null_reps = null_reps)
