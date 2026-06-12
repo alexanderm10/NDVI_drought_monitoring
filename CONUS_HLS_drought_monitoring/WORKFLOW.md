@@ -185,6 +185,13 @@ docker exec conus-hls-drought-monitor Rscript 07_visualize_derivatives.R
 
 ### Phase 6: Validation
 
+#### **Script 00b: NLCD 2019 Extraction** (~25 min; one-time, prerequisite for LC-stratified sections)
+```bash
+docker exec -w /workspace conus-hls-drought-monitor \
+  Rscript 00b_extract_nlcd_2019.R
+```
+Resamples standard NLCD 2019 16-class (from `/data/input_data/nlcd/Annual_NLCD_LndCov_2019_CU_C1V0.tif`) to the 4km HLS grid via `terra::segregate + aggregate(fun="mean")`, joins to valid_pixels, applies the Juliana collapse (crop / forest / grassland / urban_* / other). Output: `/data/gam_models/valid_pixels_nlcd2019.rds` (superset of `valid_pixels_landcover_filtered.rds`; legacy file untouched).
+
 #### **Script 08: Validation Data Setup** (~3-18 hr depending on sections)
 ```bash
 docker exec -w /workspace conus-hls-drought-monitor \
@@ -192,12 +199,20 @@ docker exec -w /workspace conus-hls-drought-monitor \
 ```
 Pulls + rasterizes reference data onto the 4 km Midwest pixel basis. Sections: `ecoregion`, `usdm_download`, `usdm_process`, `gridmet`, `spei`, `gridmet_weekly`, `spei_weekly`, `qc`. Outputs in `/data/validation/` (USDM weekly, GridMET daily/weekly, SPI/SPEI weekly + monthly, ecoregion lookup).
 
-#### **Script 09: Validate Drought Signal** (~5 hr align_weekly; ~20-40 min per analysis section)
+#### **Script 09: Validate Drought Signal** (~5 hr align_weekly; ~20-60 min per analysis section)
 ```bash
 docker exec -w /workspace conus-hls-drought-monitor \
   Rscript 09_validate_drought_signal.R --section=<name> [--scope=10y|13y]
 ```
-Sections: `align_weekly` builds the master pixel-week join (NDVI summaries + USDM + SPEI + ecoregion); the analysis sections (`categorical_usdm`, `continuous_spei`, `event_detection`, `qc`) read the cached join and score the NDVI signal against USDM (categorical, lead-time-K sweep) and SPEI (continuous). USDM is treated as a lagging indicator throughout.
+Sections: `align_weekly` builds the master pixel-week join (NDVI summaries + USDM + SPEI + ecoregion); the analysis sections read the cached join and score the NDVI signal against USDM (categorical, two-track skill) and SPEI (continuous β/r²). Available analysis sections:
+- `within_week_diagnostic` — within-week vs across-week SD ratio per pixel (gates grain choice for event_detection)
+- `categorical_usdm` — v3 two-track (binary onset/end + ordinal within-drought) skill sweep + permutation null
+- `continuous_spei` — pooled + iso_week-FE regression NDVI ~ SPEI per ecoregion (3 SPEI windows × 5 signals)
+- `continuous_spei_nlcd` — LC-stratified version: full eco × {crop, forest, grassland} grid + per-ecoregion LC-interaction model + Wald slopes-differ test
+- `event_detection` — drafted but currently PAUSED; resumes under skill-not-lead-time framing
+- `qc` — stub
+
+The validation question is **NDVI monitor skill against typical drought measures (USDM, SPEI)**. Lead/lag is a diagnostic byproduct, not an optimization target.
 
 ## Data Flow
 
