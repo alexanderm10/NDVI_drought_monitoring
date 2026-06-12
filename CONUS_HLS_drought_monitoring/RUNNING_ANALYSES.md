@@ -1,10 +1,48 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-11 ~15:30 CDT — Phase 6 reframe in progress. Sections A (`continuous_spei`) and C (`within_week_diagnostic`) COMPLETE. Section B (`event_detection`) drafted but **PAUSED for framing redesign** — the "does NDVI provide lead time?" framing I (Claude) used during op-point design conflated "NDVI as leading indicator" with the actual project framing "USDM as lagging indicator." Resuming tomorrow with clearer framing. See [[usdm-lagging-not-ndvi-leading]] memory.
+**Updated**: 2026-06-12 ~10:15 CDT — Phase 6 framing sharpened to *NDVI monitor skill against typical operational drought measures (USDM, SPEI)*. Lead/lag is a diagnostic byproduct, NOT the question. NLCD 2019 16-class extracted to all 129,310 valid pixels via new `00b_extract_nlcd_2019.R` + `valid_pixels_nlcd2019.rds`. Next: extend `09 section_continuous_spei` to add `nlcd_juliana` × `L2_code` cross-stratification to test the corn-belt-reversal-is-crops hypothesis.
 
 ## Active run
 
 (none)
+
+## Session Summary (2026-06-12) — Phase 6 framing sharpened + NLCD 2019 extraction (00b)
+
+### Phase 6 framing — third pass (lock this one in)
+- The question is **skill of NDVI monitor against typical drought measures (USDM, SPEI)**. Full stop.
+- *Not* "does NDVI lead USDM?" (Claude's 2026-06-10/11 framing — biased the op-point design toward maximizing lead).
+- *Not* "USDM is lagging so optimize for tightest correspondence given its lag" (2026-06-11 fallback — still organized around USDM's temporal properties, not skill).
+- Lead/lag observations are *diagnostic byproducts* of skill measurement, never optimization targets.
+- Memory updated: [[phase6-question-is-skill]] (formerly [[usdm-lagging-not-ndvi-leading]] — superseded).
+- Consequence for Section B: keep the helpers (build_events, detect_fires, match, count) as-is; drop the max-lead op-point sweep; headline POD/FAR/HSS/ETS per ecoregion; report median_lead as a diagnostic column.
+
+### NLCD 2019 16-class extraction (00b_extract_nlcd_2019.R) — COMPLETE in 22 min
+- **Why**: legacy `nlcd_code` is a 9-class US Labeled Ecosystems collapse (Forest=4, Herbaceous=8 lumping crop + grass + pasture) sourced from the GDO wildfire project. It cannot distinguish crop from grassland — so the leading hypothesis for the 9.2 Temperate Prairies SPEI reversal ("it's a cropland effect: irrigation + planting/harvest masking") is untestable on the legacy schema.
+- **What**: pulled standard NLCD 2019 16-class (1.32 GB, 30m CONUS, EPSG:5070; via ScienceBase captcha 2026-06-12 morning, into `/data/input_data/nlcd/`). Resampled to 4km HLS grid via `terra::segregate + aggregate(fun="mean")` (segregate splits to per-class 0/1 layers; aggregate→mean of 0/1 gives the class fraction at 4km; which.max + max give modal class + dominance fraction in one pass).
+- **Output**: `/data/gam_models/valid_pixels_nlcd2019.rds` (544 KB) — same 129,310 pixels as legacy, adds columns `nlcd_code_2019` (raw 16-class int), `nlcd_juliana` (collapsed string ∈ {crop, forest, grassland, urban_high/med/low/open, other}), `modal_frac` (0..1), `nlcd_dominant` (logical, ≥0.60). Legacy `valid_pixels_landcover_filtered.rds` is **untouched** — mtime confirmed unchanged. Pipeline invariant safe.
+- **Companion rasters**: `/data/processed_ndvi/land_cover/nlcd_2019_4km_modal.tif` (27 KB, INT1U) + `nlcd_2019_4km_modal_frac.tif` (642 KB, FLT4S), both cropped to Midwest sub-template (320 × 517 cells).
+- **Midwest LC distribution** (n=129,310): crop 47.4% (61,241), grassland 28.4% (36,758), forest 20.0% (25,900), other 2.2%, urban_* 1.95%. Plenty of sample for the corn-belt test.
+- **Dominance**: ~64% of crop, 67% of grassland, 30% of forest cells have `modal_frac ≥ 0.60`. Forests have lower dominance because Midwest forest is in mixed crop/forest mosaic at 4km.
+- **Spot-checks pass**: Iowa corn belt → crop (90% dominance). Mark Twain NF MO → forest 41 (93% dominance). Park Falls WI → forest (NLCD 90 Woody Wetlands per [[forest-wet-collapses-to-forest]]). Madison/Champaign/Des Moines → urban_low. Springfield MO Plateau → grassland/pasture (correct — open ag, not deep Ozark forest).
+- **Legacy vs new disagreement is high**: legacy "8 Herbaceous" splits 53/42 crop/grassland under NLCD 2019. Legacy "4 Forest" splits 47/40 forest / (crop + grassland) — i.e. half of "legacy forest" is now classified as ag at 4km modal. Two different upstream rasters; treat as complementary, not interchangeable.
+
+### Bug fixed mid-session (one-character)
+- Initial run wrote `segregate(other = NA)` and produced all-1.0 dominance fractions with ~77% of pixels mis-classified as NLCD 11 (Open Water). Cause: with `other=NA`, each per-class layer is "1 where this class, NA elsewhere" — `aggregate(fun="mean", na.rm=TRUE)` then averages to exactly 1.0 wherever the class is present, and `which.max` ties on the first listed class (`11L` Open Water). Fix: `other = 0L` — one char. Memory: [[segregate-other-zero-not-na]].
+
+### NLCD download path (for future reference)
+- MRLC and ScienceBase both gate the S3-hosted files behind a captcha; no scriptable URL. The ScienceBase manager URL returns HTML (4 KB), the s3DownloadRequestPageUri is captcha-walled. The legacy NLCD 2019 product bucket (`s3-us-west-2.amazonaws.com/mrlc/`) requires signed requests for any object. Manual browser download at the ScienceBase catalog item page is the path. User downloaded `Annual_NLCD_LndCov_2019_CU_C1V0.zip` from `https://www.sciencebase.gov/catalog/item/664e0d2bd34e702fe8744536` and unzipped to `/data/input_data/nlcd/`.
+
+### Memory additions this session
+- [[phase6-question-is-skill]] (feedback — supersedes [[usdm-lagging-not-ndvi-leading]] file; question is skill, not lead/lag)
+- [[forest-wet-collapses-to-forest]] (feedback — NLCD 90 Woody Wetlands lumps into `forest` per Juliana's empirical test)
+- [[segregate-other-zero-not-na]] (feedback — terra gotcha, one-char bug fix)
+- [[nlcd-2019-extraction]] (project — pointer to `valid_pixels_nlcd2019.rds` + Juliana collapse spec)
+
+### Next session pickup
+- Extend `09_validate_drought_signal.R section_continuous_spei()` to join `nlcd_juliana` from the new file and add it as a stratification dim. Two options on the table:
+  - (a) **Parallel-strata**: add a separate LC-only strata loop alongside the existing L2_code loop → ~5 cells per signal-config (~165 fits, ~1 hr).
+  - (b) **Cross**: `(L2_code × nlcd_juliana)` → ~55 cells per signal-config (~1,650 fits, ~12 hr). Direct answer to "is 9.2 reversal a crop effect?".
+- Recommended: start with (b), or scope down to just the cells where the corn-belt hypothesis is directly testable (9.2 × crop, 9.2 × forest, 8.4 × forest, 8.4 × crop, 9.4 × grassland) — ~5 targeted cells vs the full cross. Discuss before launching.
 
 ## Session Summary (2026-06-11) — Phase 6 reframe + Section C + A; Section B paused
 
