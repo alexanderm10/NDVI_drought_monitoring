@@ -122,8 +122,10 @@ config <- list(
   nlcd_pixel_lookup    = file.path(paths$gam_models, "valid_pixels_nlcd2019.rds"),
   nlcd_modal_frac_threshold   = 0.60,
   nlcd_min_pixels_per_stratum = 500L,
-  event_detection_10y  = file.path(paths$validation_data, "event_detection_10y.rds"),
-  event_detection_13y  = file.path(paths$validation_data, "event_detection_13y.rds")
+  event_detection_10y       = file.path(paths$validation_data, "event_detection_10y.rds"),
+  event_detection_13y       = file.path(paths$validation_data, "event_detection_13y.rds"),
+  event_detection_nlcd_10y  = file.path(paths$validation_data, "event_detection_nlcd_10y.rds"),
+  event_detection_nlcd_13y  = file.path(paths$validation_data, "event_detection_nlcd_13y.rds")
 )
 
 # ------------------------------------------------------------------------------
@@ -3020,6 +3022,12 @@ detect_signal_fires_weekly <- function(dt, signal_col, z_threshold,
 #' nearest fire within +/- lead_window_weeks. lead_weeks = event_week - fire_week
 #' (positive = NDVI led USDM event; negative = NDVI lagged).
 #'
+#' KNOWN BUG (2026-06-15): the `by = pixel_id` reduction and the subsequent
+#' positional assignment back into `events_out` are NOT order-aligned, so per-
+#' event hit/lead_weeks values get scrambled within a pixel. Pixel-aggregate
+#' counts are also affected. Use `match_fires_to_events_vec` instead; this
+#' scalar version is retained only as a reference / corner-case fallback.
+#'
 #' Returns matches data.table with one row per event:
 #'   pixel_id, event_iso_year, event_iso_week, event_week_start, event_type,
 #'   hit (logical), lead_weeks, n_fires_in_window
@@ -3086,6 +3094,10 @@ match_fires_to_events <- function(events_dt, fires_dt, lead_window_weeks) {
 #' Proper false-alarm count: fires that do NOT have ANY event within
 #' ±lead_window_weeks. Symmetric to match_fires_to_events but starting from
 #' fires instead of events. Returns per-pixel false-alarm count (not rate).
+#'
+#' Same row-ordering caveat as match_fires_to_events — use
+#' `count_false_alarms_vec` for production. This scalar reference can drift by
+#' ~1 per several hundred fires vs the vectorized version on random data.
 count_false_alarms <- function(fires_dt, events_dt, lead_window_weeks) {
   if (nrow(fires_dt) == 0L) {
     return(data.table(pixel_id = integer(0), false_alarms = integer(0)))
@@ -3426,6 +3438,350 @@ run_event_permutation_null <- function(dt, events_pixel, fires_cache,
                   lead_window, direction)]
 }
 
+# ==============================================================================
+# Helpers for section_event_detection_nlcd (LC-stratified + SPEI integration)
+# ==============================================================================
+
+#' Vectorized replacement for match_fires_to_events. Same input/output schema,
+#' replaces the per-pixel for-loop with a single non-equi data.table join. ~5-10x
+#' faster on the full Midwest population; identical results on the smoke fixture.
+#'
+#' For each event, returns the nearest fire within ±lead_window_weeks (in weeks).
+#'   hit               = TRUE if any fire in window
+#'   lead_weeks        = event_week - fire_week (positive = NDVI led USDM)
+#'   n_fires_in_window = number of fires in the window
+match_fires_to_events_vec <- function(events_dt, fires_dt, lead_window_weeks) {
+  if (nrow(fires_dt) == 0L) {
+    out <- copy(events_dt)
+    out[, `:=`(hit = FALSE, lead_weeks = NA_integer_, n_fires_in_window = 0L)]
+    return(out)
+  }
+  events_out <- copy(events_dt)
+  events_out[, ev_idx := as.integer(week_start)]
+  events_out[, ev_row := .I]
+  f <- copy(fires_dt)
+  f[, fr_idx := as.integer(week_start)]
+  lead_days <- lead_window_weeks * 7L
+
+  # Non-equi join: join on pixel_id, narrow to events within ±lead_days of each
+  # fire. allow.cartesian = TRUE because events × fires can multiply per pixel.
+  ef <- f[events_out, on = "pixel_id", allow.cartesian = TRUE,
+          .(ev_row, pixel_id, ev_idx, fr_idx,
+            lag_days = i.ev_idx - fr_idx)]
+  ef <- ef[!is.na(fr_idx) & abs(lag_days) <= lead_days]
+
+  if (nrow(ef) == 0L) {
+    events_out[, `:=`(hit = FALSE, lead_weeks = NA_integer_,
+                      n_fires_in_window = 0L)]
+  } else {
+    ef[, abs_lag := abs(lag_days)]
+    # Per event: count fires + nearest fire's lag
+    summary_dt <- ef[, .(n_fires_in_window = .N,
+                         best_lag_days     = lag_days[which.min(abs_lag)]),
+                     by = ev_row]
+    events_out[, `:=`(hit = FALSE, lead_weeks = NA_integer_,
+                      n_fires_in_window = 0L)]
+    events_out[summary_dt, on = "ev_row",
+               `:=`(hit               = TRUE,
+                    lead_weeks        = as.integer(round(i.best_lag_days / 7)),
+                    n_fires_in_window = i.n_fires_in_window)]
+  }
+  events_out[, c("ev_idx", "ev_row") := NULL]
+  events_out
+}
+
+#' Vectorized replacement for count_false_alarms. Returns per-pixel
+#' false_alarms count (fires with NO event within ±lead_window_weeks).
+count_false_alarms_vec <- function(fires_dt, events_dt, lead_window_weeks) {
+  if (nrow(fires_dt) == 0L) {
+    return(data.table(pixel_id = integer(0), false_alarms = integer(0)))
+  }
+  f <- copy(fires_dt)
+  f[, fr_row := .I]
+  f[, fr_idx := as.integer(week_start)]
+
+  if (nrow(events_dt) == 0L) {
+    # No events → every fire is a false alarm
+    return(f[, .(false_alarms = .N), by = pixel_id])
+  }
+
+  e <- copy(events_dt)
+  e[, ev_idx := as.integer(week_start)]
+  lead_days <- lead_window_weeks * 7L
+
+  # Non-equi join: keep fire-event pairs within window
+  fe <- e[f, on = "pixel_id", allow.cartesian = TRUE,
+          .(fr_row, pixel_id, fr_idx, ev_idx,
+            lag_days = ev_idx - fr_idx)]
+  matched_fr_rows <- fe[!is.na(ev_idx) & abs(lag_days) <= lead_days,
+                        unique(fr_row)]
+  # False alarms = fires NOT in matched_fr_rows
+  f[, is_fa := !(fr_row %in% matched_fr_rows)]
+  fa_per_pixel <- f[is_fa == TRUE, .(false_alarms = .N), by = pixel_id]
+  # Fill in pixels with zero false alarms (so downstream merge handles them)
+  zero_px <- setdiff(unique(f$pixel_id), fa_per_pixel$pixel_id)
+  if (length(zero_px) > 0L) {
+    fa_per_pixel <- rbind(fa_per_pixel,
+                          data.table(pixel_id = zero_px, false_alarms = 0L))
+  }
+  fa_per_pixel
+}
+
+#' Detect fires once globally for a (signal × z × K × direction) cell. Wrapper
+#' around detect_signal_fires_weekly that returns NULL fast when no fires fire,
+#' and tags the fires with the signal_col so downstream code can carry them in
+#' a single rbindlist.
+detect_fires_global <- function(dt, signal_col, z_threshold, sustained_weeks,
+                                direction, is_raw_spei = FALSE) {
+  # SPEI is raw (not z-scored); same direction logic, same per-pixel rleid pattern.
+  # detect_signal_fires_weekly already handles is.finite filter.
+  fires <- detect_signal_fires_weekly(dt, signal_col, z_threshold,
+                                      sustained_weeks, direction)
+  if (nrow(fires) == 0L) return(NULL)
+  fires[, `:=`(signal_col      = signal_col,
+               z_threshold     = z_threshold,
+               sustained_weeks = sustained_weeks,
+               direction       = direction,
+               is_raw_spei     = is_raw_spei)]
+  fires
+}
+
+#' Extract SPEI trajectory descriptors per event. For each event (one row in
+#' events_dt with pixel_id + week_start), pull the weekly SPEI series in
+#' [-lookback, +lookforward] weeks and compute summary descriptors using
+#' spei_13w as the canonical window plus mean of spei_4w/spei_26w in the same
+#' window for context.
+#'
+#' Returns events_dt augmented with these columns:
+#'   spei13_at_event       SPEI value at the event week
+#'   spei13_mean_pre       mean of spei_13w in [-lookback, -1]
+#'   spei13_mean_post      mean of spei_13w in [0, +lookforward]
+#'   spei13_min_window     min of spei_13w over the full window
+#'   spei13_max_window     max of spei_13w over the full window
+#'   spei13_trend_post     OLS slope of spei_13w vs week-offset in the post window
+#'   spei13_crossed_m1     TRUE if any spei_13w ≤ -1 in window
+#'   spei13_crossed_m15    TRUE if any spei_13w ≤ -1.5 in window
+#'   spei4_mean_window     mean of spei_4w  over the full window (short-window context)
+#'   spei26_mean_window    mean of spei_26w over the full window (long-window context)
+extract_spei_trajectory_per_event <- function(events_dt, weekly_dt,
+                                              lookback = 8L, lookforward = 8L,
+                                              pixel_chunk = 5000L) {
+  stopifnot(all(c("pixel_id", "week_start") %in% names(events_dt)),
+            all(c("pixel_id", "week_start", "spei_4w", "spei_13w", "spei_26w") %in%
+                names(weekly_dt)))
+
+  spei_cols <- c("spei13_at_event", "spei13_mean_pre", "spei13_mean_post",
+                 "spei13_min_window", "spei13_max_window", "spei13_trend_post",
+                 "spei4_mean_window", "spei26_mean_window")
+  bool_cols <- c("spei13_crossed_m1", "spei13_crossed_m15")
+
+  if (nrow(events_dt) == 0L) {
+    cat("    (no events; skipping SPEI trajectory extraction)\n")
+    out <- copy(events_dt)
+    for (col in spei_cols) out[, (col) := NA_real_]
+    for (col in bool_cols) out[, (col) := NA]
+    return(out)
+  }
+
+  cat(sprintf("    extracting SPEI trajectory for %s events (window ±%dw)...\n",
+              format(nrow(events_dt), big.mark = ","), max(lookback, lookforward)))
+  t0 <- Sys.time()
+
+  ev <- copy(events_dt)
+  ev[, ev_idx := as.integer(week_start)]
+  ev[, ev_row := .I]
+
+  # Chunk events by pixel_id to bound memory of the non-equi join.
+  pixel_batches <- split(unique(ev$pixel_id),
+                         ceiling(seq_along(unique(ev$pixel_id)) / pixel_chunk))
+  cat(sprintf("      %d pixel chunks of <= %d pixels each\n",
+              length(pixel_batches), pixel_chunk))
+
+  desc_list <- vector("list", length(pixel_batches))
+  for (bi in seq_along(pixel_batches)) {
+    pxs <- pixel_batches[[bi]]
+    ev_b <- ev[pixel_id %in% pxs]
+    w_b  <- weekly_dt[pixel_id %in% pxs,
+                      .(pixel_id, week_start, spei_4w, spei_13w, spei_26w)]
+    w_b[, w_idx := as.integer(week_start)]
+
+    # Per-pixel cartesian join is bounded: ev pixel rows × ~520 weekly rows per
+    # pixel for that single chunk only.
+    ew <- w_b[ev_b, on = "pixel_id", allow.cartesian = TRUE,
+              .(ev_row, w_idx, ev_idx,
+                spei_4w, spei_13w, spei_26w,
+                week_offset = (w_idx - ev_idx) %/% 7L)]
+    ew <- ew[!is.na(w_idx) &
+             week_offset >= -lookback &
+             week_offset <=  lookforward]
+
+    desc_list[[bi]] <- ew[, .(
+      spei13_at_event    = {
+        x <- spei_13w[week_offset == 0]
+        if (length(x) > 0L && is.finite(x[1])) x[1] else NA_real_
+      },
+      spei13_mean_pre    = {
+        x <- spei_13w[week_offset < 0 & is.finite(spei_13w)]
+        if (length(x) > 0L) mean(x) else NA_real_
+      },
+      spei13_mean_post   = {
+        x <- spei_13w[week_offset >= 0 & is.finite(spei_13w)]
+        if (length(x) > 0L) mean(x) else NA_real_
+      },
+      spei13_min_window  = {
+        x <- spei_13w[is.finite(spei_13w)]
+        if (length(x) > 0L) min(x) else NA_real_
+      },
+      spei13_max_window  = {
+        x <- spei_13w[is.finite(spei_13w)]
+        if (length(x) > 0L) max(x) else NA_real_
+      },
+      spei13_trend_post  = {
+        ok <- week_offset >= 0 & is.finite(spei_13w)
+        x  <- spei_13w[ok]
+        wk <- week_offset[ok]
+        if (length(x) >= 3L && stats::sd(wk) > 0) {
+          unname(stats::coef(stats::lm(x ~ wk))[2])
+        } else {
+          NA_real_
+        }
+      },
+      spei13_crossed_m1  = any(spei_13w <= -1.0, na.rm = TRUE),
+      spei13_crossed_m15 = any(spei_13w <= -1.5, na.rm = TRUE),
+      spei4_mean_window  = {
+        x <- spei_4w[is.finite(spei_4w)]
+        if (length(x) > 0L) mean(x) else NA_real_
+      },
+      spei26_mean_window = {
+        x <- spei_26w[is.finite(spei_26w)]
+        if (length(x) > 0L) mean(x) else NA_real_
+      }
+    ), by = ev_row]
+
+    if (bi %% 5L == 0L || bi == length(pixel_batches)) {
+      cat(sprintf("      chunk %d/%d done (%.1f min elapsed)\n",
+                  bi, length(pixel_batches),
+                  as.numeric(Sys.time() - t0, units = "mins")))
+    }
+    rm(ev_b, w_b, ew); gc(verbose = FALSE)
+  }
+  desc <- rbindlist(desc_list, use.names = TRUE, fill = TRUE)
+  rm(desc_list); gc(verbose = FALSE)
+
+  out <- copy(events_dt)
+  out[, ev_row := .I]
+  out <- merge(out, desc, by = "ev_row", all.x = TRUE)
+  out[, ev_row := NULL]
+  # Defensive: any event without window matches → set bools to FALSE
+  for (col in bool_cols) {
+    out[is.na(get(col)), (col) := FALSE]
+  }
+  cat(sprintf("      SPEI trajectory done in %.1f min\n",
+              as.numeric(Sys.time() - t0, units = "mins")))
+  out
+}
+
+#' Compute a per-stratum 2×2 contingency for HSS/ETS using the temporal-block
+#' formulation. Each (pixel × block) cell is a trial:
+#'   event_in_block = any USDM event in block (of this event_type/direction)
+#'   fire_in_block  = any matching NDVI fire in block (of this signal × op-point)
+#'
+#' Returns one row per stratum × direction with hits/misses/false_alarms/
+#' correct_negatives + n_blocks_total. Caller computes POD/FAR/HSS/ETS from it.
+#'
+#'   events_dt       — events filtered to direction; needs pixel_id + week_start
+#'   fires_dt        — fires for one (signal × z × K × direction); needs
+#'                     pixel_id + week_start (the start week of the run)
+#'   stratum_map     — data.table mapping pixel_id → stratum_key
+#'   block_weeks     — bin width in weeks (4 default)
+#'   period_weeks    — total study period in weeks (for n_blocks_total)
+compute_temporal_block_contingency <- function(events_dt, fires_dt, stratum_map,
+                                               block_weeks = 4L,
+                                               period_start_wk, period_end_wk) {
+  # block_id = floor((week_idx - period_start) / block_weeks)
+  period_start_idx <- as.integer(period_start_wk)
+  period_end_idx   <- as.integer(period_end_wk)
+  n_blocks <- as.integer(ceiling((period_end_idx - period_start_idx + 1L) /
+                                 (block_weeks * 7L)))
+
+  # Build (pixel × block) flags from events and fires
+  ev_blk <- if (nrow(events_dt) == 0L) {
+    data.table(pixel_id = integer(0), block_id = integer(0))
+  } else {
+    e <- copy(events_dt)
+    e[, block_id := as.integer((as.integer(week_start) - period_start_idx) %/%
+                               (block_weeks * 7L))]
+    unique(e[, .(pixel_id, block_id)])
+  }
+
+  fr_blk <- if (nrow(fires_dt) == 0L) {
+    data.table(pixel_id = integer(0), block_id = integer(0))
+  } else {
+    f <- copy(fires_dt)
+    f[, block_id := as.integer((as.integer(week_start) - period_start_idx) %/%
+                               (block_weeks * 7L))]
+    unique(f[, .(pixel_id, block_id)])
+  }
+
+  # Combine into a single flag table over the pixels in stratum_map.
+  ev_blk[, event_flag := TRUE]
+  fr_blk[, fire_flag  := TRUE]
+  both <- merge(ev_blk, fr_blk, by = c("pixel_id", "block_id"), all = TRUE)
+  both[is.na(event_flag), event_flag := FALSE]
+  both[is.na(fire_flag),  fire_flag  := FALSE]
+
+  # Restrict to pixels in stratum_map; merge stratum_key
+  both <- merge(both, stratum_map, by = "pixel_id")
+  if (nrow(both) == 0L) {
+    return(data.table(stratum_key = character(0),
+                      hits = integer(0), misses = integer(0),
+                      false_alarms = integer(0), correct_negatives = integer(0),
+                      n_blocks_total = integer(0)))
+  }
+
+  # Per-stratum non-zero counts (any cell with event or fire)
+  nonzero <- both[, .(hits         = sum(event_flag &  fire_flag),
+                      misses       = sum(event_flag & !fire_flag),
+                      false_alarms = sum(!event_flag & fire_flag)),
+                  by = stratum_key]
+  # Correct negatives = total cells in stratum - any non-zero cells
+  stratum_n_pix <- stratum_map[, .N, by = stratum_key]
+  setnames(stratum_n_pix, "N", "n_pixels")
+  out <- merge(stratum_n_pix, nonzero, by = "stratum_key", all.x = TRUE)
+  for (col in c("hits", "misses", "false_alarms")) {
+    out[is.na(get(col)), (col) := 0L]
+  }
+  out[, n_blocks_total    := n_pixels * n_blocks]
+  out[, correct_negatives := n_blocks_total - hits - misses - false_alarms]
+  out[, n_pixels := NULL]
+  out[]
+}
+
+#' Append POD/FAR/HSS/ETS/Bias columns to a contingency table.
+compute_skill_metrics <- function(cont_dt) {
+  out <- copy(cont_dt)
+  H  <- as.numeric(out$hits)
+  M  <- as.numeric(out$misses)
+  FA <- as.numeric(out$false_alarms)
+  CN <- as.numeric(out$correct_negatives)
+  N  <- H + M + FA + CN
+  E  <- (H + M) * (H + FA) / pmax(N, 1)  # expected hits under independence
+
+  out[, `:=`(
+    pod  = H / pmax(H + M, 1),
+    far  = FA / pmax(H + FA, 1),
+    bias = (H + FA) / pmax(H + M, 1),
+    hss  = (2 * (H * CN - M * FA)) /
+           pmax((H + M) * (M + CN) + (H + FA) * (FA + CN), 1),
+    ets  = (H - E) / pmax(H + M + FA - E, 1)
+  )]
+  # Handle degenerate cells: zero events OR zero positives → metrics NA
+  out[(H + M) == 0L, `:=`(pod = NA_real_, bias = NA_real_,
+                          hss = NA_real_, ets = NA_real_)]
+  out[(H + FA) == 0L, `:=`(far = NA_real_, bias = NA_real_)]
+  out[]
+}
+
 section_event_detection <- function(scope, null_reps = 5L) {
   cat("\n=== Section: event_detection (scope =", scope,
       ", null_reps =", null_reps, ", grain = WEEKLY) ===\n")
@@ -3521,7 +3877,7 @@ section_event_detection <- function(scope, null_reps = 5L) {
     K_weeks             = K_WEEKS,
     lead_windows        = LEAD_WINDOWS,
     majority_delta      = MAJORITY_DELTA,
-    event_headline      = EVENT_HEADLINE,
+    event_headlines     = EVENT_HEADLINES,
     dropped_pixels      = length(drop_px),
     runtime_minutes     = as.numeric(Sys.time() - t_section, units = "mins"),
     created             = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
@@ -3555,6 +3911,467 @@ section_event_detection <- function(scope, null_reps = 5L) {
   invisible(out)
 }
 
+# ==============================================================================
+# SECTION: event_detection_nlcd
+#
+# LC-stratified, SPEI-aware extension of section_event_detection. Mirrors the
+# NLCD pattern from section_continuous_spei_nlcd / section_categorical_usdm_nlcd
+# and the SKILL framing in [[phase6-question-is-skill]].
+#
+# Differences vs section_event_detection (the predecessor):
+#   1. Stratified per (L2_code × nlcd_juliana × dom_filter) — 5 LC classes (with
+#      collapse_urban_to_2tier) × 11 ecoregions × 2 dom variants ≈ 100 stratum
+#      groups. Each is reported in the skill table.
+#   2. Adds SPEI as an additional fire-signal family (spei_4w, spei_13w,
+#      spei_26w used raw, since SPEI is already standardized upstream). Same
+#      threshold semantics: onset fires at SPEI ≤ -z, recovery at SPEI ≥ +z.
+#      Total fire signals = 8 (ndvi_z + 4 derivative windows + 3 SPEI windows).
+#   3. Augments events_pixel with SPEI within-window trajectory descriptors
+#      (±8wk around each event): mean_pre, mean_post, min/max, trend, crossings.
+#   4. Replaces hit-rate-only skill with proper POD/FAR/HSS/ETS/Bias from a 2×2
+#      contingency built via 4-week temporal blocks (the only way to get a
+#      defensible correct_negatives count for HSS).
+#   5. Uses vectorized match_fires_to_events_vec / count_false_alarms_vec
+#      (5–10x faster than the scalar predecessors for the full population).
+#   6. Trimmed op-point grid: 3 z × 3 K × 2 dirs (36 ops/signal) × 8 signals = 288
+#      ops/stratum × 2 match tolerances (4w/8w) for lead-distribution diagnostic.
+#
+# Skipped on first pass (matches NLCD-section convention):
+#   - Permutation null (null_reps=0 default; add later if needed)
+#   - LC-interaction Wald test (no clean single-equation analog for skill metrics
+#     -- POD/FAR/HSS aren't slopes)
+#
+# Output: event_detection_nlcd_<scope>.rds
+#   events_pixel       per-pixel USDM transitions + SPEI trajectory cols
+#   events_ecoregion   per (L2 × week) majority-shift events (no SPEI cols)
+#   skill_lc           per (stratum × signal × z × K × dir): HSS/ETS/POD/FAR/Bias
+#   lead_distributions_lc per (stratum × signal × z × K × dir × lead_window):
+#                      hit_rate + lead percentiles (4w + 8w match tolerances)
+#   pixel_event_map    per (pixel × event_type × headline_op): hit + lead_weeks
+#                      at 2 headline op-points (ndvi_z + spei_13w) for maps
+#   meta               scope, op_point grid, runtime, signal definitions
+# ==============================================================================
+
+# Headline op-points for pixel_event_map (carry 2 ops × 2 dirs = 4 spatial layers
+# per event_type). NDVI magnitude side-by-side with SPEI's medium window.
+EVENT_DETECTION_NLCD_HEADLINES <- list(
+  list(signal = "ndvi_z",   z = 1.5, K = 2L, lead_window = 8L),
+  list(signal = "spei_13w", z = 1.5, K = 2L, lead_window = 8L)
+)
+
+section_event_detection_nlcd <- function(scope, null_reps = 0L, smoke = FALSE) {
+  cat("\n=== Section: event_detection_nlcd (scope =", scope,
+      ", null_reps =", null_reps, ", smoke =", smoke, ") ===\n")
+  stopifnot(scope %in% c("10y", "13y"), is.numeric(null_reps), null_reps >= 0L)
+  null_reps <- as.integer(null_reps)
+  if (null_reps > 0L) {
+    cat("  NOTE: null model not implemented on first pass.\n")
+    cat("        null_reps will be stored in meta but no null loop will run.\n")
+  }
+
+  in_file  <- if (scope == "10y") config$align_out_10y           else config$align_out_13y
+  out_file <- if (scope == "10y") config$event_detection_nlcd_10y else config$event_detection_nlcd_13y
+
+  if (!file.exists(in_file)) {
+    stop("Cache file missing: ", in_file,
+         "\n  Run --section=align_weekly --scope=", scope, " first.")
+  }
+  if (!file.exists(config$nlcd_pixel_lookup)) {
+    stop("NLCD pixel lookup missing: ", config$nlcd_pixel_lookup,
+         "\n  Run 00b_extract_nlcd_2019.R first.")
+  }
+  cat(sprintf("Input:  %s (%.1f GB)\n", basename(in_file), file.size(in_file) / 1e9))
+  cat(sprintf("NLCD:   %s\n", basename(config$nlcd_pixel_lookup)))
+  cat(sprintf("Output: %s\n", basename(out_file)))
+
+  t_section <- Sys.time()
+
+  ANOM_COLS    <- c("ndvi_anom_mean",
+                    "deriv_w03_anom_mean", "deriv_w07_anom_mean",
+                    "deriv_w14_anom_mean", "deriv_w30_anom_mean")
+  NDVI_SIGNALS <- c("ndvi_z",
+                    "deriv_w03_z", "deriv_w07_z", "deriv_w14_z", "deriv_w30_z")
+  SPEI_SIGNALS <- c("spei_4w", "spei_13w", "spei_26w")
+  ALL_SIGNALS  <- c(NDVI_SIGNALS, SPEI_SIGNALS)
+  Z_THRESHOLDS <- c(1.0, 1.5, 2.0)
+  K_WEEKS      <- c(1L, 2L, 4L)
+  LEAD_WINDOWS <- c(4L, 8L)
+  DIRECTIONS   <- c("onset", "recovery")
+  BLOCK_WEEKS  <- 4L              # for temporal-block contingency
+  MAJORITY_DELTA  <- 0.10
+  MIN_VALID_WEEKS <- 30L
+
+  if (smoke) {
+    cat("\n  SMOKE MODE: trimming to 2 ecoregions × 3 LCs × 1 signal × 1 op-point\n")
+    SMOKE_ECOS    <- c("9.4", "8.4")
+    ALL_SIGNALS   <- c("ndvi_z", "spei_13w")
+    Z_THRESHOLDS  <- 1.5
+    K_WEEKS       <- 2L
+    LEAD_WINDOWS  <- c(4L, 8L)
+  }
+
+  # --- 1. Load cache, slim columns ---
+  cat("\n[1] Load align_weekly cache, slim columns...\n")
+  dt <- as.data.table(readRDS_retry(in_file))
+  cat(sprintf("  raw: %s rows x %d cols\n",
+              format(nrow(dt), big.mark = ","), ncol(dt)))
+  keep_cols <- c("pixel_id", "iso_year", "iso_week", "week_start",
+                 ANOM_COLS, SPEI_SIGNALS, "usdm", "L2_code", "L2_name")
+  dt <- dt[, ..keep_cols]
+  gc(verbose = FALSE)
+
+  n_px_in <- uniqueN(dt$pixel_id)
+  cat(sprintf("  pixel count: %d (expected %d)\n", n_px_in, EXPECTED_VALID_PIXELS))
+
+  # --- 2. Join NLCD info ---
+  cat("\n[2] Join nlcd_juliana + modal_frac from valid_pixels_nlcd2019.rds...\n")
+  v_nlcd <- as.data.table(readRDS_retry(config$nlcd_pixel_lookup))
+  stopifnot(all(c("pixel_id", "nlcd_juliana", "modal_frac") %in% names(v_nlcd)))
+  dt <- merge(dt, v_nlcd[, .(pixel_id, nlcd_juliana, modal_frac)],
+              by = "pixel_id", all.x = TRUE)
+  n_na <- sum(is.na(dt$nlcd_juliana))
+  if (n_na > 0L) {
+    stop(sprintf("Join drift: %d rows have NA nlcd_juliana. Pixel set mismatch ",
+                 n_na),
+         "between align_weekly cache and valid_pixels_nlcd2019.rds.")
+  }
+  collapse_urban_to_2tier(dt)
+  cat(sprintf("  after urban 2-tier collapse; LC distribution (rows): %s\n",
+              paste(sprintf("%s=%s", names(table(dt$nlcd_juliana)),
+                            format(as.integer(table(dt$nlcd_juliana)),
+                                   big.mark = ",")),
+                    collapse = ", ")))
+  rm(v_nlcd); gc(verbose = FALSE)
+
+  # --- 3. z-standardize NDVI signals (NOT SPEI — used raw) ---
+  cat("\n[3] z-standardize 5 NDVI signals (SPEI stays raw)...\n")
+  setorder(dt, pixel_id, week_start)
+  drop_px <- zstandardize_signals_per_pixel(dt, ANOM_COLS, NDVI_SIGNALS,
+                                            min_valid_weeks = MIN_VALID_WEEKS)
+  if (length(drop_px) > 0L) dt <- dt[!pixel_id %in% drop_px]
+  dt[, (ANOM_COLS) := NULL]
+  gc(verbose = FALSE)
+  cat(sprintf("  after drops: %s rows x %d pixels\n",
+              format(nrow(dt), big.mark = ","), uniqueN(dt$pixel_id)))
+
+  # --- 4. Build stratum_key columns (eco × LC × dom) ---
+  cat("\n[4] Build stratum_key columns (full eco x LC_STRATA_LEVELS cross)...\n")
+  eco_codes_all <- sort(unique(dt$L2_code[!is.na(dt$L2_code)]))
+  if (smoke) eco_codes_all <- intersect(eco_codes_all, SMOKE_ECOS)
+  LC_STRATA <- as.data.table(expand.grid(
+    L2_code      = eco_codes_all,
+    nlcd_juliana = LC_STRATA_LEVELS,
+    stringsAsFactors = FALSE
+  ))
+  LC_STRATA[, key := paste(L2_code, nlcd_juliana, sep = "|")]
+  cat(sprintf("  built %d (eco x LC) cells across %d ecoregions x %d LC classes\n",
+              nrow(LC_STRATA), length(eco_codes_all), length(LC_STRATA_LEVELS)))
+
+  dt[, lc_eco_key := paste(L2_code, nlcd_juliana, sep = "|")]
+  targeted_set <- LC_STRATA$key
+  dt[, stratum_key_all := fifelse(lc_eco_key %in% targeted_set,
+                                  paste(lc_eco_key, "all", sep = "|"),
+                                  NA_character_)]
+  dt[, stratum_key_dom := fifelse(lc_eco_key %in% targeted_set &
+                                  modal_frac >= config$nlcd_modal_frac_threshold,
+                                  paste(lc_eco_key, "dom", sep = "|"),
+                                  NA_character_)]
+  dt[, lc_eco_key := NULL]
+
+  if (smoke) {
+    # In smoke mode, drop rows outside the smoke ecoregions to make the fire
+    # detection + contingency loops tractable in ~10 min.
+    dt <- dt[L2_code %in% SMOKE_ECOS]
+    cat(sprintf("  smoke filter: %s rows in %d ecoregions\n",
+                format(nrow(dt), big.mark = ","), length(SMOKE_ECOS)))
+  }
+
+  # --- 5. Build USDM events (pixel + ecoregion-aggregate) ---
+  cat("\n[5] Build USDM events (pixel + ecoregion-aggregate)...\n")
+  events_pixel <- build_pixel_events(dt[, .(pixel_id, iso_year, iso_week,
+                                            week_start, usdm)])
+  cat(sprintf("  Per-pixel events: %s onset + %s recovery\n",
+              format(sum(events_pixel$event_type == "onset"),    big.mark = ","),
+              format(sum(events_pixel$event_type == "recovery"), big.mark = ",")))
+
+  events_eco <- build_ecoregion_events(
+    dt[, .(pixel_id, iso_year, iso_week, week_start, usdm, L2_code, L2_name)],
+    majority_delta = MAJORITY_DELTA)
+  cat(sprintf("  Eco-aggregate events (≥%.0f%% w/w shift): %d onset + %d recovery\n",
+              100 * MAJORITY_DELTA,
+              sum(events_eco$event_type == "onset"),
+              sum(events_eco$event_type == "recovery")))
+
+  # --- 6. Augment events_pixel with SPEI trajectory ---
+  cat("\n[6] Augment events_pixel with SPEI within-window trajectory (±8wk)...\n")
+  spei_weekly <- dt[, .(pixel_id, week_start,
+                        spei_4w, spei_13w, spei_26w)]
+  events_pixel <- extract_spei_trajectory_per_event(events_pixel, spei_weekly,
+                                                    lookback = 8L,
+                                                    lookforward = 8L)
+  rm(spei_weekly); gc(verbose = FALSE)
+
+  # --- 7. Detect fires globally per (signal × z × K × direction) ---
+  cat("\n[7] Detect fires globally per op-cell...\n")
+  t_fires <- Sys.time()
+  fires_list <- list()
+  fire_idx <- 0L
+  total_fire_cells <- length(ALL_SIGNALS) * length(Z_THRESHOLDS) *
+                      length(K_WEEKS) * length(DIRECTIONS)
+  cat(sprintf("  %d total fire-detection passes\n", total_fire_cells))
+
+  for (sig in ALL_SIGNALS) {
+    is_spei <- startsWith(sig, "spei_")
+    # For SPEI fires, use the raw col directly; for NDVI use the z col.
+    sig_col_in_dt <- sig
+    if (!(sig_col_in_dt %in% names(dt))) {
+      cat(sprintf("    WARN: signal %s not in dt; skipping\n", sig))
+      next
+    }
+    for (z in Z_THRESHOLDS) {
+      for (K in K_WEEKS) {
+        for (dir_ in DIRECTIONS) {
+          fire_idx <- fire_idx + 1L
+          fires <- detect_fires_global(dt, sig_col_in_dt, z, K, dir_,
+                                       is_raw_spei = is_spei)
+          if (!is.null(fires)) {
+            fires_list[[length(fires_list) + 1L]] <- fires
+          }
+          if (fire_idx %% 12L == 0L) {
+            elapsed <- as.numeric(Sys.time() - t_fires, units = "mins")
+            cat(sprintf("    %d/%d fire cells (%.1f min, ETA %.1f min)\n",
+                        fire_idx, total_fire_cells, elapsed,
+                        elapsed * (total_fire_cells - fire_idx) / fire_idx))
+          }
+        }
+      }
+    }
+  }
+  fires_all <- rbindlist(fires_list, use.names = TRUE, fill = TRUE)
+  rm(fires_list); gc(verbose = FALSE)
+  cat(sprintf("  fires detected: %s total rows in %.1f min\n",
+              format(nrow(fires_all), big.mark = ","),
+              as.numeric(Sys.time() - t_fires, units = "mins")))
+
+  # --- 8. Per-stratum skill loop ---
+  # For each (stratum_track in c("all","dom"), signal × z × K × dir):
+  #   - Build stratum_map (pixel_id → stratum_key) restricted to the track
+  #   - Restrict events_pixel + fires to that stratum's pixels
+  #   - Build 2×2 contingency (4-week blocks), compute POD/FAR/HSS/ETS/Bias
+  #   - For each lead_window: match fires to events for lead percentiles
+  cat("\n[8] Per-stratum skill loop (contingency + lead percentiles)...\n")
+  t_skill <- Sys.time()
+
+  # Period bounds for n_blocks_total in the contingency:
+  period_start_wk <- min(dt$week_start)
+  period_end_wk   <- max(dt$week_start)
+  cat(sprintf("  period: %s to %s (%.0f weeks)\n",
+              period_start_wk, period_end_wk,
+              as.numeric(period_end_wk - period_start_wk) / 7))
+
+  # Cache the two stratum_maps (pixel_id → stratum_key); unique by pixel.
+  stratum_map_all <- unique(dt[!is.na(stratum_key_all),
+                               .(pixel_id, stratum_key = stratum_key_all)])
+  stratum_map_dom <- unique(dt[!is.na(stratum_key_dom),
+                               .(pixel_id, stratum_key = stratum_key_dom)])
+  cat(sprintf("  stratum maps: %d (all) + %d (dom) pixel→stratum rows\n",
+              nrow(stratum_map_all), nrow(stratum_map_dom)))
+
+  # Pre-index fires by op for quick slicing
+  setkey(fires_all, signal_col, z_threshold, sustained_weeks, direction)
+  # Pre-index events by direction for quick slicing
+  setkey(events_pixel, event_type)
+
+  skill_rows <- list()
+  lead_rows  <- list()
+  total_ops  <- length(ALL_SIGNALS) * length(Z_THRESHOLDS) * length(K_WEEKS) *
+                length(DIRECTIONS)
+  op_idx <- 0L
+
+  for (sig in ALL_SIGNALS) {
+    for (z in Z_THRESHOLDS) {
+      for (K in K_WEEKS) {
+        for (dir_ in DIRECTIONS) {
+          op_idx <- op_idx + 1L
+          # Pull this op's fires
+          f_op <- fires_all[.(sig, z, K, dir_), nomatch = 0L,
+                            .(pixel_id, week_start)]
+          # Pull this direction's events (same for both stratum tracks)
+          e_op <- events_pixel[event_type == dir_,
+                               .(pixel_id, week_start, iso_year, iso_week)]
+
+          for (stratum_track in c("all", "dom")) {
+            stratum_map <- if (stratum_track == "all") stratum_map_all else stratum_map_dom
+            if (nrow(stratum_map) == 0L) next
+            # Restrict events + fires to pixels in this track
+            f_t <- f_op[pixel_id %in% stratum_map$pixel_id]
+            e_t <- e_op[pixel_id %in% stratum_map$pixel_id]
+
+            # 2×2 contingency + skill metrics (block-based)
+            cont <- compute_temporal_block_contingency(
+              e_t, f_t, stratum_map,
+              block_weeks    = BLOCK_WEEKS,
+              period_start_wk = period_start_wk,
+              period_end_wk   = period_end_wk)
+            if (nrow(cont) > 0L) {
+              cont <- compute_skill_metrics(cont)
+              cont[, `:=`(signal_col      = sig,
+                          z_threshold     = z,
+                          sustained_weeks = K,
+                          direction       = dir_,
+                          dom_filter      = stratum_track)]
+              skill_rows[[length(skill_rows) + 1L]] <- cont
+            }
+
+            # Per-event matching for lead percentiles (per lead_window)
+            for (lead in LEAD_WINDOWS) {
+              matches <- match_fires_to_events_vec(e_t, f_t, lead)
+              if (nrow(matches) == 0L) next
+              # Attach stratum_key for grouping
+              matches <- merge(matches, stratum_map, by = "pixel_id")
+              ld <- matches[, .(
+                n_events     = .N,
+                n_hits       = sum(hit, na.rm = TRUE),
+                hit_rate     = mean(hit, na.rm = TRUE),
+                median_lead  = if (any(hit, na.rm = TRUE)) as.numeric(median(lead_weeks[hit], na.rm = TRUE)) else NA_real_,
+                mean_lead    = if (any(hit, na.rm = TRUE)) as.numeric(mean(lead_weeks[hit],   na.rm = TRUE)) else NA_real_,
+                p10_lead     = if (any(hit, na.rm = TRUE)) as.numeric(quantile(lead_weeks[hit], 0.10, na.rm = TRUE)) else NA_real_,
+                p25_lead     = if (any(hit, na.rm = TRUE)) as.numeric(quantile(lead_weeks[hit], 0.25, na.rm = TRUE)) else NA_real_,
+                p75_lead     = if (any(hit, na.rm = TRUE)) as.numeric(quantile(lead_weeks[hit], 0.75, na.rm = TRUE)) else NA_real_,
+                p90_lead     = if (any(hit, na.rm = TRUE)) as.numeric(quantile(lead_weeks[hit], 0.90, na.rm = TRUE)) else NA_real_,
+                pct_lead_pos = if (any(hit, na.rm = TRUE)) as.numeric(mean(lead_weeks[hit] > 0, na.rm = TRUE)) else NA_real_
+              ), by = stratum_key]
+              ld[, `:=`(signal_col      = sig,
+                        z_threshold     = z,
+                        sustained_weeks = K,
+                        direction       = dir_,
+                        lead_window     = lead,
+                        dom_filter      = stratum_track)]
+              lead_rows[[length(lead_rows) + 1L]] <- ld
+            }
+          }
+          if (op_idx %% 8L == 0L) {
+            elapsed <- as.numeric(Sys.time() - t_skill, units = "mins")
+            cat(sprintf("    op %d/%d (%.1f min, ETA %.1f min)\n",
+                        op_idx, total_ops, elapsed,
+                        elapsed * (total_ops - op_idx) / op_idx))
+          }
+        }
+      }
+    }
+  }
+  skill_lc <- rbindlist(skill_rows, use.names = TRUE, fill = TRUE)
+  lead_distributions_lc <- rbindlist(lead_rows, use.names = TRUE, fill = TRUE)
+  rm(skill_rows, lead_rows); gc(verbose = FALSE)
+  # Parse stratum_key into (L2_code, nlcd_juliana, dom_filter_token)
+  for (tbl in list(skill_lc, lead_distributions_lc)) {
+    if (nrow(tbl) > 0L) {
+      parts <- tstrsplit(tbl$stratum_key, "|", fixed = TRUE)
+      tbl[, `:=`(L2_code        = parts[[1]],
+                 nlcd_juliana   = parts[[2]],
+                 dom_filter_tok = parts[[3]])]
+    }
+  }
+  cat(sprintf("  skill_lc rows: %s | lead rows: %s | %.1f min total\n",
+              format(nrow(skill_lc), big.mark = ","),
+              format(nrow(lead_distributions_lc), big.mark = ","),
+              as.numeric(Sys.time() - t_skill, units = "mins")))
+
+  # --- 9. Pixel-level event map at headline op-points ---
+  cat("\n[9] Build pixel_event_map at headline op-points...\n")
+  hdl_rows <- list()
+  for (hdl in EVENT_DETECTION_NLCD_HEADLINES) {
+    for (dir_ in DIRECTIONS) {
+      f_op <- fires_all[.(hdl$signal, hdl$z, hdl$K, dir_), nomatch = 0L,
+                        .(pixel_id, week_start)]
+      e_op <- events_pixel[event_type == dir_,
+                           .(pixel_id, week_start, iso_year, iso_week)]
+      if (nrow(e_op) == 0L) next
+      m <- match_fires_to_events_vec(e_op, f_op, hdl$lead_window)
+      m[, `:=`(headline_signal = hdl$signal, event_type = dir_)]
+      hdl_rows[[length(hdl_rows) + 1L]] <- m[, .(pixel_id, week_start,
+                                                  iso_year, iso_week,
+                                                  headline_signal,
+                                                  event_type, hit, lead_weeks,
+                                                  n_fires_in_window)]
+    }
+  }
+  pixel_event_map <- if (length(hdl_rows)) {
+    rbindlist(hdl_rows, use.names = TRUE, fill = TRUE)
+  } else {
+    data.table()
+  }
+  cat(sprintf("  pixel_event_map rows: %s\n",
+              format(nrow(pixel_event_map), big.mark = ",")))
+
+  # --- 10. Assemble + save ---
+  meta <- list(
+    scope             = scope,
+    scope_years       = if (scope == "10y") 2016:2025 else 2013:2025,
+    lc_strata         = LC_STRATA,
+    lc_strata_levels  = LC_STRATA_LEVELS,
+    nlcd_modal_frac_threshold   = config$nlcd_modal_frac_threshold,
+    null_reps         = null_reps,
+    all_signals       = ALL_SIGNALS,
+    ndvi_signals      = NDVI_SIGNALS,
+    spei_signals      = SPEI_SIGNALS,
+    z_thresholds      = Z_THRESHOLDS,
+    K_weeks           = K_WEEKS,
+    lead_windows      = LEAD_WINDOWS,
+    directions        = DIRECTIONS,
+    block_weeks       = BLOCK_WEEKS,
+    majority_delta    = MAJORITY_DELTA,
+    event_headlines   = EVENT_DETECTION_NLCD_HEADLINES,
+    min_valid_weeks   = MIN_VALID_WEEKS,
+    dropped_pixels    = length(drop_px),
+    period_start_wk   = period_start_wk,
+    period_end_wk     = period_end_wk,
+    smoke             = smoke,
+    runtime_minutes   = as.numeric(Sys.time() - t_section, units = "mins"),
+    created           = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+  )
+
+  out <- list(
+    events_pixel          = events_pixel,
+    events_ecoregion      = events_eco,
+    skill_lc              = skill_lc,
+    lead_distributions_lc = lead_distributions_lc,
+    pixel_event_map       = pixel_event_map,
+    meta                  = meta
+  )
+
+  cat(sprintf("\nSaving %s...\n", basename(out_file)))
+  saveRDS_validated(out, out_file, compress = "xz")
+  cat(sprintf("  wrote %.2f MB in %.1f min total\n",
+              file.size(out_file) / 1e6, meta$runtime_minutes))
+
+  # --- Quick summary ---
+  options(datatable.print.nrows = 60L, datatable.print.topn = 60L)
+  cat("\n--- HSS summary (ndvi_z, z=1.5, K=2, onset, dom=all), sorted by HSS ---\n")
+  q1 <- skill_lc[signal_col == "ndvi_z" & z_threshold == 1.5 &
+                 sustained_weeks == 2L & direction == "onset" &
+                 dom_filter == "all"]
+  if (nrow(q1) > 0L) {
+    print(q1[order(-hss),
+             .(L2_code, nlcd_juliana,
+               hits, misses, false_alarms,
+               pod = round(pod, 3), far = round(far, 3),
+               hss = round(hss, 3), ets = round(ets, 3))])
+  }
+
+  cat("\n--- SPEI sanity (mean spei13_mean_post per event_type) ---\n")
+  if (all(c("spei13_mean_post", "event_type") %in% names(events_pixel))) {
+    print(events_pixel[, .(n_events    = .N,
+                           mean_spei13_post = round(mean(spei13_mean_post,
+                                                         na.rm = TRUE), 3),
+                           med_spei13_post  = round(median(spei13_mean_post,
+                                                           na.rm = TRUE), 3)),
+                       by = event_type])
+  }
+
+  invisible(out)
+}
+
 section_qc <- function(scope) {
   cat("\n=== Section: qc (scope =", scope, ") — STUB ===\n")
   cat("Not yet implemented. Will audit:\n")
@@ -3571,6 +4388,7 @@ args <- commandArgs(trailingOnly = TRUE)
 section_arg   <- gsub("^--section=",   "", grep("^--section=",   args, value = TRUE))
 scope_arg     <- gsub("^--scope=",     "", grep("^--scope=",     args, value = TRUE))
 null_reps_arg <- gsub("^--null-reps=", "", grep("^--null-reps=", args, value = TRUE))
+smoke_flag    <- any(args == "--smoke")
 if (length(scope_arg) == 0L) scope_arg <- "10y"  # default per design sketch
 if (!scope_arg %in% c("10y", "13y")) stop("--scope must be '10y' or '13y'")
 
@@ -3588,11 +4406,13 @@ if (length(section_arg) == 0L) {
   invisible(NULL)
 } else {
 
-cat(sprintf("Section: %s | Scope: %s%s\n", section_arg, scope_arg,
+cat(sprintf("Section: %s | Scope: %s%s%s\n", section_arg, scope_arg,
             if (section_arg %in% c("categorical_usdm", "categorical_usdm_nlcd",
                                    "continuous_spei", "continuous_spei_nlcd",
-                                   "event_detection", "all"))
-              sprintf(" | null_reps: %d", null_reps) else ""))
+                                   "event_detection", "event_detection_nlcd",
+                                   "all"))
+              sprintf(" | null_reps: %d", null_reps) else "",
+            if (smoke_flag) " | SMOKE" else ""))
 
 switch(section_arg,
   align_weekly             = section_align_weekly(scope_arg),
@@ -3602,6 +4422,7 @@ switch(section_arg,
   continuous_spei          = section_continuous_spei(scope_arg, null_reps = null_reps),
   continuous_spei_nlcd     = section_continuous_spei_nlcd(scope_arg, null_reps = null_reps),
   event_detection          = section_event_detection(scope_arg, null_reps = null_reps),
+  event_detection_nlcd     = section_event_detection_nlcd(scope_arg, null_reps = null_reps, smoke = smoke_flag),
   qc                       = section_qc(scope_arg),
   all = {
     section_align_weekly(scope_arg)
@@ -3610,7 +4431,7 @@ switch(section_arg,
     section_within_week_diagnostic(scope_arg)
     section_continuous_spei(scope_arg, null_reps = null_reps)
     section_continuous_spei_nlcd(scope_arg, null_reps = null_reps)
-    section_event_detection(scope_arg, null_reps = null_reps)
+    section_event_detection_nlcd(scope_arg, null_reps = null_reps)
     section_qc(scope_arg)
   },
   stop("Unknown section: ", section_arg)
