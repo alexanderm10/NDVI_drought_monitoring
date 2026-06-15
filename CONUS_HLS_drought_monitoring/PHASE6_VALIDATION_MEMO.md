@@ -827,3 +827,79 @@ The combination of "frequent transitions" + "meteorologically meaningful respons
 6. **Pre-existing carryover** (memory: `phase6-next-session-plan`): 8.1 + 5.2 grass-worst DJF-excluded diagnostic; 8.4 Ozark "USDM-WORKS-but-SPEI-SILENT" deep dive; the figures already enumerated in the 2026-06-12 plan.
 7. **Ensemble exploration** — does (NDVI fire OR SPEI fire) outperform either alone at the event level? Cheap to compute from the existing outputs (no new model fits needed). If the 4-5% concurrent + 19% NDVI-only + 22% SPEI-only pattern holds across strata, an ensemble has obvious POD upside but ambiguous FAR/HSS impact.
 8. **Memo / paper draft prep** — Phase 6 now has the full picture: A (state), B (transitions), USDM/SPEI references both stratified by LC. The "skill of an NDVI drought monitor" question can be answered.
+
+---
+
+# Glossary of acronyms used throughout Phase 6
+
+Keep this near the top of any external write-up — multiple acronyms collide across literatures (POD / FAR / HSS / ETS from forecast verification; SPEI / SPI / USDM / NDVI from drought / remote-sensing). Established 2026-06-15 during Section B figure-pass review.
+
+| Acronym | Meaning |
+|---|---|
+| **NDVI** | Normalized Difference Vegetation Index — vegetation greenness from Landsat / Sentinel-2 HLS |
+| **SPEI** | Standardized Precipitation-Evapotranspiration Index — meteorological drought index, water balance (precip − PET) standardized to ~N(0,1); negative = dry |
+| **SPI** | Standardized Precipitation Index — precip-only standardized index (also in cache, less-used in Phase 6) |
+| **USDM** | US Drought Monitor — operational consensus weekly product. Classes: None / D0 (abnormally dry) / D1 (moderate) / D2 (severe) / D3 (extreme) / D4 (exceptional) |
+| **POD** | Probability of Detection (hit rate) = hits / (hits + misses). Ranges [0, 1] |
+| **FAR** | False Alarm Ratio = false_alarms / (hits + false_alarms). Ranges [0, 1] |
+| **HSS** | Heidke Skill Score — 2×2 categorical skill vs chance. Ranges [−1, +1]; 0 = no skill |
+| **ETS** | Equitable Threat Score (a.k.a. Gilbert Skill Score) — variant of HSS adjusted for randomly-correct hits |
+| **β / r²** | Per-stratum regression slope and within-R² (Section A: NDVI z vs SPEI raw via `fixest::feols`) |
+| **ρ** | Spearman rank correlation (used in Section A++ `categorical_usdm` within-drought analysis) |
+| **z / z-anomaly** | Per-pixel-standardized anomaly: (signal − per-pixel mean) / per-pixel SD. So a normally-green pixel that gets stressed shows up as negative z |
+| **K** | Sustained-weeks requirement — signal must stay past threshold for K consecutive weeks to count as "fired" |
+| **fire** | When a signal crosses its threshold and sustains for K weeks. Section B's atomic unit of analysis |
+| **lead_window** | Match tolerance (weeks) for pairing a fire to a USDM event (±N weeks around the event) |
+| **L2 / L2_code** | EPA Level II Ecoregion (e.g., 9.4, 8.3, 5.2) — geographic-ecological strata used throughout |
+| **LC** | Land cover from NLCD 2019, collapsed via Juliana's schema to: crop, forest, grassland, urban_dense, urban_diffuse, (other) |
+| **dom / all** | Two-track LC stratification: "dom" = only pixels where modal LC class covers ≥60% of the 4 km cell; "all" = every pixel in stratum |
+| **modal_frac** | Fraction of the 4 km cell covered by the dominant NLCD class (0..1) |
+| **spei_4w / 13w / 26w** | SPEI computed over 4-week, 13-week, 26-week accumulation windows |
+| **deriv_w03_z, etc.** | Standardized NDVI derivative anomaly at window widths of 3, 7, 14, 30 days |
+| **continuous_spei (Section A)** | `09_validate_drought_signal.R` section: regresses NDVI z on SPEI raw, headline β |
+| **categorical_usdm (Section A++)** | Confusion-matrix analog on USDM categorical data, headline HSS |
+| **event_detection (Section B)** | Anchored on USDM transitions, asks when NDVI/SPEI fires near the event |
+| **`_nlcd` suffix** | LC-stratified version of the section (always preferred for headline claims) |
+| **D0+** | USDM D0 or worse (any drought class). Used as the "onset" target in Section B |
+| **onset / recovery** | USDM transitions: onset = none → D0+; recovery = any drought → none |
+| **HLS** | Harmonized Landsat-Sentinel (NASA data product combining L8/L9 + Sentinel-2 to harmonized 30m surface reflectance) |
+| **DEWS** | Drought Early Warning System (NIDIS regional program — Midwest DEWS is our analysis domain) |
+| **GAM / GAMM** | Generalized Additive Model / GAM with Mixed effects. The upstream NDVI baseline fitting (scripts 01–06) |
+| **DOY / yday** | Day-of-year (1..365/366) |
+| **ISO week** | ISO 8601 week number — weekly aggregation grain used throughout Phase 6 |
+| **MIDWEST domain** | 1976 × 1212 km region covering 14 states / 129,310 land-filtered pixels (NOT CONUS despite the directory name) |
+
+---
+
+# Figures log (Phase 6 visualization pass — `10_phase6_figures.R`)
+
+All figures land in `/data/figures/phase6/`. Built incrementally starting 2026-06-15. Naming: `phase6_<figN>_<slug>.png`.
+
+## Figure 1: NDVI ⊥ SPEI complementarity (per ecoregion)
+`phase6_fig1_ndvi_spei_complementarity.png` — 100% stacked horizontal bar per ecoregion × {onset, recovery}; segments = {both, NDVI only, SPEI only, neither}. Uses headline op-point z=1.5 / K=2 / lead=±8wk.
+
+### Key takeaways
+- **Only 4-5% of USDM events have both NDVI AND SPEI firing at this op-point.** The two signals are largely independent at the event level — they catch different events, not the same ones.
+- **NDVI uniquely catches ~19% of events SPEI misses** across most ecoregions; **SPEI uniquely catches 6-28%** depending on stratum. Combined (NDVI OR SPEI) operational POD = ~30-50% per ecoregion.
+- **8.3 South Central Semi-Arid Prairies has the highest "both" (~10% onset)** — consistent with its top-ranked Section B HSS (+0.473 grass dom). The cell where the two signals agree the most is also the cell with the best operational skill.
+- **9.4 recovery shows highest "both" (10%)** — paralleling Section A's WORKS designation for 9.4.
+- **8.2 onset has the largest "NDVI only" share (27%)** — NDVI is the dominant detector in central Plains cropland.
+- **Recovery generally has less "SPEI only"** than onset — SPEI is poor at detecting greening. NDVI's value-add is largest in recovery monitoring.
+
+## Figure 1b: complementarity stratified by LC (eco × LC × direction)
+`phase6_fig1b_ndvi_spei_complementarity_lc.png` — same structure as 1 but faceted by LC class (rows) × direction (cols). Cells with n_events < 500 suppressed.
+
+### Key takeaways
+- **Crop onset**: 8.3 has the largest "both" — corn-belt cropland where the two signals are most aligned. 8.2 + 9.4 crop show strong NDVI-only — NDVI catches crop drought SPEI misses, possibly via irrigation-stress signatures.
+- **Forest onset**: 8.2 central Plains forest has the largest NDVI-only share — forest NDVI signal is high-value where SPEI is silent.
+- **Grass onset**: 6.2 Western Cordillera grass is nearly all "neither" — semi-arid grass has low NDVI variability and at this op-point almost nothing fires. 8.3 grass shows the clearest "both" segment.
+- **Urban dense**: small N (only 5 ecos make the n≥500 cutoff). 8.3, 8.2 urban_dense are dominated by NDVI-only and SPEI-only — almost no concurrent firing.
+- **Urban diffuse onset**: looks much like grass — consistent with `continuous_spei_nlcd` finding that low-impervious urban behaves like natural cover.
+- **Recovery side (across LCs)**: NDVI-only dominates almost everywhere. SPEI is structurally poor at greening detection.
+
+## Pending figures (this session)
+- **Reference domain map** — LC + ecoregion zones, to orient external readers.
+- **Figure 2** — 8.3 Plains deep-dive (HSS bar / hit-rate map).
+- **Figure 3** — Section A × B 2×2 mechanism map (where do the two analyses agree vs disagree?).
+- **Figure 4** — four-mechanism eco map (from `continuous_spei_nlcd`) with Section B annotations.
+- **Figure 5** — headline op-points heatmap (best HSS per signal × direction).
