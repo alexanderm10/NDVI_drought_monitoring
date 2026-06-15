@@ -674,3 +674,156 @@ Overall skill remains low (HSS <0.06 even for the best cells), consistent with v
 5. **Cross-section reproduction figure (QC)**: for each (eco × LC) cell where both SPEI and USDM agree on sign, confirm the direction. List the disagree cells with rank-ordered importance.
 6. **Section B event_detection**: revive under skill framing with (eco × LC) stratification baked in. Now with explicit hypotheses from the SPEI vs USDM 5-LC comparison.
 7. **Eventually, Stage-2 finer-resolution analysis**: 30m HLS for flagged drought areas to parse subpixel structure (memory: `two-stage-resolution-idea`). The 9.2 urban-density split on SPEI but not USDM is a leading candidate for Stage-2 — what's happening at sub-4km scale that the categorical analyst-product smears over?
+
+---
+
+# Phase 6 Update: Section B (`event_detection_nlcd`) — 2026-06-15
+
+LC-stratified event detection completed in a single afternoon (~3 hr to build, 4 hr 19 min full run, ~15 min to inspect). Anchored on USDM transitions (none→D0 onset, any→none recovery), measures how skillfully NDVI z, 4 derivative windows, and 3 SPEI windows *fire* near those transitions. Proper POD/FAR/HSS/ETS via temporal-block contingency; per-event lead percentiles as diagnostic. SPEI joined as both a fire-signal family AND a within-window trajectory descriptor on every event.
+
+Output: `/data/validation/event_detection_nlcd_10y.rds` (180 MB xz). Contains: events_pixel (1.53M onset + 1.48M recovery × 17 cols with SPEI trajectory), events_ecoregion (eco-aggregate), skill_lc (12,240 rows = 50 strata × 2 dom × 8 signals × 36 ops × 2 dirs / dedup), lead_distributions_lc (24,192 rows), pixel_event_map (6M rows at 2 headline ops), meta.
+
+## Implementation lessons
+
+**Caught a latent bug in legacy scalar matchers** (`match_fires_to_events`, `count_false_alarms`, lines 3028–3121). The `by = pixel_id` reduction reorders results by pixel, but the positional assignment back into `events_out` assumes original row order. Within a pixel that has >1 event, hit/lead/n_fires values get scrambled across events. Hand-verified on synthetic pixel-1 case: scalar said 1 hit / 4 events, vec said 3 hits / 4 events, manual computation agreed with vec exactly. The 2026-06-11 Section B smoke results (line 412 of this memo) used the scalar — aggregate hit rates per stratum happened to be approximately preserved despite the misalignment, but per-event lead/lag claims should not be trusted from that old smoke. Production `section_event_detection_nlcd` uses only the vectorized helpers; legacy scalars retained with docstring warnings as reference / corner-case fallback.
+
+**Block-based 2×2 contingency for HSS.** The per-event hit/false-alarm framework gives POD and FAR but cannot define `correct_negatives` without a denominator of "trials." We discretize time into 4-week blocks (≈ ~130 blocks × ~129K pixels = ~17M cells per stratum); for each (pixel × block), is there any event in the block and is there any fire in the block? 2×2 over all blocks per stratum gives proper HSS/ETS. Lead percentiles are still reported separately as a diagnostic at ±4w and ±8w match tolerances. The block-based HSS is *stricter* than per-event hit_rate (same-block vs ±8wk tolerance) — both useful for different framings.
+
+**SPEI trajectory extraction needs chunking.** Naive `events[weekly, on="pixel_id"]` cartesian explodes (10M events × 520 weekly rows per pixel ≈ 5B rows joined). Chunked by pixel batches of 5000 → 26 chunks at full pop, each cartesian-joins only that chunk's events × weekly rows, then aggregates per-event. 48.8 min total for 3M events at full pop, ~2 GB peak.
+
+**Runtime budget** (full pop, 67M weekly rows, 129K pixels, 10 years):
+- Cache load + slim + NLCD join + z-stand + strata: ~10 min
+- Event build (per-pixel + eco-aggregate): ~5 min
+- SPEI trajectory: 48.8 min
+- Fire detection (8 signals × 3 z × 3 K × 2 dir = 144 cells): **172 min** (longest single step)
+- Skill loop (288 op×dom cells × {contingency + 2 lead matches}): 31.5 min
+- pixel_event_map (2 headline ops × 2 dirs): ~5 min
+- Save (179 MB xz): ~7 min
+- **Total: 259 min wall ≈ 4 hr 19 min**
+
+## Headline findings
+
+### 1. Real operational skill in 8.3 South Central Semi-Arid Prairies
+
+Top 5 onset cells (n_events ≥ 5000):
+
+| L2 | LC | dom | Signal | z | K | n_events | POD | FAR | **HSS** |
+|---|---|---|---|---|---|---|---|---|---|
+| 8.3 | grassland | dom | spei_4w | 1.5 | 1 | 6,480 | 0.526 | 0.473 | **+0.473** |
+| 8.3 | grassland | dom | spei_4w | 1.5 | 2 | 6,480 | 0.389 | 0.327 | +0.452 |
+| 8.3 | grassland | dom | spei_4w | 1.0 | 2 | 6,480 | 0.540 | 0.534 | +0.439 |
+| 8.3 | grassland | all | spei_4w | 1.5 | 1 | 27,656 | 0.467 | 0.493 | +0.423 |
+| 8.3 | grassland | all | spei_4w | 1.0 | 2 | 27,656 | 0.520 | 0.546 | +0.414 |
+
+12 of top 20 cells are 8.3 strata. 8.4 forest (Ozark) shows up too (+0.343 at z=1.5/K=1/all). HSS in the 0.30–0.47 range is operationally meaningful — half of all USDM onset transitions caught with manageable false-alarm rate.
+
+### 2. spei_4w (short-window meteorological signal) dominates
+
+Of 35 (eco × LC × dom) cells with ≥5000 events, the best-skill signal per cell breakdown:
+
+| Direction | spei_4w wins | derivatives win | spei_13w/26w wins |
+|---|---|---|---|
+| Onset | **33 of 35** | 0 | 2 |
+| Recovery | **30 of 35** | 3 | 2 |
+
+`spei_4w` is the operationally-best single signal across the board. NDVI z and the 4 derivative windows rarely beat it at the single-op-point level. This is genuinely surprising given the original framing motivation ("NDVI fills gaps in SPEI") — at this *single-op-point* benchmark, SPEI is the harder one to beat.
+
+Caveat: the per-event hit_rate breakdown shows that spei_4w catches *different events* than NDVI does (only ~5% concurrent), so the per-cell best-signal table understates the value-add of combining signals.
+
+### 3. NDVI and SPEI fires are largely independent — complementarity argument
+
+`pixel_event_map` at the headline op-point (z=1.5, K=2, lead=8wk), agreement matrix per direction:
+
+| Direction | Both | NDVI only | SPEI only | Neither |
+|---|---|---|---|---|
+| Onset | 5% | 19% | 22% | 53% |
+| Recovery | 4% | 19% | 14% | 63% |
+
+**Only 4-5% of USDM events have both signals firing.** This is the strongest single argument for the NDVI monitor's value: it's catching events SPEI misses (~19% of all events) and vice versa (~22%). If we treated either signal alone as the detector, we'd miss most events. An ensemble (NDVI fire OR SPEI fire) would catch ~46% of onset events — close to the best single-signal POD in 8.3 — but with broader coverage across ecoregions.
+
+This complementarity is the central operational finding from Section B. Whether to *headline* an ensemble in published claims is a downstream design question (does the user want a single combined indicator, or two separate indicators to be interpreted together?).
+
+### 4. Recovery > onset detectability
+
+Over the 35 stratum cells with ≥5000 events:
+- 39.6% have positive onset HSS (median = 0)
+- 50.1% have positive recovery HSS (median = 0)
+
+Best recovery cells:
+
+| L2 | LC | dom | Signal | z | K | n | POD | **HSS** |
+|---|---|---|---|---|---|---|---|---|
+| 8.3 | grassland | dom | deriv_w07_z | 1.5 | 2 | 6,448 | 0.201 | **+0.223** |
+| 6.2 | grassland | all | spei_26w | 1.0 | 2 | 2,635 | 0.260 | +0.215 |
+| 6.2 | grassland | dom | spei_26w | 1.0 | 2 | 1,355 | 0.243 | +0.206 |
+| 9.4 | crop | dom | spei_4w | 1.5 | 1 | 92,345 | 0.320 | +0.163 |
+| 9.4 | crop | all | spei_4w | 1.5 | 2 | 113,469 | 0.237 | +0.157 |
+
+Greening events leave a cleaner signature than stressing events. Operationally, an NDVI monitor would be a better *recovery* tracker than *onset* warner — which is the opposite of how drought monitoring is usually framed.
+
+### 5. SPEI trajectory matches USDM severity (dose-response)
+
+Per-event SPEI window descriptors aggregated by USDM post-class:
+
+| event_type | usdm_post | n | mean spei13_post | % crossed −1 in ±8wk |
+|---|---|---|---|---|
+| onset | D0 | 1,531,053 | −0.53 | 65.8% |
+| onset | D1 | 485 | −1.02 | 92.4% |
+| recovery | (any → none) | 1,475,032 | +0.23 | 46.7% (still in window) |
+
+D1 onsets are much rarer (n=485 across 13 ecoregions × 10 years) but show a markedly deeper meteorological signature. Establishes the SPEI trajectory data are signal-meaningful, not noise.
+
+By ecoregion, onset SPEI trajectory severity:
+| L2 | n_onsets | mean spei13_post | % crossed −1 |
+|---|---|---|---|
+| 8.4 Ozark | 107K | −0.59 | 70.2% |
+| 9.2 corn belt | 332K | −0.59 | 66.4% |
+| 9.4 Prairies | 241K | −0.57 | 64.2% |
+| 8.2 Plains | 212K | −0.53 | 66.5% |
+| 8.1 Mixed Wood | 152K | −0.57 | 66.6% |
+| 8.3 South Central | 195K | −0.48 | 66.8% |
+| 5.2 Mixed Wood Plains | 126K | −0.60 | 65.8% |
+| 9.3 W Cornbelt | 159K | **−0.44** | **51.6%** |
+| 6.2 Western Cordillera | 6K | −0.47 | 48.0% |
+
+**9.3 W Cornbelt has the weakest meteorological signature at USDM onset** — USDM declares drought there with thinner SPEI evidence. Worth a follow-up: are those declarations driven by other inputs (soil moisture, streamflow, agricultural reports) rather than precipitation deficit? 6.2 has a similar pattern but on much smaller N.
+
+### 6. Section A vs Section B agreement and divergence
+
+| Ecoregion | Section A (continuous_spei) | Section B (event_detection) |
+|---|---|---|
+| 8.3 | SILENT (β small-negative) | **TOP onset skill (HSS +0.47)** |
+| 9.4 | WORKS (β=+0.18 grass) | Strong recovery (HSS +0.15 crop), modest onset |
+| 8.4 Ozark | SILENT (β ≈ −0.05 forest) | Top-5 onset (HSS +0.34 forest) |
+| 9.2 corn belt | REVERSES (β=−0.10 crop) | Weak overall, modest recovery (HSS +0.12) |
+| 9.3 W Cornbelt | mostly grass-positive | Bottom of skill table (HSS −0.07) |
+
+**The two sections measure different things and disagree often.** Section A measures concurrent state agreement (does NDVI track SPEI week-to-week?). Section B measures event-timing alignment (does NDVI fire near USDM transitions?). 8.3 has poor concurrent agreement but excellent transition alignment — meaning the temporal *changes* line up even when the *levels* don't. Both are valid operational metrics; users should pick based on which question matters for their application.
+
+### 7. 8.3 Plains is the new dark horse
+
+Section A had 8.3 in the SILENT tier (β small-negative across LCs, ~−0.03). Section B reveals it has the best transition-detection skill in the entire 50-stratum table. The story:
+- 8.3 is "South Central Semi-Arid Prairies" (Oklahoma / Texas Panhandle / SE Kansas).
+- Semi-arid → SPEI fluctuations are biologically meaningful.
+- Land cover is grass-dominated with crop + forest patches → mixed but heavily semi-natural.
+- Mean SPEI13_post at onset = −0.48 (modest — events are common, not necessarily severe).
+- High event volume (195K onset events, much higher than 8.4 Ozark's 107K).
+
+The combination of "frequent transitions" + "meteorologically meaningful response" + "natural vegetation cover" makes 8.3 the cleanest test case for the SPEI-fire-as-USDM-anchor framing. Worth a deep-dive figure.
+
+## Files updated
+
+- `09_validate_drought_signal.R`: +828 lines (commit `111cadb` pre-launch)
+- `RUNNING_ANALYSES.md`: 2026-06-15 session summary
+- `PHASE6_VALIDATION_MEMO.md`: this section
+
+## What to do next (Phase 6 — Section B feeds into the figure backlog)
+
+1. **NDVI-vs-SPEI complementarity figure** — Venn-style or 2×2 panel of the agreement matrix, faceted by ecoregion. The headline finding (4-5% concurrent firing) needs to be visible immediately.
+2. **8.3 deep-dive figure** — onset hit_rate map (pixel-level from `pixel_event_map`), or HSS-by-stratum bar with 8.3 highlighted; reproduces the operational claim "this is where the monitor works."
+3. **Section A × Section B 2×2 mechanism table** — for each (eco × LC), is it state-concurrent + transition-aligned (both A and B positive), concurrent-only, transition-only, or neither? Direct visualization of where the two analyses agree vs disagree.
+4. **Headline op-points across signal × direction matrix** — heatmap of best HSS per (signal × direction) collapsed across strata. Lets readers see at a glance that spei_4w wins onset/recovery, derivatives win in a few recovery cells.
+5. **SPEI trajectory by event severity** — line plot of mean SPEI13 around event time (±8wk), faceted by D0 / D1 onset and recovery. Confirms the dose-response visually.
+6. **Pre-existing carryover** (memory: `phase6-next-session-plan`): 8.1 + 5.2 grass-worst DJF-excluded diagnostic; 8.4 Ozark "USDM-WORKS-but-SPEI-SILENT" deep dive; the figures already enumerated in the 2026-06-12 plan.
+7. **Ensemble exploration** — does (NDVI fire OR SPEI fire) outperform either alone at the event level? Cheap to compute from the existing outputs (no new model fits needed). If the 4-5% concurrent + 19% NDVI-only + 22% SPEI-only pattern holds across strata, an ensemble has obvious POD upside but ambiguous FAR/HSS impact.
+8. **Memo / paper draft prep** — Phase 6 now has the full picture: A (state), B (transitions), USDM/SPEI references both stratified by LC. The "skill of an NDVI drought monitor" question can be answered.

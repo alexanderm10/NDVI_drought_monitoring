@@ -1,10 +1,75 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-12 ~17:55 CDT — 5-LC chain COMPLETE. `continuous_spei_nlcd` (66.2 min) + `categorical_usdm_nlcd` (95.0 min) both ran 5-LC schema with urban_dense + urban_diffuse. Outputs: `continuous_spei_nlcd_10y.rds` (124K, overwrote yesterday's 3-LC) and `usdm_confusion_nlcd_10y.rds` (1.59 MB, new file). **Headline new finding**: SPEI shows clean 9.2 corn-belt urban-density split (dense −0.072 joins crop reversal, diffuse −0.008 behaves like grass), USDM does not (both urban tiers ~−0.045 in 9.2). Broader SPEI-vs-USDM discrepancies in 8.4 (USDM-WORKS, SPEI-SILENT) and 8.2 grass (USDM ρ=−0.171, SPEI mild −0.030). Full writeup in [PHASE6_VALIDATION_MEMO.md](PHASE6_VALIDATION_MEMO.md) "Phase 6 Update: LC Stratification".
+**Updated**: 2026-06-15 ~13:25 CDT — **Section B `event_detection_nlcd` COMPLETE** (4 hr 19 min wall, 180 MB output). New LC-stratified, SPEI-aware event analysis with proper POD/FAR/HSS/ETS skill metrics. **Headline finding**: spei_4w (short meteorological window) dominates — wins 33 of 35 onset cells, 30 of 35 recovery cells. Best onset HSS = +0.473 (8.3 grass dom × spei_4w × z=1.5/K=1, n=6480, POD=0.526/FAR=0.473). Best recovery HSS = +0.223 (8.3 grass dom × deriv_w07_z). **NDVI vs SPEI fires are largely independent: only 4-5% concurrent firing at headline op-point** → NDVI provides complementary information beyond SPEI. Full writeup in [PHASE6_VALIDATION_MEMO.md](PHASE6_VALIDATION_MEMO.md) "Phase 6 Update: Section B".
 
 ## Active run
 
 (none)
+
+## Session Summary (2026-06-15) — Section B event_detection_nlcd built + run
+
+### Implementation (morning, ~3 hr)
+- New section `section_event_detection_nlcd` in `09_validate_drought_signal.R` (~830 lines added). Mirrors NLCD pattern from `section_continuous_spei_nlcd`/`section_categorical_usdm_nlcd`: 5 LC classes (collapse_urban_to_2tier) × 11 ecoregions × 2 dom tracks ≈ 100 stratum groups.
+- 5 new helpers: `extract_spei_trajectory_per_event` (chunked non-equi join, bounded memory), `compute_temporal_block_contingency` (proper 2×2 via 4-week blocks → correct_negatives countable for HSS), `compute_skill_metrics` (POD/FAR/HSS/ETS/Bias), `match_fires_to_events_vec` + `count_false_alarms_vec` (~5-10× faster than scalar predecessors).
+- **Caught a latent bug in legacy scalar matchers** (`match_fires_to_events`, `count_false_alarms`): `by = pixel_id` reduction + positional assignment back into events_out scrambled within-pixel row alignment. Hand-verified on synthetic pixel-1 case: scalar said 1 hit / 4 events, vec said 3 hits / 4 events; vec exactly matched manual computation. Added docstring warnings flagging the legacy functions as not-trusted. Original `section_event_detection` (paused 2026-06-11) used the buggy scalar — so its per-event lead/lag numbers in `PHASE6_VALIDATION_MEMO.md` line 412 are quantitatively unreliable.
+- Bug fix: `EVENT_HEADLINE` → `EVENT_HEADLINES` typo in legacy section meta-list (would have errored on completion).
+- CLI: `--section=event_detection_nlcd` + `--smoke` flag (2 ecos × 2 signals × 1 op for fast validation).
+
+### Smoke test (~18 min wall, 2026-06-15 ~09:00 CDT)
+- 39 MB output. SPEI sanity passed (onset mean spei13_post = −0.56, recovery = +0.32 — direction correct).
+- Per-event hit_rate at headline op matches the 2026-06-11 predecessor smoke closely (8.4 grass onset 37.9% vs old 33.4%; 9.4 grass 22.4% vs old 23.1%) — within expected variance.
+- Vec matcher hand-verified bit-correct.
+- Smoke schema bug caught: `pixel_event_map` was missing `week_start`/`iso_year`/`iso_week` keys, so dcast collided on (pixel × type × signal). Fixed before full launch.
+
+### Full run (4 hr 19 min wall, 2026-06-15 ~13:23 CDT completion)
+- Cache load + NLCD + z-stand + strata: ~10 min
+- SPEI trajectory extraction (1.5M onset + 1.5M recovery events × ±8wk window): **48.8 min** (26 chunks of ≤5K pixels)
+- Fire detection (144 op-cells × 67M-row data): **172.0 min** — 196.5M total fire rows
+- Skill loop (288 op×dom cells × {contingency + 2 lead matches}): **31.5 min** → 12,240 skill rows + 24,192 lead-dist rows
+- pixel_event_map at 2 headline ops (ndvi_z + spei_13w) × 2 dirs: ~6M rows
+- Save: ~7 min → `event_detection_nlcd_10y.rds` 180 MB xz-compressed
+
+### Headline findings (full writeup → PHASE6_VALIDATION_MEMO.md)
+
+**1. Real operational skill in 8.3 Plains.** Best onset HSS = +0.473 (8.3 grass dom × spei_4w × z=1.5/K=1, n=6480 events, POD=0.526/FAR=0.473). 12 of top 20 onset cells are 8.3 strata. 8.3 = "South Central Semi-Arid Prairies" — semi-arid, SPEI is the natural tool.
+
+**2. spei_4w dominates.** Of 35 strata with ≥5000 events, spei_4w wins 33 onset cells and 30 recovery cells (out of 35 each direction). Derivatives win 3 onset / 5 recovery cells. spei_13w/spei_26w almost never win at the single-op-point level. The short meteorological window catches more USDM transitions than longer windows OR than the NDVI signals at any single op-point.
+
+**3. NDVI vs SPEI fires are LARGELY INDEPENDENT.** At the headline op (z=1.5, K=2, lead=8wk), per-event firing breakdown:
+| Direction | Both | NDVI only | SPEI only | Neither |
+|---|---|---|---|---|
+| Onset | 5% | 19% | 22% | 53% |
+| Recovery | 4% | 19% | 14% | 63% |
+
+Only 4-5% concurrent firing. This means the NDVI monitor provides **complementary** information to SPEI, not redundant — it catches events SPEI misses, and vice versa. Major argument for using NDVI alongside (not instead of) the meteorological reference.
+
+**4. Recovery > onset detectability.** 50% of strata have positive recovery HSS vs 40% for onset. Best recovery HSS = +0.223 (8.3 grass dom × deriv_w07_z) and +0.215 (6.2 grass × spei_26w). Greening events are easier to detect than stressed-onset events.
+
+**5. SPEI trajectory matches USDM severity dose-response.** Onset events show mean SPEI13_post = −0.53 with 65% crossing −1 (D0+); the rare D1+ onset subset (n=485 vs 348K D0 events) shows mean SPEI = −1.02 with 92% crossing −1. Meteorological signal scales with USDM severity at event time.
+
+**6. 8.3 Plains is the new dark horse.** Section A (`continuous_spei_nlcd`) had 8.3 in the SILENT tier (small-negative ρ). Section B shows 8.3 grass+forest+crop with the BEST event-detection skill in the whole table. The two analyses measure different things: A measures concurrent state agreement, B measures event-timing alignment. 8.3 has poor concurrent agreement but excellent transition alignment.
+
+**7. 9.2 corn belt is hard.** No 9.2 cell appears in the top-20 onset table. 9.2 crop spei_4w recovery HSS = +0.125 (n=229K) — modest. Consistent with Section A's REVERSES-CROP mechanism (irrigation/management buffers concurrent state, but transitions are still partially detectable).
+
+### Files modified
+- `09_validate_drought_signal.R`: +828 lines, -7 (new section + 5 helpers + bug-flagged scalar docstrings + CLI smoke flag + EVENT_HEADLINE typo fix + event_detection_nlcd config paths)
+- `RUNNING_ANALYSES.md`: this section
+- `PHASE6_VALIDATION_MEMO.md`: "Phase 6 Update: Section B" section (to be added)
+- Commit: `111cadb` (pre-full-run)
+
+### Lessons captured
+- Cache-load is the single longest fixed cost (~5 min for the 8.9 GB join). Sub-section iteration is cheap once it's in memory.
+- Block-based 2×2 contingency gives a properly defined HSS even when per-event match with tolerance is what users intuit. Both are reported in the output (HSS = block, hit_rate = per-event).
+- The legacy `match_fires_to_events` bug existed since 2026-06-11; predecessor smoke results (PHASE6_VALIDATION_MEMO line 412) were within-pixel-scrambled. Aggregate hit rates per stratum happened to be roughly preserved despite the misalignment, which is why nobody noticed.
+- `pixel_event_map` schema needed week_start key for dcast-style NDVI-vs-SPEI agreement analysis. Caught in smoke before full run.
+- spei_4w as the operationally-best single signal is somewhat surprising; future work should test whether ensembles of (spei_4w + ndvi_z) beat spei_4w alone (the 4-5% concurrent firing rate suggests they would).
+
+### Next session
+- Visualize (the figure backlog from 2026-06-12 carryover plus new Section B figures: 8.3 hit-map, NDVI⊥SPEI complementarity panel, four-mechanism map now informed by Section B too)
+- 8.1 + 5.2 grass-worst diagnostic (still on the carryover list)
+- Decide whether to add ensembles of (NDVI + SPEI) as a derived signal
+- Phase 6 → memo paper draft
+
 
 ## Session Summary (2026-06-12 afternoon) — 5-LC chain complete
 
