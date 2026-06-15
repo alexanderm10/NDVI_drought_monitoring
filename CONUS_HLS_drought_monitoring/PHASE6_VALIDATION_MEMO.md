@@ -703,7 +703,7 @@ Output: `/data/validation/event_detection_nlcd_10y.rds` (180 MB xz). Contains: e
 
 ## Headline findings
 
-### 1. Real operational skill in 8.3 South Central Semi-Arid Prairies
+### 1. Real operational skill in 8.3 Southeastern USA Plains
 
 Top 5 onset cells (n_events ≥ 5000):
 
@@ -715,7 +715,7 @@ Top 5 onset cells (n_events ≥ 5000):
 | 8.3 | grassland | all | spei_4w | 1.5 | 1 | 27,656 | 0.467 | 0.493 | +0.423 |
 | 8.3 | grassland | all | spei_4w | 1.0 | 2 | 27,656 | 0.520 | 0.546 | +0.414 |
 
-12 of top 20 cells are 8.3 strata. 8.4 forest (Ozark) shows up too (+0.343 at z=1.5/K=1/all). HSS in the 0.30–0.47 range is operationally meaningful — half of all USDM onset transitions caught with manageable false-alarm rate.
+12 of top 20 cells are 8.3 strata. 8.3 = **Southeastern USA Plains** (Arkansas / Missouri Ozark foothills / East Texas / Louisiana / parts of MS+TN), humid subtropical, mixed grass-crop-forest. 8.4 forest (Ozark) shows up too (+0.343 at z=1.5/K=1/all). HSS in the 0.30–0.47 range is operationally meaningful — half of all USDM onset transitions caught with manageable false-alarm rate.
 
 ### 2. spei_4w (short-window meteorological signal) dominates
 
@@ -782,7 +782,7 @@ By ecoregion, onset SPEI trajectory severity:
 | 8.2 Plains | 212K | −0.53 | 66.5% |
 | 8.1 Mixed Wood | 152K | −0.57 | 66.6% |
 | 8.3 South Central | 195K | −0.48 | 66.8% |
-| 5.2 Mixed Wood Plains | 126K | −0.60 | 65.8% |
+| 5.2 Mixed Wood Shield | 126K | −0.60 | 65.8% |
 | 9.3 W Cornbelt | 159K | **−0.44** | **51.6%** |
 | 6.2 Western Cordillera | 6K | −0.47 | 48.0% |
 
@@ -800,16 +800,17 @@ By ecoregion, onset SPEI trajectory severity:
 
 **The two sections measure different things and disagree often.** Section A measures concurrent state agreement (does NDVI track SPEI week-to-week?). Section B measures event-timing alignment (does NDVI fire near USDM transitions?). 8.3 has poor concurrent agreement but excellent transition alignment — meaning the temporal *changes* line up even when the *levels* don't. Both are valid operational metrics; users should pick based on which question matters for their application.
 
-### 7. 8.3 Plains is the new dark horse
+### 7. 8.3 Southeastern USA Plains is the new dark horse
 
-Section A had 8.3 in the SILENT tier (β small-negative across LCs, ~−0.03). Section B reveals it has the best transition-detection skill in the entire 50-stratum table. The story:
-- 8.3 is "South Central Semi-Arid Prairies" (Oklahoma / Texas Panhandle / SE Kansas).
-- Semi-arid → SPEI fluctuations are biologically meaningful.
-- Land cover is grass-dominated with crop + forest patches → mixed but heavily semi-natural.
+Section A had 8.3 in the SILENT tier (β small-negative across LCs, ~−0.03). Section B reveals it has the best transition-detection skill in the entire 50-stratum table. The corrected story (note: earlier this session 8.3 was misnamed "S Central Semi-Arid Prairies" — that's actually 9.4; 8.3 is **Southeastern USA Plains** per EPA L2):
+- 8.3 = humid subtropical mixed grass/crop/forest. Arkansas + Missouri Ozark foothills + East Texas + Louisiana + parts of MS/TN.
+- Annual precip ~40-60 inches, episodic summer storms.
 - Mean SPEI13_post at onset = −0.48 (modest — events are common, not necessarily severe).
 - High event volume (195K onset events, much higher than 8.4 Ozark's 107K).
 
-The combination of "frequent transitions" + "meteorologically meaningful response" + "natural vegetation cover" makes 8.3 the cleanest test case for the SPEI-fire-as-USDM-anchor framing. Worth a deep-dive figure.
+The mechanistic story (revised after name correction): humid-subtropical precipitation events produce **sharp, episodic SPEI excursions** (rather than the slow drying typical of semi-arid). USDM analysts in this region likely respond to those precip pulses with similar latency, putting both spei_4w fires and USDM declarations on aligned timescales. Mixed vegetation cover responds to soil-moisture changes within ~4 weeks. The result: spei_4w as a USDM-event anchor works exceptionally well here.
+
+This is meaningfully different from the original (mistaken) "semi-arid grassland" framing — which would have predicted a slower, more cumulative meteorological signature.
 
 ## Files updated
 
@@ -881,7 +882,7 @@ All figures land in `/data/figures/phase6/`. Built incrementally starting 2026-0
 ### Key takeaways
 - **Only 4-5% of USDM events have both NDVI AND SPEI firing at this op-point.** The two signals are largely independent at the event level — they catch different events, not the same ones.
 - **NDVI uniquely catches ~19% of events SPEI misses** across most ecoregions; **SPEI uniquely catches 6-28%** depending on stratum. Combined (NDVI OR SPEI) operational POD = ~30-50% per ecoregion.
-- **8.3 South Central Semi-Arid Prairies has the highest "both" (~10% onset)** — consistent with its top-ranked Section B HSS (+0.473 grass dom). The cell where the two signals agree the most is also the cell with the best operational skill.
+- **8.3 Southeastern USA Plains has the highest "both" (~10% onset)** — consistent with its top-ranked Section B HSS (+0.473 grass dom). The cell where the two signals agree the most is also the cell with the best operational skill.
 - **9.4 recovery shows highest "both" (10%)** — paralleling Section A's WORKS designation for 9.4.
 - **8.2 onset has the largest "NDVI only" share (27%)** — NDVI is the dominant detector in central Plains cropland.
 - **Recovery generally has less "SPEI only"** than onset — SPEI is poor at detecting greening. NDVI's value-add is largest in recovery monitoring.

@@ -31,7 +31,7 @@
 
 ### Headline findings (full writeup → PHASE6_VALIDATION_MEMO.md)
 
-**1. Real operational skill in 8.3 Plains.** Best onset HSS = +0.473 (8.3 grass dom × spei_4w × z=1.5/K=1, n=6480 events, POD=0.526/FAR=0.473). 12 of top 20 onset cells are 8.3 strata. 8.3 = "South Central Semi-Arid Prairies" — semi-arid, SPEI is the natural tool.
+**1. Real operational skill in 8.3 Southeastern USA Plains.** Best onset HSS = +0.473 (8.3 grass dom × spei_4w × z=1.5/K=1, n=6480 events, POD=0.526/FAR=0.473). 12 of top 20 onset cells are 8.3 strata. 8.3 = **Southeastern USA Plains** (Arkansas / Missouri Ozark foothills / East Texas / Louisiana / parts of MS+TN) — humid subtropical, mixed grass/crop/forest, episodic summer storms. (Earlier in this session 8.3 was misnamed "S Central Semi-Arid Prairies" — that's actually 9.4.)
 
 **2. spei_4w dominates.** Of 35 strata with ≥5000 events, spei_4w wins 33 onset cells and 30 recovery cells (out of 35 each direction). Derivatives win 3 onset / 5 recovery cells. spei_13w/spei_26w almost never win at the single-op-point level. The short meteorological window catches more USDM transitions than longer windows OR than the NDVI signals at any single op-point.
 

@@ -36,16 +36,21 @@ dir.create(FIG_DIR, showWarnings = FALSE, recursive = TRUE)
 # ------------------------------------------------------------------------------
 # Shared constants
 # ------------------------------------------------------------------------------
+#' Authoritative names from EPA Level II ecoregion scheme (Omernik & Griffith 2014;
+#' verified 2026-06-15 against L2_name in pixel_to_ecoregion_l2.rds).
+#' DO NOT shuffle these — early labels in this session had 5.2/8.1 swapped and 8.3
+#' mis-named as "S Central Semi-Arid Prairies"; the canonical pixel lookup is the
+#' source of truth.
 ECO_NAMES <- c(
-  "5.2" = "Mixed Wood Plains",
+  "5.2" = "Mixed Wood Shield",
   "6.2" = "Western Cordillera",
-  "8.1" = "Mixed Wood Shield",
+  "8.1" = "Mixed Wood Plains",
   "8.2" = "Central USA Plains",
-  "8.3" = "S Central Semi-Arid Prairies",
-  "8.4" = "Ozark / Ouachita / Appalachian",
+  "8.3" = "Southeastern USA Plains",
+  "8.4" = "Ozark/Ouachita-Appalachian Forests",
   "9.2" = "Temperate Prairies (Corn Belt)",
-  "9.3" = "West-Central Semi-Arid Prairies",
-  "9.4" = "South Central Semi-Arid Prairies"
+  "9.3" = "West-Central Semiarid Prairies",
+  "9.4" = "South Central Semiarid Prairies"
 )
 
 # Common ggplot theme
@@ -300,17 +305,12 @@ make_fig0_domain_map <- function() {
   bbox_pix <- c(xmin = min(pix$x) - 25e3, xmax = max(pix$x) + 25e3,
                 ymin = min(pix$y) - 25e3, ymax = max(pix$y) + 25e3)
 
-  # Color palettes (tweaked 9.3 to a more saturated purple for separation from 9.2)
-  eco_pal <- c(
-    "5.2 Mixed Wood Plains"             = "#7FB069",  # green
-    "6.2 Western Cordillera"            = "#A4C2A8",  # pale green
-    "8.1 Mixed Wood Shield"             = "#6BAED6",  # blue
-    "8.2 Central USA Plains"            = "#FDE68A",  # pale yellow
-    "8.3 S Central Semi-Arid Prairies"  = "#F4A261",  # orange
-    "8.4 Ozark / Ouachita / Appalachian" = "#9D6B53", # brown
-    "9.2 Temperate Prairies (Corn Belt)" = "#E5989B", # pink/coral
-    "9.3 West-Central Semi-Arid Prairies" = "#7E57C2",# saturated purple
-    "9.4 South Central Semi-Arid Prairies" = "#B0413E" # dark red
+  # Color palettes (palette is keyed by canonical name from ECO_NAMES; tweaked 9.3
+  # to saturated purple for separation from 9.2)
+  eco_pal <- setNames(
+    c("#7FB069", "#A4C2A8", "#6BAED6", "#FDE68A", "#F4A261",
+      "#9D6B53", "#E5989B", "#7E57C2", "#B0413E"),
+    sprintf("%s %s", names(ECO_NAMES), unname(ECO_NAMES))
   )
   lc_pal <- c(
     "crop"          = "#F4D03F",   # warm yellow
@@ -388,8 +388,161 @@ make_fig0_domain_map <- function() {
   invisible(out_path)
 }
 
+# ------------------------------------------------------------------------------
+# Figure 2: 8.3 South Central Semi-Arid Prairies deep-dive
+# Three panels:
+#   A: small orientation map (Midwest with 8.3 highlighted)
+#   B: per-pixel onset hit_rate map for 8.3 (combined NDVI OR SPEI fire)
+#   C: HSS heatmap for 8.3 grass × dom × onset — signal × (z × K)
+# ------------------------------------------------------------------------------
+make_fig2_eco83_deepdive <- function() {
+  cat("\n=== Figure 2: 8.3 Plains deep-dive ===\n")
+  out_b <- readRDS_retry(file.path(paths$validation_data,
+                                    "event_detection_nlcd_10y.rds"))
+  vp    <- as.data.table(readRDS_retry(file.path(paths$validation_data,
+                                                  "pixel_to_ecoregion_l2.rds")))
+  nlcd  <- as.data.table(readRDS_retry(file.path(paths$gam_models,
+                                                  "valid_pixels_nlcd2019.rds")))
+
+  pix_eco <- merge(nlcd[, .(pixel_id, x, y)],
+                   vp[, .(pixel_id, L2_code)], by = "pixel_id")
+  pix_eco <- pix_eco[!is.na(L2_code) & !L2_code %in% c("0.0", "8.5")]
+  pix_eco[, is_83 := (L2_code == "8.3")]
+
+  # State outlines
+  states <- st_transform(st_as_sf(map("state", plot = FALSE, fill = TRUE)), 5070)
+  bbox_pix <- c(xmin = min(pix_eco$x) - 25e3, xmax = max(pix_eco$x) + 25e3,
+                ymin = min(pix_eco$y) - 25e3, ymax = max(pix_eco$y) + 25e3)
+
+  # === Panel A: orientation map ===
+  p_a <- ggplot(pix_eco, aes(x = x, y = y, fill = is_83)) +
+    geom_raster() +
+    geom_sf(data = states, fill = NA, color = "grey25", linewidth = 0.35,
+            inherit.aes = FALSE) +
+    coord_sf(xlim = bbox_pix[c("xmin","xmax")],
+             ylim = bbox_pix[c("ymin","ymax")],
+             crs  = st_crs(5070), expand = FALSE) +
+    scale_fill_manual(values = c(`FALSE` = "#E0E0E0", `TRUE` = "#F4A261"),
+                      labels = c("Other ecoregions",
+                                 sprintf("8.3 %s", ECO_NAMES["8.3"])),
+                      name = NULL) +
+    labs(title = "A. Where is 8.3?",
+         subtitle = "Southeastern USA Plains — Arkansas / Missouri Ozark foothills / East Texas / Louisiana / parts of MS/TN") +
+    theme_minimal(base_size = 10) +
+    theme(plot.title       = element_text(face = "bold"),
+          plot.subtitle    = element_text(color = "grey30", size = rel(0.85)),
+          axis.text        = element_blank(),
+          axis.title       = element_blank(),
+          axis.ticks       = element_blank(),
+          panel.grid       = element_blank(),
+          legend.position  = "bottom",
+          legend.text      = element_text(size = 9))
+
+  # === Panel B: per-pixel onset hit_rate map for 8.3 (combined NDVI OR SPEI) ===
+  pem83 <- merge(out_b$pixel_event_map, vp[, .(pixel_id, L2_code)],
+                 by = "pixel_id")
+  pem83 <- pem83[L2_code == "8.3" & event_type == "onset"]
+  pem83_w <- dcast(pem83, pixel_id + week_start ~ headline_signal,
+                   value.var = "hit")
+  pem83_w[, either := ndvi_z | spei_13w]
+  pix_hit <- pem83_w[, .(n_events = .N,
+                         hit_rate_either = mean(either, na.rm = TRUE)),
+                     by = pixel_id]
+  pix_hit_xy <- merge(pix_hit, nlcd[, .(pixel_id, x, y, nlcd_juliana)],
+                      by = "pixel_id")
+  # Restrict to pixels with at least 10 events for stable per-pixel rate
+  pix_hit_xy <- pix_hit_xy[n_events >= 10L]
+
+  bbox_83 <- c(xmin = min(pix_hit_xy$x) - 20e3, xmax = max(pix_hit_xy$x) + 20e3,
+               ymin = min(pix_hit_xy$y) - 20e3, ymax = max(pix_hit_xy$y) + 20e3)
+
+  p_b <- ggplot(pix_hit_xy, aes(x = x, y = y, fill = hit_rate_either)) +
+    geom_raster() +
+    geom_sf(data = states, fill = NA, color = "grey25", linewidth = 0.45,
+            inherit.aes = FALSE) +
+    coord_sf(xlim = bbox_83[c("xmin","xmax")],
+             ylim = bbox_83[c("ymin","ymax")],
+             crs  = st_crs(5070), expand = FALSE) +
+    scale_fill_viridis_c(option = "viridis",
+                         name = "Combined POD\n(NDVI ∨ SPEI fires)",
+                         labels = percent_format(accuracy = 1),
+                         limits = c(0, 1)) +
+    labs(title = "B. Per-pixel onset detection — 8.3 only",
+         subtitle = sprintf(
+           "%s pixels, mean events per pixel = %.0f. Headline op: z=1.5, K=2, ±8wk. 'Either fires' = NDVI z or SPEI_13w crossed threshold near USDM onset.",
+           format(nrow(pix_hit_xy), big.mark = ","),
+           mean(pix_hit_xy$n_events))) +
+    theme_minimal(base_size = 10) +
+    theme(plot.title       = element_text(face = "bold"),
+          plot.subtitle    = element_text(color = "grey30", size = rel(0.85)),
+          axis.text        = element_blank(),
+          axis.title       = element_blank(),
+          axis.ticks       = element_blank(),
+          panel.grid       = element_blank(),
+          legend.position  = "right",
+          legend.title     = element_text(face = "bold", size = 9),
+          legend.text      = element_text(size = 8))
+
+  # === Panel C: HSS heatmap for 8.3 grass × dom — signal × (z × K), onset ===
+  sk83 <- out_b$skill_lc[L2_code == "8.3" & nlcd_juliana == "grassland" &
+                         dom_filter == "dom" & direction == "onset"]
+  # signal ordering: NDVI then derivatives by window length, then SPEI by window
+  sig_order <- c("ndvi_z", "deriv_w03_z", "deriv_w07_z", "deriv_w14_z", "deriv_w30_z",
+                 "spei_4w", "spei_13w", "spei_26w")
+  sk83[, signal_col := factor(signal_col, levels = rev(sig_order))]
+  sk83[, op_label := sprintf("z=%.1f / K=%d", z_threshold, sustained_weeks)]
+  # Order op_label: z=1.0/K=1, K=2, K=4, then z=1.5..., then z=2.0...
+  op_order <- as.vector(outer(c(1, 2, 4),
+                               c("z=1.0", "z=1.5", "z=2.0"),
+                               function(k, z) paste(z, paste0("K=", k), sep=" / ")))
+  sk83[, op_label := factor(op_label, levels = op_order)]
+
+  p_c <- ggplot(sk83, aes(x = op_label, y = signal_col, fill = hss)) +
+    geom_tile(color = "white", linewidth = 0.4) +
+    geom_text(aes(label = sprintf("%+.2f", hss)),
+              size = 3, color = "grey15") +
+    scale_fill_gradient2(low = "#B0413E", mid = "#FAFAFA", high = "#2E7D32",
+                        midpoint = 0,
+                        name = "HSS",
+                        limits = c(-0.1, 0.5), oob = scales::squish) +
+    labs(
+      title    = "C. HSS by signal × op-point — 8.3 grass dom × ONSET",
+      subtitle = "Each cell = one (signal × threshold × sustained-weeks) op-point. dom = pixels where modal LC ≥ 60% (n_pixels = 270).",
+      x = "Operating point",
+      y = "Fire signal",
+      caption = "spei_4w dominates onset detection in 8.3 grass: HSS = +0.47 at z=1.5/K=1, +0.45 at z=1.5/K=2. Derivative + NDVI signals show near-zero or slightly negative HSS — the meteorological short-window signal is the right tool for this stratum."
+    ) +
+    theme_minimal(base_size = 10) +
+    theme(plot.title       = element_text(face = "bold"),
+          plot.subtitle    = element_text(color = "grey30", size = rel(0.85)),
+          plot.caption     = element_text(color = "grey45", size = 8, hjust = 0,
+                                          margin = margin(t = 8)),
+          axis.text.x      = element_text(angle = 0),
+          panel.grid       = element_blank(),
+          legend.position  = "right")
+
+  # === Compose ===
+  top_row <- p_a + p_b + plot_layout(widths = c(1, 1.4))
+  combined <- (top_row / p_c) +
+    plot_layout(heights = c(1, 1.1)) +
+    plot_annotation(
+      title    = "8.3 Southeastern USA Plains — the operational dark horse of Phase 6",
+      subtitle = "Section A had 8.3 as SILENT (concurrent NDVI–SPEI agreement small-negative). Section B reveals best-in-class onset detection via spei_4w — humid subtropical precip pulses drive both meteorological signal and analyst declarations on similar timescales.",
+      caption  = "event_detection_nlcd_10y.rds, 2026-06-15. NDVI z signals derived per-pixel; SPEI windows used raw.",
+      theme    = theme(plot.title    = element_text(face = "bold", size = 14),
+                       plot.subtitle = element_text(color = "grey30"),
+                       plot.caption  = element_text(color = "grey45", size = 8, hjust = 0))
+    )
+
+  out_path <- file.path(FIG_DIR, "phase6_fig2_eco83_deepdive.png")
+  ggsave(out_path, combined, width = 16, height = 13, dpi = 300, bg = "white")
+  cat(sprintf("  wrote %s (%.2f MB)\n", out_path, file.size(out_path) / 1e6))
+  invisible(out_path)
+}
+
 if (fig_arg %in% c("0",  "all")) make_fig0_domain_map()
 if (fig_arg %in% c("1",  "all")) make_fig1_complementarity()
 if (fig_arg %in% c("1b", "all")) make_fig1b_complementarity_lc()
+if (fig_arg %in% c("2",  "all")) make_fig2_eco83_deepdive()
 
 cat("\nDone.\n")
