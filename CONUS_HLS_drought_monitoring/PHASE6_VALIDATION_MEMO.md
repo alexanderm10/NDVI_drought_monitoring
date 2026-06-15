@@ -781,12 +781,12 @@ By ecoregion, onset SPEI trajectory severity:
 | 9.4 Prairies | 241K | −0.57 | 64.2% |
 | 8.2 Plains | 212K | −0.53 | 66.5% |
 | 8.1 Mixed Wood | 152K | −0.57 | 66.6% |
-| 8.3 South Central | 195K | −0.48 | 66.8% |
+| 8.3 Southeastern USA Plains | 195K | −0.48 | 66.8% |
 | 5.2 Mixed Wood Shield | 126K | −0.60 | 65.8% |
-| 9.3 W Cornbelt | 159K | **−0.44** | **51.6%** |
+| 9.3 West-Central Semiarid Prairies | 159K | **−0.44** | **51.6%** |
 | 6.2 Western Cordillera | 6K | −0.47 | 48.0% |
 
-**9.3 W Cornbelt has the weakest meteorological signature at USDM onset** — USDM declares drought there with thinner SPEI evidence. Worth a follow-up: are those declarations driven by other inputs (soil moisture, streamflow, agricultural reports) rather than precipitation deficit? 6.2 has a similar pattern but on much smaller N.
+**9.3 West-Central Semiarid Prairies has the weakest meteorological signature at USDM onset** — USDM declares drought there with thinner SPEI evidence. (9.3 ≠ Corn Belt; 9.3 is the semi-arid plains west of the corn belt — Nebraska / Kansas / eastern Colorado. 9.2 Temperate Prairies is the corn belt.) Worth a follow-up: are those declarations driven by other inputs (soil moisture, streamflow, agricultural reports) rather than precipitation deficit? 6.2 has a similar pattern but on much smaller N.
 
 ### 6. Section A vs Section B agreement and divergence
 
@@ -796,7 +796,7 @@ By ecoregion, onset SPEI trajectory severity:
 | 9.4 | WORKS (β=+0.18 grass) | Strong recovery (HSS +0.15 crop), modest onset |
 | 8.4 Ozark | SILENT (β ≈ −0.05 forest) | Top-5 onset (HSS +0.34 forest) |
 | 9.2 corn belt | REVERSES (β=−0.10 crop) | Weak overall, modest recovery (HSS +0.12) |
-| 9.3 W Cornbelt | mostly grass-positive | Bottom of skill table (HSS −0.07) |
+| 9.3 West-Central Semiarid | mostly grass-positive | Bottom of skill table (HSS −0.07) |
 
 **The two sections measure different things and disagree often.** Section A measures concurrent state agreement (does NDVI track SPEI week-to-week?). Section B measures event-timing alignment (does NDVI fire near USDM transitions?). 8.3 has poor concurrent agreement but excellent transition alignment — meaning the temporal *changes* line up even when the *levels* don't. Both are valid operational metrics; users should pick based on which question matters for their application.
 
@@ -884,15 +884,15 @@ All figures land in `/data/figures/phase6/`. Built incrementally starting 2026-0
 - **NDVI uniquely catches ~19% of events SPEI misses** across most ecoregions; **SPEI uniquely catches 6-28%** depending on stratum. Combined (NDVI OR SPEI) operational POD = ~30-50% per ecoregion.
 - **8.3 Southeastern USA Plains has the highest "both" (~10% onset)** — consistent with its top-ranked Section B HSS (+0.473 grass dom). The cell where the two signals agree the most is also the cell with the best operational skill.
 - **9.4 recovery shows highest "both" (10%)** — paralleling Section A's WORKS designation for 9.4.
-- **8.2 onset has the largest "NDVI only" share (27%)** — NDVI is the dominant detector in central Plains cropland.
+- **8.2 onset has the largest "NDVI only" share (27%)** — NDVI is the dominant detector in 8.2 Central USA Plains (Dakotas + adjacent grass/crop mosaic).
 - **Recovery generally has less "SPEI only"** than onset — SPEI is poor at detecting greening. NDVI's value-add is largest in recovery monitoring.
 
 ## Figure 1b: complementarity stratified by LC (eco × LC × direction)
 `phase6_fig1b_ndvi_spei_complementarity_lc.png` — same structure as 1 but faceted by LC class (rows) × direction (cols). Cells with n_events < 500 suppressed.
 
 ### Key takeaways
-- **Crop onset**: 8.3 has the largest "both" — corn-belt cropland where the two signals are most aligned. 8.2 + 9.4 crop show strong NDVI-only — NDVI catches crop drought SPEI misses, possibly via irrigation-stress signatures.
-- **Forest onset**: 8.2 central Plains forest has the largest NDVI-only share — forest NDVI signal is high-value where SPEI is silent.
+- **Crop onset**: 8.3 has the largest "both" — Southeastern USA Plains cropland (Arkansas / east Texas / Louisiana / Mississippi delta), NOT corn belt. The two signals are most aligned in this humid subtropical mixed cropland. 8.2 + 9.4 crop show strong NDVI-only — NDVI catches crop drought SPEI misses, possibly via irrigation-stress signatures.
+- **Forest onset**: 8.2 Central USA Plains forest has the largest NDVI-only share — forest NDVI signal is high-value where SPEI is silent.
 - **Grass onset**: 6.2 Western Cordillera grass is nearly all "neither" — semi-arid grass has low NDVI variability and at this op-point almost nothing fires. 8.3 grass shows the clearest "both" segment.
 - **Urban dense**: small N (only 5 ecos make the n≥500 cutoff). 8.3, 8.2 urban_dense are dominated by NDVI-only and SPEI-only — almost no concurrent firing.
 - **Urban diffuse onset**: looks much like grass — consistent with `continuous_spei_nlcd` finding that low-impervious urban behaves like natural cover.
@@ -900,7 +900,7 @@ All figures land in `/data/figures/phase6/`. Built incrementally starting 2026-0
 
 ## Pending figures (this session)
 - **Reference domain map** — LC + ecoregion zones, to orient external readers.
-- **Figure 2** — 8.3 Plains deep-dive (HSS bar / hit-rate map).
+- **Figure 2** — 8.3 Southeastern USA Plains deep-dive (HSS bar / hit-rate map).
 - **Figure 3** — Section A × B 2×2 mechanism map (where do the two analyses agree vs disagree?).
 - **Figure 4** — four-mechanism eco map (from `continuous_spei_nlcd`) with Section B annotations.
 - **Figure 5** — headline op-points heatmap (best HSS per signal × direction).

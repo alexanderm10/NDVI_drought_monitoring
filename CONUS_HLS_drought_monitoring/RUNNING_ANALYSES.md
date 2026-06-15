@@ -47,7 +47,7 @@ Only 4-5% concurrent firing. This means the NDVI monitor provides **complementar
 
 **5. SPEI trajectory matches USDM severity dose-response.** Onset events show mean SPEI13_post = −0.53 with 65% crossing −1 (D0+); the rare D1+ onset subset (n=485 vs 348K D0 events) shows mean SPEI = −1.02 with 92% crossing −1. Meteorological signal scales with USDM severity at event time.
 
-**6. 8.3 Plains is the new dark horse.** Section A (`continuous_spei_nlcd`) had 8.3 in the SILENT tier (small-negative ρ). Section B shows 8.3 grass+forest+crop with the BEST event-detection skill in the whole table. The two analyses measure different things: A measures concurrent state agreement, B measures event-timing alignment. 8.3 has poor concurrent agreement but excellent transition alignment.
+**6. 8.3 Southeastern USA Plains is the new dark horse.** Section A (`continuous_spei_nlcd`) had 8.3 in the SILENT tier (small-negative ρ). Section B shows 8.3 grass+forest+crop with the BEST event-detection skill in the whole table. The two analyses measure different things: A measures concurrent state agreement, B measures event-timing alignment. 8.3 has poor concurrent agreement but excellent transition alignment.
 
 **7. 9.2 corn belt is hard.** No 9.2 cell appears in the top-20 onset table. 9.2 crop spei_4w recovery HSS = +0.125 (n=229K) — modest. Consistent with Section A's REVERSES-CROP mechanism (irrigation/management buffers concurrent state, but transitions are still partially detectable).
 
