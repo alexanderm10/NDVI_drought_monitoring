@@ -36,6 +36,7 @@ Analysis pipeline (run sequentially)
   07_visualize_derivatives.R             - Visualize change-derivative outputs (post-script-06)
   08_validation_data_setup.R             - Pull + grid USDM / GridMET / SPEI to the 4km pixel basis (--section= CLI)
   09_validate_drought_signal.R           - Phase 6 validation: align NDVI to weekly + skill-score vs USDM/SPEI (--section= CLI)
+  10_phase6_figures.R                    - Phase 6 headline figures (domain map, complementarity, deep-dives) (--fig= CLI)
 
 Acquisition module (sourced by 00_monthly_update.R; also runnable directly)
   acquisition/hls_acquisition_core.R              - NASA HLS STAC search + download helpers
@@ -206,13 +207,28 @@ docker exec -w /workspace conus-hls-drought-monitor \
 ```
 Sections: `align_weekly` builds the master pixel-week join (NDVI summaries + USDM + SPEI + ecoregion); the analysis sections read the cached join and score the NDVI signal against USDM (categorical, two-track skill) and SPEI (continuous β/r²). Available analysis sections:
 - `within_week_diagnostic` — within-week vs across-week SD ratio per pixel (gates grain choice for event_detection)
-- `categorical_usdm` — v3 two-track (binary onset/end + ordinal within-drought) skill sweep + permutation null
+- `categorical_usdm` — v3 two-track (binary onset/end + ordinal within-drought) skill sweep + permutation null (eco-only)
+- `categorical_usdm_nlcd` — LC-stratified version: full eco × 5-LC grid (crop / forest / grass / urban_dense / urban_diffuse) + two-track sweep + correlation per (eco × LC × dom)
 - `continuous_spei` — pooled + iso_week-FE regression NDVI ~ SPEI per ecoregion (3 SPEI windows × 5 signals)
-- `continuous_spei_nlcd` — LC-stratified version: full eco × {crop, forest, grassland} grid + per-ecoregion LC-interaction model + Wald slopes-differ test
-- `event_detection` — drafted but currently PAUSED; resumes under skill-not-lead-time framing
+- `continuous_spei_nlcd` — LC-stratified version: full eco × 5-LC grid + per-ecoregion LC-interaction model + Wald slopes-differ test
+- `event_detection_nlcd` — LC-stratified event-anchored skill (2026-06-15): 8 fire signals (ndvi_z + 4 derivative windows + 3 SPEI windows) × 3 z × 3 K × 2 lead × 2 dir × 100 stratum tracks. SPEI joined as both fire signal AND ±8wk trajectory descriptor per event. POD/FAR/HSS/ETS from 4-week temporal-block contingency. Runtime ~5 hr full population
+- `event_detection` — original eco-only version (uses scalar matcher with a known row-ordering bug; superseded by `_nlcd` variant — see [[legacy-event-matcher-bug]] memory)
 - `qc` — stub
 
 The validation question is **NDVI monitor skill against typical drought measures (USDM, SPEI)**. Lead/lag is a diagnostic byproduct, not an optimization target.
+
+#### **Script 10: Phase 6 Figures** (~1-2 min per figure)
+```bash
+docker exec -w /workspace conus-hls-drought-monitor \
+  Rscript 10_phase6_figures.R --fig=<0|1|1b|2|all>
+```
+Builds Phase 6 headline figures from the analysis-section outputs. Currently includes:
+- `fig0` — domain reference map (EPA L2 ecoregions + NLCD 2019 modal LC, 2-panel)
+- `fig1` — NDVI ⊥ SPEI complementarity per ecoregion (100% stacked bar)
+- `fig1b` — same with LC × ecoregion facets
+- `fig2` — 8.3 Southeastern USA Plains deep-dive (3-panel: orientation + per-pixel POD map + HSS heatmap)
+
+Outputs land in `/data/figures/phase6/phase6_<figN>_<slug>.png` at 300 dpi. See PHASE6_VALIDATION_MEMO.md "Figures log" section for key takeaways per figure, and the Glossary section for acronym definitions.
 
 ## Data Flow
 

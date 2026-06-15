@@ -1,10 +1,19 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-15 ~13:25 CDT — **Section B `event_detection_nlcd` COMPLETE** (4 hr 19 min wall, 180 MB output). New LC-stratified, SPEI-aware event analysis with proper POD/FAR/HSS/ETS skill metrics. **Headline finding**: spei_4w (short meteorological window) dominates — wins 33 of 35 onset cells, 30 of 35 recovery cells. Best onset HSS = +0.473 (8.3 grass dom × spei_4w × z=1.5/K=1, n=6480, POD=0.526/FAR=0.473). Best recovery HSS = +0.223 (8.3 grass dom × deriv_w07_z). **NDVI vs SPEI fires are largely independent: only 4-5% concurrent firing at headline op-point** → NDVI provides complementary information beyond SPEI. Full writeup in [PHASE6_VALIDATION_MEMO.md](PHASE6_VALIDATION_MEMO.md) "Phase 6 Update: Section B".
+**Updated**: 2026-06-15 ~14:30 CDT — **Phase 6 Section B `event_detection_nlcd` COMPLETE + first 4 headline figures landed** (Fig 0 domain map, Fig 1 + 1b complementarity, Fig 2 8.3 deep-dive). All in `/data/figures/phase6/`. **Headline finding**: spei_4w dominates (33/35 onset cells), NDVI vs SPEI fires only 4-5% concurrent → strong complementarity argument. Best onset HSS = +0.473 (8.3 grass dom × spei_4w × z=1.5/K=1). Mid-session caught + corrected EPA L2 ecoregion mis-naming (8.3 = Southeastern USA Plains, NOT semi-arid prairies; that's 9.4). Glossary + figures log added to PHASE6_VALIDATION_MEMO.md.
 
 ## Active run
 
 (none)
+
+## Next session pickup
+
+- **Figure 3**: Section A × Section B 2×2 mechanism map (where do the two analyses agree vs disagree per eco × LC?)
+- **Figure 4**: four-mechanism eco map (from continuous_spei_nlcd) with Section B annotations
+- **Figure 5**: headline op-points heatmap (best HSS per signal × direction collapsed across strata)
+- **Follow-on**: flash-drought subset analysis — define USDM transitions of ≥2 classes in ≤4 weeks as "flash", re-score skill against that subset (cheap, no new model fits needed). Use existing event_detection_nlcd_10y.rds.
+- **Carryover from prior session** (still pending): 8.1 + 5.2 grass-worst DJF-excluded diagnostic; 8.4 Ozark "USDM-WORKS-but-SPEI-SILENT" deep dive
+- **Verify**: any earlier figures (`continuous_spei_nlcd`, `categorical_usdm_nlcd`) that may have ecoregion-name labels — re-verify they use canonical L2_name from pixel_to_ecoregion_l2.rds (see new `feedback_verify_epa_l2_names.md` memory).
 
 ## Session Summary (2026-06-15) — Section B event_detection_nlcd built + run
 
