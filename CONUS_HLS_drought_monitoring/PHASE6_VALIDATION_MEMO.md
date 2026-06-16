@@ -904,3 +904,99 @@ All figures land in `/data/figures/phase6/`. Built incrementally starting 2026-0
 - **Figure 3** — Section A × B 2×2 mechanism map (where do the two analyses agree vs disagree?).
 - **Figure 4** — four-mechanism eco map (from `continuous_spei_nlcd`) with Section B annotations.
 - **Figure 5** — headline op-points heatmap (best HSS per signal × direction).
+
+---
+
+# 2026-06-16 Session — Fig 3/4/5 built + flash drought subset analysis
+
+## Figure work — Fig 3, Fig 4 (pivoted), Fig 5 all complete
+
+Per the pending list above (carried in from prior session):
+
+- **Fig 3** (`phase6_fig3_section_a_vs_b_scatter.png`) — per-(eco × LC) scatter. X = Section A β (state agreement at spei_26w × ndvi_z × pooled × dom=all). Y = best NDVI-signal HSS from Section B (max over 5 NDVI signals × z × K). Open grey circle = best SPEI HSS (reference). Segment shows NDVI–SPEI skill gap when |gap| > 0.05. Color = NLCD class. Faceted by direction.
+- **Fig 4** (`phase6_fig4_complementarity_atlas.png`) — **pivoted from original "four-mechanism map" design**. The mechanism collapse (per-eco "best NDVI HSS" with a single LC pick) duplicated what Fig 3 already shows per stratum, and forced an ill-defined "best" selection (small-N urban_dense cells frequently won the "best" prize). Replaced with a per-pixel **NDVI⊥SPEI complementarity atlas** — pixel color blends from white (no NDVI-only firing) to a per-eco saturated hue at the complementarity rate. Two stacked panels (Onset / Recovery), bivariate legend on the right showing the eco × intensity grid. Directly answers the user-framed question: "where does NDVI add information?"
+- **Fig 5** (`phase6_fig5_op_point_heatmap.png`) — 2×8 heatmap of global max HSS per (signal × direction). NDVI monitor block (5 signals: ndvi_z + 4 derivatives) faceted above SPEI reference block (3 windows). Cell label includes best stratum, op-point, and n_blocks.
+
+## Flash drought subset analysis (exploratory; not yet in 09)
+
+### Definition
+- Reused existing `event_detection_nlcd_10y.rds` + cached USDM weekly.
+- Per-pixel rolling max USDM via `frollmax(dm_max, n=5L, align=...)` — n=5 = current week + 4 future/past = ~4-week look-ahead/-back window (Otkin-style).
+- Tagged each onset/recovery event with two flash flags:
+  - **`is_flash_d1`** (lenient): max(USDM) in ±4wk window ≥ D1
+  - **`is_flash`** (Otkin-strict): max(USDM) in ±4wk window ≥ D2
+- Per-event hit booleans come from `pixel_event_map` at the existing headline ops (ndvi_z at z=1.5, K=2; spei_13w at z=1.5, K=2; lead_window=8wk).
+
+### Tooling notes for future sessions
+- **Date alignment caveat**: events use `week_start` (Monday), USDM weekly uses `week_date` (Tuesday). Reconcile by `usdm[, week_start := week_date - 1L]`. Did NOT need iso_year/iso_week conversion.
+- `frollmax` works on integer USDM and is fast — preferred over `frollapply(FUN=max)`.
+- Trajectory + tagging + join completed in ~3 min on ~3M events.
+
+### Headline numbers (domain-wide; per-pixel hit at headline ops)
+
+**Onset (drought worsens):**
+
+| Subset | n events | NDVI hit | SPEI hit | NDVI only | SPEI only | NDVI relative lift |
+|---|---:|---:|---:|---:|---:|---:|
+| All events | 1,504,859 | 24.6% | 27.0% | 19.6% | 22.0% | −0.024 |
+| Flash ≥D1 in 4wk | 476,539 | 22.3% | 44.2% | 14.5% | 36.4% | −0.219 |
+| Flash ≥D2 in 4wk | 65,398 | 17.1% | **60.8%** | 7.7% | **51.4%** | **−0.437** |
+
+**Recovery (drought eases):**
+
+| Subset | n events | NDVI hit | SPEI hit | NDVI only | SPEI only | NDVI relative lift |
+|---|---:|---:|---:|---:|---:|---:|
+| All events | 1,448,992 | 23.4% | 17.7% | 19.4% | 13.7% | **+0.057** |
+| Flash ≥D1 in 4wk | 373,764 | 23.7% | 25.4% | 16.6% | 18.3% | −0.017 |
+| Flash ≥D2 in 4wk | 33,740 | 21.7% | 33.6% | 13.6% | 25.5% | −0.119 |
+
+### Interpretation — NDVI is a *slow* drought monitor, not a flash detector
+
+Three readings stand out:
+
+1. **NDVI's complementary value lives in the slow / baseline event population, not the flash subset.** On all events, NDVI and SPEI are roughly equivalent in hit rate (25% vs 27% onset; NDVI is *better* at recovery 23% vs 18%). As we tighten the flash filter, SPEI's hit rate climbs sharply (27 → 44 → 61%) while NDVI's drops (25 → 22 → 17%). NDVI-only firing on onset collapses 20% → 14% → 8%.
+2. **The mechanism is intuitive**: SPEI is the meteorological *trigger* — by definition it moves first. NDVI captures the vegetation *response* on a ~weeks-to-month lag. A 4-week window is approximately the lag time, so NDVI hasn't responded by the time the event is declared.
+3. **One striking exception**: 9.4 South Central Semiarid Prairies grass shows NDVI hit rate **+25 points** on flash recoveries vs all-recoveries (54% vs 29%) — and 9.4 crop +12 points. Semiarid grassland greens up visibly fast after rapid drought breaks. This is consistent with 9.4's WORKS mechanism in `continuous_spei_nlcd` (strong concurrent agreement) but extends it to a transition-skill claim specifically for flash *recovery*.
+
+### Per-stratum highlights (onset flash lift, n_flash ≥ 50)
+
+Strata where NDVI does **better** on flash onsets than overall:
+- 6.2 forest: +0.124 (small n=166)
+- 8.4 grass: +0.122 (n=1,475) — Ozark grass
+- 8.1 urban_diffuse: +0.098 (n=116)
+- 9.4 grass: +0.035 (n=3,160)
+
+Strata where NDVI does **worse** on flash onsets:
+- 9.2 corn-belt crop: **−0.078** (n=8,553) — the strongest negative; aligns with the REVERSES-crop mechanism in `continuous_spei_nlcd` (NDVI anti-tracks SPEI in managed cropland)
+- 9.4 crop: −0.065 (n=3,768)
+- 8.3 grass: −0.065 (n=2,814)
+
+### Per-stratum highlights (recovery flash lift, n_flash ≥ 50)
+
+NDVI **wins** on flash recoveries:
+- **9.4 grass: +0.251** (n=4,014) — biggest win in the table
+- **9.4 crop: +0.124** (n=3,797)
+- 8.2 forest: +0.053 (small n=122)
+- 8.3 forest: +0.026 (n=4,086)
+
+NDVI loses on flash recoveries elsewhere — particularly 8.4 forest (−0.107), 8.1 forest (−0.109).
+
+### Caveats
+
+- This is a **hit-rate**, not HSS, analysis. HSS would require recomputing the 4-week-block contingency on the flash subset (correct negatives change because the event population changes). Productionizing into `section_flash_drought` should add this.
+- "Flash" defined here by max USDM trajectory, not by the *rate* of USDM intensification per week (Otkin's strictest definition). A truer Otkin proxy would require slope-of-USDM-over-4wk. The trajectory-max version is the simpler valid proxy.
+- Per-stratum N drops sharply for the D2+ strict subset. Many cells were dropped at n ≥ 50. The lift estimates for small-N cells (6.2 forest n=166, 8.1 urban_diffuse n=116) should be read with caution.
+- Headline ops are fixed at z=1.5, K=2, lead=8wk. We did not sweep ops on the flash subset.
+
+### Files
+
+- Exploration script: `tmp_flash_drought_exploration.R` (not productionized; safe to delete after `section_flash_drought` is written or kept as reference)
+- Saved intermediate: `/data/validation/flash_drought_exploration.rds` (9.64 MB) — contains `ev_full`, `strat`, `domain_summary`, and `meta`
+
+### Implications for the methods/results memo
+
+The flash drought finding **strengthens the headline framing of the project**: NDVI is a complementary monitor for *slow* drought, not a replacement for SPEI on rapid drought. This positions NDVI in a specific operational niche:
+
+- Routine slow-onset drought where the meteorological signal is ambiguous: NDVI adds value
+- Flash drought monitoring: SPEI dominates; NDVI is a lagging confirmation, not a leading indicator
+- Recovery from drought: NDVI has a small edge on slow recoveries (greening visible before SPEI normalizes), and a large edge on flash recoveries in 9.4 semiarid grass specifically

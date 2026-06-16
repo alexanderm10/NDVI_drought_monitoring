@@ -1,26 +1,49 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-16 afternoon — **Phase 6 Fig 3 + Fig 4 + Fig 5 COMPLETE.** Three new figures in `/data/figures/phase6/`: Section A × B scatter (`phase6_fig3_section_a_vs_b_scatter.png`, 540K), per-pixel NDVI⊥SPEI complementarity atlas (`phase6_fig4_complementarity_atlas.png`, 1.6M, two panels Onset|Recovery), op-points heatmap (`phase6_fig5_op_point_heatmap.png`, 381K). Fig 4 was originally designed as a four-mechanism eco map with Section B HSS labels, but mid-build we **pivoted to a complementarity atlas** — Fig 3 already does the A-vs-B comparison cleanly per (eco × LC), so an extra map collapse didn't add value. The atlas directly answers "where does NDVI add information?" (the user-framed question after walking through Fig 3). Added ggrepel to container. Two figure-reviewer rounds before commit.
+**Updated**: 2026-06-16 EOD — **Two big things landed today**: (1) Phase 6 Fig 3 + Fig 4 + Fig 5 (committed 6da404b); (2) **Flash drought subset exploration** — first analytical look at NDVI vs SPEI skill on rapid-onset / rapid-recovery USDM transitions. The flash result is the headline of the session: **NDVI is not a flash drought monitor**. As we tighten the flash filter (max USDM trajectory ≥D1 → ≥D2 in 4wk), SPEI's hit rate climbs sharply (27 → 44 → 61% for onset) while NDVI's drops (25 → 22 → 17%). NDVI-only firing collapses 20% → 14% → 8%. Vegetation lag (~weeks-to-month) is too long for the meteorological-trigger window. **One striking exception**: 9.4 South Central Semiarid Prairies grass shows NDVI hit rate +25 points on flash recoveries (54% vs 29%) — semiarid grass greens up visibly fast after rapid drought breaks. Full findings + tables + interpretation written to `PHASE6_VALIDATION_MEMO.md` (new section dated 2026-06-16). Exploration script `tmp_flash_drought_exploration.R` + intermediate RDS at `/data/validation/flash_drought_exploration.rds`. Not yet productionized into section_flash_drought in 09; no figure yet built.
 
 ## Active run
 
 (none)
 
-## Next session pickup
+## Toward methods/results memo (1-2 more sessions)
 
-**Originally queued (still pending):**
-- **Follow-on**: flash-drought subset analysis — define USDM transitions of ≥2 classes in ≤4 weeks as "flash", re-score skill against that subset (cheap, no new model fits needed). Use existing event_detection_nlcd_10y.rds.
+The user wants to write a brief methods/results memo for colleagues after ~1-2 more sessions. The substantive findings now in hand:
 
-**Carryover from prior sessions (still pending):**
-- 8.1 + 5.2 grass-worst DJF-excluded diagnostic (carryover from 2026-06-12 EOD — test snow contamination in cold ecoregions)
-- 8.4 Ozark "USDM-WORKS-but-SPEI-SILENT" deep dive (carryover from 2026-06-12 — reconcile categorical_usdm vs continuous_spei discrepancy)
-- Verify earlier figures (`continuous_spei_nlcd`, `categorical_usdm_nlcd`) use canonical L2_name per `feedback_verify_epa_l2_names.md`
+1. **Section A** (`continuous_spei_nlcd`) — four-mechanism eco × LC story (WORKS / SILENT / REVERSES-crop / REVERSES-grass + 9.3 grass-only WORKS)
+2. **Section A++** (`categorical_usdm_nlcd`) — USDM ρ shows different pattern than SPEI β (8.4 Ozark USDM-WORKS-but-SPEI-SILENT; 9.2 urban density split absent on USDM side)
+3. **Section B** (`event_detection_nlcd`) — spei_4w dominates onset; NDVI⊥SPEI complementarity ~19% NDVI-only across both directions; 8.3 Southeastern USA Plains is the operational dark horse for onset detection
+4. **Section B+flash subset** (this session) — NDVI is a slow-drought monitor not flash; 9.4 grass exception on flash recovery
+5. **Headline figures**: Fig 0 (domain), Fig 1+1b (complementarity), Fig 2 (8.3 deep-dive), Fig 3 (A vs B scatter), Fig 4 (complementarity atlas), Fig 5 (op-point heatmap), Fig 6/7/8 (case-year time series)
 
-**New from this session:**
-- **Revisit 05_*.R scripts** — at session start the plan was to refactor `05a_timeseries_quick.R` / `05b_animation_maps.R` / `05c_create_yearly_gifs.R`. Now that Fig 6/7/8 cover most of the time-series visualization need, decide: (a) deprecate 05a in favor of Fig 6 wrapper, (b) keep 05b/c animation as-is, (c) move all into `10_phase6_figures.R`.
-- **Empirical growing-season redux** — 00c_compute_growing_seasons.R is half-built. Saved table at `/data/gam_models/growing_seasons_stratum.rds` is from the failed derivative-threshold attempt. To resume: try amplitude-50% rule (Option B from session discussion) or hybrid (derivative for SOS @ 50%, NDVI-symmetry for EOS). Both should give tighter windows than the 25%/15% versions. Re-wire renderers to consume the lookup once a method works.
-- **NDVI + SPEI ensemble signal test** — Section B showed only 4-5% concurrent firing between NDVI and SPEI. Test whether a logical-OR ensemble at the headline op-point beats either alone (cheap; reuse event_detection_nlcd_10y.rds).
-- **Figure-reviewer polish pass** — bump legend.key.size 0.4 → 0.5 cm if Fig 6/7/8 go on slides; verify all titles use canonical L2_name (sample check on a few of the 71 figures).
+**What still needs to land before the memo writeup:**
+
+### A. High-priority for memo (do next session)
+- **Fig 9 — flash drought comparison figure**. Recommended shape: 2×3 grid (rows = direction onset/recovery, cols = subset all/flash-D1/flash-D2) of (NDVI hit, SPEI hit) scatter per stratum, with 1:1 reference line. Visualizes the "NDVI loses on flash, holds on slow" finding directly. Could also add a panel highlighting 9.4 grass recovery as the exception.
+- **Productionize flash subset into `section_flash_drought` in script 09** — wrap the trajectory + tagging + skill logic cleanly. Add proper HSS computation (4-wk-block contingency on flash subset, not just hit rates). Save `flash_drought_10y.rds`.
+- **Verify canonical L2_name in Fig 3, Fig 4 captions/legends** per `feedback_verify_epa_l2_names.md`. Sample check.
+
+### B. Strengthen the story (do next session if time)
+- **8.4 Ozark "USDM-WORKS-but-SPEI-SILENT" deep dive** — reconcile categorical_usdm vs continuous_spei discrepancy. What signal are USDM analysts using in 8.4 that the meteorological SPEI series doesn't carry?
+- **NDVI + SPEI ensemble signal test** — logical-OR at headline op vs each alone. Given the 19% complementarity rate, OR ensemble should beat either by ~5-10 percentage points on hit rate. Cheap reuse of pixel_event_map.
+
+### C. Cleanup before memo finalization
+- **8.1 + 5.2 grass-worst DJF-excluded diagnostic** (snow-contamination hypothesis) — only worth doing if the memo needs to address why the REVERSES-grass mechanism exists. Could defer.
+- **Empirical growing-season redux** (00c) — only matters if Fig 6/7/8 go in the memo and we want stratum-appropriate growing-season bands rather than the Mar 1–Sep 30 calendar default. Can defer.
+- **05_*.R refactor decision** — orthogonal to memo. Can defer.
+
+### D. Suggested first-session-focus when resuming
+**Build Fig 9** (the flash comparison) + **write the flash subset section of the memo proper** (clean writeup, less notebook-style than the PHASE6_VALIDATION_MEMO entry). Then **productionize section_flash_drought** so the analysis is reproducible. That should be ~one focused session and lands the headline analytical result of the memo.
+
+**Second session-focus**: 8.4 Ozark deep-dive + ensemble test + L2_name verify pass + assemble memo outline.
+
+## Recent session summaries (full detail below)
+- 2026-06-16 (this session): Fig 3+4+5 built; Fig 4 pivoted to complementarity atlas; flash drought exploration (above).
+- 2026-06-15: Section B `event_detection_nlcd` built + run (180 MB output, 4 hr 19 min wall).
+- 2026-06-12: USDM 5-LC + SPEI 5-LC rerun; 8.4 USDM-WORKS-but-SPEI-SILENT discrepancy surfaced.
+- 2026-06-11: Phase 6 reframe; Section A `continuous_spei` complete; Section C `within_week_diagnostic` complete.
+- 2026-06-10: `categorical_usdm` v3 built; Phase 6 reframe.
+- (earlier): align_weekly cache + derivatives rebuild + weekly SPI/SPEI.
 
 ## Session Summary (2026-06-15) — Section B event_detection_nlcd built + run
 
