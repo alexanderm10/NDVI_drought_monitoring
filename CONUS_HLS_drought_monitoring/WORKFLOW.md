@@ -220,13 +220,16 @@ The validation question is **NDVI monitor skill against typical drought measures
 #### **Script 10: Phase 6 Figures** (~1-2 min per figure; Fig 7 set is ~5 min for 57 panels)
 ```bash
 docker exec -w /workspace conus-hls-drought-monitor \
-  Rscript 10_phase6_figures.R --fig=<0|1|1b|2|6|7|8|all>
+  Rscript 10_phase6_figures.R --fig=<0|1|1b|2|3|4|5|6|7|8|all>
 ```
 Builds Phase 6 headline figures from the analysis-section outputs. Currently includes:
 - `fig0` — domain reference map (EPA L2 ecoregions + NLCD 2019 modal LC, 2-panel)
 - `fig1` — NDVI ⊥ SPEI complementarity per ecoregion (100% stacked bar)
 - `fig1b` — same with LC × ecoregion facets
 - `fig2` — 8.3 Southeastern USA Plains deep-dive (3-panel: orientation + per-pixel POD map + HSS heatmap)
+- `fig3` — Section A (state agreement) vs Section B (transition skill) scatter per (eco × LC). Open grey circle = SPEI-reference HSS; segment = NDVI–SPEI gap. Faceted by direction. Colored by LC.
+- `fig4` — NDVI⊥SPEI per-pixel complementarity atlas (where does NDVI add information?). Two panels (Onset / Recovery). Pixel color = fraction of events where NDVI fired but SPEI didn't.
+- `fig5` — Headline op-points: 2×8 heatmap of best HSS per (signal × direction). Top facet = NDVI monitor (5 signals); bottom = SPEI reference (3 windows). Cell label = (best stratum, op, n).
 - `fig6` — domain-wide case-year time series (NDVI anom / deriv anom / USDM stacked area, faceted by year ∈ {2017, 2019, 2021, 2023})
 - `fig7` — same case-year layout per stratum: 43 (eco × LC) cells + 9 per-eco + 5 per-LC (57 panels total, output `phase6_fig7_*.png`)
 - `fig8` — per-ecoregion LC overlay: all 5 NLCD Juliana classes as colored lines on the same axes within each eco (9 panels)

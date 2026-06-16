@@ -19,6 +19,7 @@
 suppressPackageStartupMessages({
   library(data.table)
   library(ggplot2)
+  library(ggrepel)
   library(scales)
   library(sf)
   library(maps)
@@ -51,6 +52,25 @@ ECO_NAMES <- c(
   "9.2" = "Temperate Prairies (Corn Belt)",
   "9.3" = "West-Central Semiarid Prairies",
   "9.4" = "South Central Semiarid Prairies"
+)
+
+# Per-ecoregion color palette — keep in sync with Fig 0 so eco identity
+# carries across figures. Keyed by L2_code (not "L2 name" composite).
+ECO_PAL <- setNames(
+  c("#7FB069", "#A4C2A8", "#6BAED6", "#FDE68A", "#F4A261",
+    "#9D6B53", "#E5989B", "#7E57C2", "#B0413E"),
+  names(ECO_NAMES)
+)
+
+# Hand-picked saturated variants of ECO_PAL for the bivariate (eco × intensity)
+# Fig 4 ramp. Fig 0's palette was designed for cartographic full-saturation use
+# (8.2 = pale cream-yellow) and disappears toward white in a blend-to-white
+# scheme. These variants preserve the hue but force similar mid-darkness so the
+# intensity dimension stays consistent across ecoregions.
+ECO_PAL_BIVAR <- setNames(
+  c("#5E8E47", "#73A189", "#3F8FBA", "#E5C53D", "#D17F36",
+    "#7C4F38", "#C66E72", "#5C3B91", "#8C2E2A"),
+  names(ECO_NAMES)
 )
 
 # Common ggplot theme
@@ -1096,10 +1116,502 @@ make_fig8_eco_lc_overlay <- function() {
   invisible(NULL)
 }
 
+# ------------------------------------------------------------------------------
+# Constants shared by Fig 3 / 4 / 5 — the "Section A canonical slice" and
+# the NDVI-vs-SPEI signal split (NDVI is the monitor; SPEI is the reference).
+#
+# Per [[phase6-question-is-skill]]: we ask whether the NDVI monitor shows skill
+# against typical drought references (USDM, SPEI). SPEI is therefore reported
+# alongside the NDVI signals in Section B but should NOT be folded into the
+# NDVI monitor's headline HSS — doing so conflates the reference with the
+# thing being validated. Fig 3 + Fig 4 use NDVI-side max HSS; Fig 5 shows both
+# tiers (NDVI monitor vs SPEI reference) side by side.
+# ------------------------------------------------------------------------------
+NDVI_SIGNALS <- c("ndvi_z", "deriv_w03_z", "deriv_w07_z",
+                  "deriv_w14_z", "deriv_w30_z")
+SPEI_SIGNALS <- c("spei_4w", "spei_13w", "spei_26w")
+ALL_SIGNALS  <- c(NDVI_SIGNALS, SPEI_SIGNALS)
+
+# Fig 3 / Fig 4 use this Section A slice as the canonical "state agreement"
+# axis — it matches the four-mechanism story documented in the
+# continuous_spei_nlcd findings memo (spei_26w × ndvi_z × pooled × dom=all).
+SECA_CANON <- list(spei_col = "spei_26w", signal_col = "ndvi_z",
+                   model_type = "pooled", dom_filter = "all")
+
+# Four-mechanism classification per [[continuous-spei-nlcd-findings]]
+# (2026-06-12 afternoon). Hardcoded from the memo; 8.5 has too few pixels to
+# fit cleanly into the typology and is omitted from Fig 4.
+ECO_MECHANISM <- c(
+  "5.2" = "REVERSES (grass worst)",
+  "6.2" = "WORKS",
+  "8.1" = "REVERSES (grass worst)",
+  "8.2" = "SILENT",
+  "8.3" = "SILENT",
+  "8.4" = "SILENT",
+  "9.2" = "REVERSES (crop strongest)",
+  "9.3" = "WORKS (grass only)",
+  "9.4" = "WORKS"
+)
+MECHANISM_LEVELS <- c("WORKS", "WORKS (grass only)", "SILENT",
+                      "REVERSES (crop strongest)", "REVERSES (grass worst)")
+MECHANISM_PAL <- c(
+  "WORKS"                     = "#2E7D32",   # dark green
+  "WORKS (grass only)"        = "#7FB069",   # light green
+  "SILENT"                    = "#BDBDBD",   # neutral grey
+  "REVERSES (crop strongest)" = "#7E57C2",   # purple (corn belt)
+  "REVERSES (grass worst)"    = "#B0413E"    # dark red (boreal)
+)
+
+# Land cover palette (same as Fig 0 / Fig 7 — keep colors consistent across figs)
+LC_PAL <- c(
+  "crop"          = "#F4D03F",
+  "forest"        = "#196F3D",
+  "grassland"     = "#A2B362",
+  "urban_dense"   = "#7B241C",
+  "urban_diffuse" = "#D98880"
+)
+
+# Compact LC labels for crowded scatter/map text. Distinguishes urban_dense
+# from urban_diffuse (substr(., 1, 5) collapses both to "urban") and avoids
+# the ugly "fores" truncation for forest.
+LC_SHORT <- c(
+  "crop"          = "crop",
+  "forest"        = "forest",
+  "grassland"     = "grass",
+  "urban_dense"   = "u-dense",
+  "urban_diffuse" = "u-diff"
+)
+
+# ------------------------------------------------------------------------------
+# Shared loaders for Fig 3 / 4 / 5
+# ------------------------------------------------------------------------------
+
+#' Load Section A canonical slice (one β per L2 × LC).
+#' Returns data.table with: L2_code, nlcd_juliana, beta, p, r2_within, n_pixels.
+load_seca_canonical <- function() {
+  out_a <- readRDS_retry(file.path(paths$validation_data,
+                                    "continuous_spei_nlcd_10y.rds"))
+  A <- as.data.table(out_a$fit_table_lc)
+  A[spei_col    == SECA_CANON$spei_col &
+    signal_col  == SECA_CANON$signal_col &
+    model_type  == SECA_CANON$model_type &
+    dom_filter  == SECA_CANON$dom_filter &
+    L2_code     != "0.0",
+    .(L2_code, nlcd_juliana, beta, p, r2_within, n_pixels)]
+}
+
+#' Aggregate Section B skill_lc to one best-HSS row per
+#' (L2_code × nlcd_juliana × direction × signal_tier),
+#' where signal_tier ∈ {"NDVI", "SPEI"}.
+#' Returns wide table with best_hss_ndvi + best_hss_spei + best_signal_ndvi.
+load_secb_best_hss <- function() {
+  out_b <- readRDS_retry(file.path(paths$validation_data,
+                                    "event_detection_nlcd_10y.rds"))
+  SK <- as.data.table(out_b$skill_lc)
+  SK <- SK[dom_filter == "all" & L2_code != "0.0" &
+           is.finite(hss)]
+
+  best_per_tier <- function(sig_set) {
+    dt <- SK[signal_col %in% sig_set]
+    dt[order(-hss), .SD[1L], by = .(L2_code, nlcd_juliana, direction),
+       .SDcols = c("hss", "signal_col", "z_threshold",
+                   "sustained_weeks", "n_blocks_total",
+                   "pod", "far", "bias", "ets")]
+  }
+
+  ndvi <- best_per_tier(NDVI_SIGNALS)
+  setnames(ndvi, c("hss", "signal_col", "z_threshold", "sustained_weeks",
+                   "n_blocks_total", "pod", "far", "bias", "ets"),
+                 c("best_hss_ndvi", "best_signal_ndvi", "best_z_ndvi",
+                   "best_K_ndvi", "n_blocks_ndvi",
+                   "pod_ndvi", "far_ndvi", "bias_ndvi", "ets_ndvi"))
+
+  spei <- best_per_tier(SPEI_SIGNALS)
+  setnames(spei, c("hss", "signal_col", "z_threshold", "sustained_weeks",
+                   "n_blocks_total", "pod", "far", "bias", "ets"),
+                 c("best_hss_spei", "best_signal_spei", "best_z_spei",
+                   "best_K_spei", "n_blocks_spei",
+                   "pod_spei", "far_spei", "bias_spei", "ets_spei"))
+
+  merge(ndvi, spei, by = c("L2_code", "nlcd_juliana", "direction"), all = TRUE)
+}
+
+# ------------------------------------------------------------------------------
+# Figure 3: Section A (state) vs Section B (transitions) — scatter per (eco × LC)
+#
+# X: Section A β at canonical slice (NDVI_z ~ SPEI_26w, pooled, dom=all)
+# Y: Section B best NDVI-signal HSS (max over 5 NDVI signals × z × K)
+# Open circle: Section B best SPEI-signal HSS (reference) — connected by segment
+# Color: NLCD class. Facet: direction (onset / recovery).
+#
+# Quadrants:
+#   +β / +HSS   = WORKS (state AND transition both detectable)
+#   +β / ~0 HSS = state-only (NDVI tracks SPEI but event timing is off)
+#   ~0/-β / +HSS = transition-only (8.3 mechanism — SILENT on state, WORKS on events)
+#   -β / -HSS    = REVERSES (anti-tracks SPEI both ways)
+# ------------------------------------------------------------------------------
+make_fig3_section_a_vs_b <- function() {
+  cat("\n=== Figure 3: Section A × Section B scatter ===\n")
+
+  A <- load_seca_canonical()
+  B <- load_secb_best_hss()
+
+  AB <- merge(A, B, by = c("L2_code", "nlcd_juliana"))
+  AB[, nlcd_juliana := factor(nlcd_juliana, levels = names(LC_PAL))]
+  AB[, direction := factor(direction, levels = c("onset", "recovery"),
+                           labels = c("Onset (drought worsens)",
+                                      "Recovery (drought eases)"))]
+
+  # Label rule: top-3 best NDVI HSS per direction, OR extreme β (|β|>0.10),
+  # OR notably negative NDVI HSS (<−0.02). These mark the "story" cells.
+  AB[, label_me := (rank(-best_hss_ndvi, ties.method = "first") <= 3 |
+                    abs(beta) > 0.10 |
+                    best_hss_ndvi < -0.02),
+     by = direction]
+  AB[, point_label := sprintf("%s %s", L2_code,
+                              LC_SHORT[as.character(nlcd_juliana)])]
+
+  # NDVI/SPEI gap (vertical segment): show only when |gap| > 0.05 to avoid clutter
+  AB[, show_gap := abs(best_hss_ndvi - best_hss_spei) > 0.05]
+
+  # Axis ranges — use union of NDVI + SPEI HSS so segments don't cliff
+  y_lo <- min(c(AB$best_hss_ndvi, AB$best_hss_spei), na.rm = TRUE) - 0.02
+  y_hi <- max(c(AB$best_hss_ndvi, AB$best_hss_spei), na.rm = TRUE) + 0.02
+
+  p <- ggplot(AB, aes(x = beta, y = best_hss_ndvi)) +
+    # Quadrant guides
+    geom_hline(yintercept = 0, color = "grey55", linewidth = 0.35,
+               linetype = "dashed") +
+    geom_vline(xintercept = 0, color = "grey55", linewidth = 0.35,
+               linetype = "dashed") +
+    # SPEI reference: open grey circle + thin connecting segment
+    geom_segment(data = AB[show_gap == TRUE],
+                 aes(x = beta, xend = beta,
+                     y = best_hss_ndvi, yend = best_hss_spei),
+                 color = "grey55", linewidth = 0.35, alpha = 0.7,
+                 inherit.aes = FALSE) +
+    geom_point(data = AB,
+               aes(x = beta, y = best_hss_spei),
+               shape = 1, color = "grey35", size = 2.4, stroke = 0.7,
+               alpha = 0.85, inherit.aes = FALSE) +
+    # NDVI-side filled point, sized by sqrt(n_pixels)
+    geom_point(aes(fill = nlcd_juliana, size = sqrt(n_pixels)),
+               shape = 21, color = "grey15", stroke = 0.4, alpha = 0.9) +
+    # Selective labels via ggrepel (handles collisions automatically)
+    ggrepel::geom_text_repel(
+      data = AB[label_me == TRUE],
+      aes(label = point_label),
+      size = 2.8, color = "grey15", fontface = "bold",
+      box.padding = 0.4, point.padding = 0.3,
+      min.segment.length = 0.1, segment.alpha = 0.5, segment.size = 0.3,
+      max.overlaps = Inf, seed = 42
+    ) +
+    facet_wrap(~ direction, nrow = 1) +
+    scale_fill_manual(values = LC_PAL, name = "Land cover (NLCD)",
+                      drop = FALSE) +
+    scale_size_continuous(range = c(2, 7.5), guide = "none") +
+    scale_x_continuous(expand = expansion(mult = c(0.04, 0.08))) +
+    scale_y_continuous(limits = c(y_lo, y_hi)) +
+    guides(fill = guide_legend(override.aes = list(size = 5))) +
+    labs(
+      title    = "Figure 3. Section A (state agreement) vs Section B (transition skill)",
+      subtitle = "One point per (ecoregion × NLCD class). Open grey circle = SPEI-side best HSS (reference); segment = NDVI–SPEI skill gap when |gap| > 0.05.",
+      x = sprintf("Section A β   (NDVI_z ~ SPEI_26w, pooled, dom=all)"),
+      y = "Section B best NDVI-signal HSS  (max over 5 NDVI signals × z × K)",
+      caption = paste0(
+        "Quadrants: +β ∧ +HSS = WORKS (state + transition); +β ∧ ~0 HSS = state-only; ~0/-β ∧ +HSS = transition-only (8.3 mechanism); −β ∧ −HSS = REVERSES.\n",
+        "Point size ∝ √n_pixels. Labels: top-3 by NDVI HSS per direction, |β|>0.10, or NDVI HSS<−0.02. NDVI signals = ndvi_z + 4 derivative windows. SPEI signals = {4w, 13w, 26w}.\n",
+        "Sources: continuous_spei_nlcd_10y.rds (2026-06-12) + event_detection_nlcd_10y.rds (2026-06-15)."
+      )
+    ) +
+    phase6_theme(base_size = 11) +
+    theme(legend.position = "bottom",
+          strip.text = element_text(face = "bold", size = rel(1.05)))
+
+  out_path <- file.path(FIG_DIR, "phase6_fig3_section_a_vs_b_scatter.png")
+  ggsave(out_path, p, width = 14, height = 8.5, dpi = 300, bg = "white")
+  cat(sprintf("  wrote %s (%.2f MB)\n", out_path, file.size(out_path) / 1e6))
+  invisible(out_path)
+}
+
+# ------------------------------------------------------------------------------
+# Figure 4: NDVI–SPEI complementarity atlas
+#
+# Per-pixel raster of "NDVI fires & SPEI doesn't" rate — directly answers the
+# question Fig 3 motivates: WHERE in the Midwest does NDVI add independent
+# information beyond the SPEI reference? Two panels (Onset | Recovery).
+#
+# Per-pixel rate = mean over this pixel's USDM events of:
+#   (ndvi_z headline-op fired) AND NOT (spei_13w headline-op fired)
+#
+# Sources:
+#   out_b$pixel_event_map — per-pixel hit booleans at headline op (z=1.5, K=2)
+#     for the two headline signals (ndvi_z and spei_13w).
+# ------------------------------------------------------------------------------
+make_fig4_complementarity_atlas <- function() {
+  cat("\n=== Figure 4: NDVI–SPEI complementarity atlas ===\n")
+
+  out_b <- readRDS_retry(file.path(paths$validation_data,
+                                    "event_detection_nlcd_10y.rds"))
+  vp    <- as.data.table(readRDS_retry(file.path(paths$validation_data,
+                                                  "pixel_to_ecoregion_l2.rds")))
+  nlcd  <- as.data.table(readRDS_retry(file.path(paths$gam_models,
+                                                  "valid_pixels_nlcd2019.rds")))
+
+  # Cast pem to wide form: per (pixel × event), one boolean column per signal
+  pem <- as.data.table(out_b$pixel_event_map)
+  pew <- dcast(pem, pixel_id + week_start + event_type ~ headline_signal,
+               value.var = "hit")
+
+  # Per-pixel × direction complementarity rate
+  per_pix <- pew[, .(
+    n_events       = .N,
+    ndvi_only_rate = mean( ndvi_z & !spei_13w, na.rm = TRUE),
+    spei_only_rate = mean(!ndvi_z &  spei_13w, na.rm = TRUE),
+    both_rate      = mean( ndvi_z &  spei_13w, na.rm = TRUE),
+    neither_rate   = mean(!ndvi_z & !spei_13w, na.rm = TRUE)
+  ), by = .(pixel_id, event_type)]
+  # Suppress noisy small-n pixels — per Section B 4-wk-block grain, ≥10 events
+  # in 10 yr means roughly ~1 event per year visible to the signal
+  per_pix <- per_pix[n_events >= 10L]
+  per_pix <- merge(per_pix, nlcd[, .(pixel_id, x, y)], by = "pixel_id")
+  per_pix[, event_type := factor(event_type,
+                                  levels = c("onset", "recovery"),
+                                  labels = c("Onset (drought worsens)",
+                                             "Recovery (drought eases)"))]
+
+  # Ecoregion polygons (dissolved by L2 code), for outline + name labels
+  eco_sf <- readRDS_retry(file.path(paths$validation_data,
+                                     "ecoregions_midwest_l2.rds"))
+  eco_sf <- eco_sf[!eco_sf$NA_L2CODE %in% c("0.0"), ]
+  eco_dissolved <- aggregate(eco_sf["NA_L2CODE"],
+                             by = list(L2_code = eco_sf$NA_L2CODE),
+                             FUN = function(x) x[1])
+  eco_dissolved$NA_L2CODE <- NULL
+  eco_dissolved <- eco_dissolved[eco_dissolved$L2_code %in% names(ECO_NAMES), ]
+
+  # Eco label centroids — short label (code + name only, no skill numbers)
+  centroids <- suppressWarnings(st_point_on_surface(eco_dissolved))
+  centroid_coords <- as.data.table(st_coordinates(centroids))
+  setnames(centroid_coords, c("X", "Y"), c("cx", "cy"))
+  centroid_coords[, L2_code := eco_dissolved$L2_code]
+  centroid_coords[, label   := sprintf("%s\n%s", L2_code,
+                                       ECO_NAMES[L2_code])]
+
+  # State outlines + Great Lakes mask
+  states <- st_transform(st_as_sf(map("state", plot = FALSE, fill = TRUE)), 5070)
+  lakes_raw <- suppressWarnings(maps::map("lakes", plot = FALSE, fill = TRUE))
+  lakes_sf  <- suppressWarnings(st_transform(st_as_sf(lakes_raw), 5070))
+
+  bbox_pix <- c(xmin = min(per_pix$x) - 25e3, xmax = max(per_pix$x) + 25e3,
+                ymin = min(per_pix$y) - 25e3, ymax = max(per_pix$y) + 25e3)
+
+  # Per-eco aggregate complementarity for caption sanity (one row per dir × eco)
+  per_eco <- merge(per_pix, vp[, .(pixel_id, L2_code)], by = "pixel_id")
+  per_eco_summary <- per_eco[, .(
+    n_pix    = uniqueno_na(pixel_id),
+    eco_mean = mean(ndvi_only_rate, na.rm = TRUE)
+  ), by = .(event_type, L2_code)]
+
+  # Domain-mean per direction (informational — printed to console)
+  cat("  domain-mean NDVI-only rate by direction:\n")
+  print(per_pix[, .(mean_rate = mean(ndvi_only_rate),
+                    median_rate = median(ndvi_only_rate),
+                    n_pixels = .N), by = event_type])
+
+  # Bivariate fill: each pixel's color = blend(white, ECO_PAL_BIVAR[eco],
+  # frac = rate / RATE_CAP). High-rate pixels in eco X show eco X's saturated
+  # color; low-rate pixels approach white. Drops text labels — eco identity is
+  # carried by hue in the data itself. ECO_PAL_BIVAR is intentionally darker
+  # than Fig 0's ECO_PAL so pale ecos (8.2 Central USA Plains, etc.) remain
+  # visible at intermediate rates.
+  RATE_CAP <- 0.5  # 0% → white, RATE_CAP+ → fully saturated eco color
+  per_pix <- merge(per_pix, vp[, .(pixel_id, L2_code)], by = "pixel_id")
+  per_pix <- per_pix[L2_code %in% names(ECO_PAL_BIVAR)]
+
+  blend_to_white_vec <- function(target_cols, fracs) {
+    rgb_t <- col2rgb(target_cols) / 255  # 3 × N
+    f <- matrix(rep(fracs, each = 3), nrow = 3)
+    blended <- rgb_t * f + (1 - f)
+    rgb(blended[1, ], blended[2, ], blended[3, ])
+  }
+
+  per_pix[, blend_frac := pmin(ndvi_only_rate / RATE_CAP, 1)]
+  per_pix[, pixel_color := blend_to_white_vec(
+    ECO_PAL_BIVAR[as.character(L2_code)], blend_frac
+  )]
+
+  # --- Main map (two panels: Onset | Recovery) -----------------------------
+  p_map <- ggplot() +
+    geom_raster(data = per_pix, aes(x = x, y = y, fill = pixel_color)) +
+    geom_sf(data = eco_dissolved, fill = NA, color = "grey20",
+            linewidth = 0.4) +
+    geom_sf(data = lakes_sf, fill = "white", color = "grey55",
+            linewidth = 0.25) +
+    geom_sf(data = states, fill = NA, color = "grey35", linewidth = 0.25) +
+    coord_sf(xlim = bbox_pix[c("xmin", "xmax")],
+             ylim = bbox_pix[c("ymin", "ymax")],
+             crs = st_crs(5070), expand = FALSE) +
+    scale_fill_identity() +
+    facet_wrap(~ event_type, ncol = 1) +
+    labs(
+      title    = "Figure 4. Where does NDVI add information? — per-pixel complementarity atlas",
+      subtitle = "Pixel hue = ecoregion. Color intensity (saturation) = fraction of this pixel's USDM events where NDVI fired but SPEI did not. White = NDVI rarely adds independent info."
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(plot.title       = element_text(face = "bold", size = 14),
+          plot.subtitle    = element_text(color = "grey30"),
+          panel.grid       = element_blank(),
+          axis.text        = element_blank(),
+          axis.title       = element_blank(),
+          axis.ticks       = element_blank(),
+          strip.text       = element_text(face = "bold", size = rel(1.05)),
+          plot.margin      = margin(t = 8, r = 8, b = 4, l = 8))
+
+  # --- Bivariate legend (eco × intensity grid, vertical layout) ----------
+  rate_breaks <- c(0, 0.10, 0.20, 0.30, 0.40, 0.50)
+  legend_data <- CJ(L2_code = names(ECO_PAL_BIVAR), rate = rate_breaks)
+  legend_data[, blend_frac := pmin(rate / RATE_CAP, 1)]
+  legend_data[, color := blend_to_white_vec(
+    ECO_PAL_BIVAR[as.character(L2_code)], blend_frac
+  )]
+  legend_data[, eco_label := factor(
+    sprintf("%s  %s", L2_code, ECO_NAMES[L2_code]),
+    levels = rev(sprintf("%s  %s", names(ECO_NAMES), unname(ECO_NAMES)))
+  )]
+  legend_data[, rate_label := scales::percent(rate, accuracy = 1)]
+
+  p_legend <- ggplot(legend_data,
+                     aes(x = factor(rate_label, levels = scales::percent(
+                       rate_breaks, accuracy = 1)),
+                         y = eco_label, fill = color)) +
+    geom_tile(color = "white", linewidth = 0.6) +
+    scale_fill_identity() +
+    scale_x_discrete(position = "top") +
+    labs(
+      title    = "Eco × intensity",
+      subtitle = "Hue = ecoregion · saturation = NDVI-only rate",
+      x = NULL,
+      y = NULL
+    ) +
+    theme_minimal(base_size = 10) +
+    theme(plot.title       = element_text(face = "bold", size = rel(1.05)),
+          plot.subtitle    = element_text(color = "grey30",
+                                          size = rel(0.85)),
+          panel.grid       = element_blank(),
+          axis.text.y      = element_text(face = "plain"),
+          axis.text.x.top  = element_text(),
+          axis.ticks       = element_blank(),
+          plot.margin      = margin(t = 4, r = 8, b = 8, l = 8))
+
+  # --- Assemble: stacked map on left, legend on right ---------------------
+  combined <- (p_map | p_legend) +
+    plot_layout(widths = c(4, 1)) +
+    plot_annotation(
+      caption = paste0(
+        "Per-pixel filter: ≥10 events in the 10-yr scope (suppresses noisy low-event pixels). Headline op-points: ndvi_z (z=1.5, K=2) and spei_13w (z=1.5, K=2).\n",
+        "Per Section B headline (event_detection_nlcd_10y.rds, 2026-06-15): domain-mean NDVI-only rate is 19.6% (recovery) – 20.0% (onset). Rate is capped at 50% for the bivariate scale (max observed 67%).\n",
+        "See Fig 3 for per-stratum (eco × LC) skill comparison; Fig 1 / 1b for per-ecoregion NDVI⊥SPEI stacked-bar summaries. CRS EPSG:5070. Eco palette matches Fig 0 hues; bivariate variants are darker for visibility."
+      ),
+      theme = theme(plot.caption = element_text(color = "grey45", size = 8,
+                                                hjust = 0,
+                                                margin = margin(t = 6)))
+    )
+
+  out_path <- file.path(FIG_DIR, "phase6_fig4_complementarity_atlas.png")
+  ggsave(out_path, combined, width = 14, height = 13, dpi = 300, bg = "white")
+  cat(sprintf("  wrote %s (%.2f MB)\n", out_path, file.size(out_path) / 1e6))
+  invisible(out_path)
+}
+
+# ------------------------------------------------------------------------------
+# Figure 5: Headline op-points heatmap — best HSS per (signal × direction)
+#
+# 8 signals × 2 directions = 16 cells. Each cell shows the global max HSS
+# across all (L2 × LC × z × K) for that (signal, direction). Label gives the
+# stratum + op-point + n_blocks. NDVI tier vs SPEI tier separated by a gap.
+# ------------------------------------------------------------------------------
+make_fig5_op_heatmap <- function() {
+  cat("\n=== Figure 5: Headline op-points heatmap ===\n")
+
+  out_b <- readRDS_retry(file.path(paths$validation_data,
+                                    "event_detection_nlcd_10y.rds"))
+  SK <- as.data.table(out_b$skill_lc)
+  SK <- SK[dom_filter == "all" & L2_code != "0.0" & is.finite(hss)]
+
+  TOP <- SK[order(-hss), .SD[1L], by = .(signal_col, direction),
+            .SDcols = c("hss", "L2_code", "nlcd_juliana", "z_threshold",
+                        "sustained_weeks", "n_blocks_total",
+                        "pod", "far", "bias", "ets")]
+  TOP[, signal_col := factor(signal_col, levels = rev(ALL_SIGNALS))]
+  TOP[, direction := factor(direction, levels = c("onset", "recovery"),
+                            labels = c("Onset", "Recovery"))]
+  TOP[, sig_tier := ifelse(as.character(signal_col) %in% SPEI_SIGNALS,
+                            "SPEI reference", "NDVI monitor")]
+  TOP[, cell_label := sprintf("HSS %+.3f\n%s | %s\nz=%.1f, K=%d\nn=%s",
+                              hss, L2_code,
+                              LC_SHORT[as.character(nlcd_juliana)],
+                              z_threshold, sustained_weeks,
+                              format(n_blocks_total, big.mark = ","))]
+  # Use a "tier" facet column so NDVI vs SPEI separation is structural,
+  # not annotation-driven (no risk of label/axis collision)
+  TOP[, sig_tier := factor(
+    ifelse(as.character(signal_col) %in% SPEI_SIGNALS,
+           "SPEI reference (3 windows)", "NDVI monitor (5 signals)"),
+    levels = c("NDVI monitor (5 signals)", "SPEI reference (3 windows)")
+  )]
+
+  # Wrap long subtitle / caption to avoid right-edge clipping
+  wrap <- function(s, w = 120) paste(strwrap(s, width = w), collapse = "\n")
+
+  p <- ggplot(TOP, aes(x = direction, y = signal_col, fill = hss)) +
+    geom_tile(color = "white", linewidth = 0.8) +
+    geom_text(aes(label = cell_label), size = 3.0, color = "grey10",
+              lineheight = 1.0, fontface = "plain") +
+    # Global max-HSS over all cells is ~0.5; use a sequential white→green
+    # ramp since all per-cell maxes are positive (taking max across strata)
+    scale_fill_gradient(
+      low = "#F7FCF5", high = "#1B5E20", name = "Max HSS",
+      limits = c(0, 0.5), oob = scales::squish,
+      breaks = c(0, 0.1, 0.2, 0.3, 0.4, 0.5)
+    ) +
+    facet_grid(sig_tier ~ ., scales = "free_y", space = "free_y",
+               switch = "y") +
+    labs(
+      title    = "Figure 5. Headline op-points — best HSS per signal × direction",
+      subtitle = wrap(
+        "Each cell = global max HSS across all (eco × LC × z × K) for that (signal, direction). Top facet = NDVI monitor (5 signals). Bottom facet = SPEI reference (3 windows)."),
+      x = NULL, y = "Fire signal",
+      caption = wrap(paste0(
+        "Source: event_detection_nlcd_10y.rds (2026-06-15). 'Best stratum' shown as L2_code | LC. z = signal z-threshold. K = sustained-weeks requirement. ",
+        "SPEI (reference) reaches HSS ~0.4–0.5 in 8.3/8.4/8.5 onset — meteorological signal aligns with USDM analyst declarations on similar timescales. ",
+        "NDVI monitor's best HSS is modest (~0.05–0.1) but operationally complementary: NDVI fires when SPEI doesn't (Section B headline: only 4–5% concurrent firing)."),
+        w = 145)
+    ) +
+    phase6_theme(base_size = 11) +
+    theme(panel.grid       = element_blank(),
+          axis.text.y      = element_text(family = "mono"),
+          strip.text.y.left = element_text(face = "bold", size = rel(0.95),
+                                            angle = 90),
+          strip.placement  = "outside",
+          strip.background = element_rect(fill = "grey92", color = NA),
+          panel.spacing.y  = unit(0.4, "lines"),
+          legend.position  = "right",
+          plot.margin      = margin(t = 8, r = 12, b = 8, l = 8))
+
+  out_path <- file.path(FIG_DIR, "phase6_fig5_op_point_heatmap.png")
+  ggsave(out_path, p, width = 13, height = 9, dpi = 300, bg = "white")
+  cat(sprintf("  wrote %s (%.2f MB)\n", out_path, file.size(out_path) / 1e6))
+  invisible(out_path)
+}
+
 if (fig_arg %in% c("0",  "all")) make_fig0_domain_map()
 if (fig_arg %in% c("1",  "all")) make_fig1_complementarity()
 if (fig_arg %in% c("1b", "all")) make_fig1b_complementarity_lc()
 if (fig_arg %in% c("2",  "all")) make_fig2_eco83_deepdive()
+if (fig_arg %in% c("3",  "all")) make_fig3_section_a_vs_b()
+if (fig_arg %in% c("4",  "all")) make_fig4_complementarity_atlas()
+if (fig_arg %in% c("5",  "all")) make_fig5_op_heatmap()
 if (fig_arg %in% c("6",  "all")) make_fig6_case_year_timeseries()
 if (fig_arg %in% c("7",  "all")) make_fig7_all_strata()
 if (fig_arg %in% c("8",  "all")) make_fig8_eco_lc_overlay()

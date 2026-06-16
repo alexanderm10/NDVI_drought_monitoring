@@ -1,6 +1,6 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-16 ~EOD — **Phase 6 case-year time-series suite (Fig 6 + Fig 7 + Fig 8) COMPLETE.** 67 new figures in `/data/figures/phase6/`: domain overview (1), per-stratum case-year (57: 43 eco×LC + 9 per-eco + 5 per-LC), per-eco LC overlay (9). Case years = {2017, 2019, 2021, 2023} selected from local USDM extent table (2019 = wet counterfactual; 2023 = extreme growing-season peak). Layout follows Juliana's stacked NDVI/derivative/USDM panels with median + IQR ribbon. Empirical growing-season computation (00c) attempted with both Juliana 15% rule and derivative-threshold @ 25%; both produced biologically-implausible windows for Midwest multi-LC data (gradual greenup shoulders + cyclic spline edge effects). **Decision: parked empirical GS; using fixed Mar 1–Sep 30 calendar default.**
+**Updated**: 2026-06-16 afternoon — **Phase 6 Fig 3 + Fig 4 + Fig 5 COMPLETE.** Three new figures in `/data/figures/phase6/`: Section A × B scatter (`phase6_fig3_section_a_vs_b_scatter.png`, 540K), per-pixel NDVI⊥SPEI complementarity atlas (`phase6_fig4_complementarity_atlas.png`, 1.6M, two panels Onset|Recovery), op-points heatmap (`phase6_fig5_op_point_heatmap.png`, 381K). Fig 4 was originally designed as a four-mechanism eco map with Section B HSS labels, but mid-build we **pivoted to a complementarity atlas** — Fig 3 already does the A-vs-B comparison cleanly per (eco × LC), so an extra map collapse didn't add value. The atlas directly answers "where does NDVI add information?" (the user-framed question after walking through Fig 3). Added ggrepel to container. Two figure-reviewer rounds before commit.
 
 ## Active run
 
@@ -9,9 +9,6 @@
 ## Next session pickup
 
 **Originally queued (still pending):**
-- **Figure 3**: Section A × Section B 2×2 mechanism map (where do the two analyses agree vs disagree per eco × LC?)
-- **Figure 4**: four-mechanism eco map (from continuous_spei_nlcd) with Section B annotations
-- **Figure 5**: headline op-points heatmap (best HSS per signal × direction collapsed across strata)
 - **Follow-on**: flash-drought subset analysis — define USDM transitions of ≥2 classes in ≤4 weeks as "flash", re-score skill against that subset (cheap, no new model fits needed). Use existing event_detection_nlcd_10y.rds.
 
 **Carryover from prior sessions (still pending):**
