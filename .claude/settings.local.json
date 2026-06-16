@@ -205,7 +205,9 @@
       "Bash(awk 'NR>=850 && NR<=905' CONUS_HLS_drought_monitoring/PHASE6_VALIDATION_MEMO.md)",
       "Bash(rm -f /mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig4_mechanism_map.png *)",
       "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring diff --stat)",
-      "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring diff .claude/settings.local.json)"
+      "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring diff .claude/settings.local.json)",
+      "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring rev-list --count origin/main..HEAD)",
+      "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring add .claude/settings.local.json)"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [
