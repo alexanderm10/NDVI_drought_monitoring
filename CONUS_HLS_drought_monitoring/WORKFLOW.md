@@ -217,18 +217,30 @@ Sections: `align_weekly` builds the master pixel-week join (NDVI summaries + USD
 
 The validation question is **NDVI monitor skill against typical drought measures (USDM, SPEI)**. Lead/lag is a diagnostic byproduct, not an optimization target.
 
-#### **Script 10: Phase 6 Figures** (~1-2 min per figure)
+#### **Script 10: Phase 6 Figures** (~1-2 min per figure; Fig 7 set is ~5 min for 57 panels)
 ```bash
 docker exec -w /workspace conus-hls-drought-monitor \
-  Rscript 10_phase6_figures.R --fig=<0|1|1b|2|all>
+  Rscript 10_phase6_figures.R --fig=<0|1|1b|2|6|7|8|all>
 ```
 Builds Phase 6 headline figures from the analysis-section outputs. Currently includes:
 - `fig0` — domain reference map (EPA L2 ecoregions + NLCD 2019 modal LC, 2-panel)
 - `fig1` — NDVI ⊥ SPEI complementarity per ecoregion (100% stacked bar)
 - `fig1b` — same with LC × ecoregion facets
 - `fig2` — 8.3 Southeastern USA Plains deep-dive (3-panel: orientation + per-pixel POD map + HSS heatmap)
+- `fig6` — domain-wide case-year time series (NDVI anom / deriv anom / USDM stacked area, faceted by year ∈ {2017, 2019, 2021, 2023})
+- `fig7` — same case-year layout per stratum: 43 (eco × LC) cells + 9 per-eco + 5 per-LC (57 panels total, output `phase6_fig7_*.png`)
+- `fig8` — per-ecoregion LC overlay: all 5 NLCD Juliana classes as colored lines on the same axes within each eco (9 panels)
 
 Outputs land in `/data/figures/phase6/phase6_<figN>_<slug>.png` at 300 dpi. See PHASE6_VALIDATION_MEMO.md "Figures log" section for key takeaways per figure, and the Glossary section for acronym definitions.
+
+Growing-season band in fig6/7/8 is currently a fixed calendar default (Mar 1 – Sep 30). The empirical per-stratum calculator (`00c_compute_growing_seasons.R`) is in-tree but parked — Juliana's 15% amplitude rule and a derivative-threshold @ 25% both produced biologically-implausible windows for our multi-LC Midwest data; needs a tuning pass (try amplitude @ 50% or derivative @ 50%) before wiring into figures.
+
+#### **Script 00c: Per-stratum growing seasons** (~2 min — currently parked)
+```bash
+docker exec -w /workspace conus-hls-drought-monitor \
+  Rscript 00c_compute_growing_seasons.R
+```
+Outputs `/data/gam_models/growing_seasons_stratum.rds` — a 58-row lookup of (season_start, season_end, qc_flag) for every analysis stratum (eco × LC + eco + LC + domain). Reads `doy_looped_norms.rds`, aggregates per-stratum median NDVI per yday, fits a cyclic cubic spline (k=12, matches Juliana's spatial_analysis/02), applies derivative-threshold @ 25% for SOS and NDVI-symmetry for EOS. Resulting windows are not currently wired into Script 10 — see "parked" note above.
 
 ## Data Flow
 

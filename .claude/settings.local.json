@@ -201,7 +201,8 @@
       "Bash(curl -s \"https://s3-us-west-2.amazonaws.com/mrlc/?prefix=nlcd_2019\")",
       "Bash(curl -s \"https://s3-us-west-2.amazonaws.com/mrlc/?prefix=Annual\")",
       "WebSearch",
-      "Bash(git rev-list *)"
+      "Bash(git rev-list *)",
+      "Bash(awk 'NR>=850 && NR<=905' CONUS_HLS_drought_monitoring/PHASE6_VALIDATION_MEMO.md)"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [

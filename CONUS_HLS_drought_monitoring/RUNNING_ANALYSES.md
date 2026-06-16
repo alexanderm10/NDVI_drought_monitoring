@@ -1,6 +1,6 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-15 ~14:30 CDT — **Phase 6 Section B `event_detection_nlcd` COMPLETE + first 4 headline figures landed** (Fig 0 domain map, Fig 1 + 1b complementarity, Fig 2 8.3 deep-dive). All in `/data/figures/phase6/`. **Headline finding**: spei_4w dominates (33/35 onset cells), NDVI vs SPEI fires only 4-5% concurrent → strong complementarity argument. Best onset HSS = +0.473 (8.3 grass dom × spei_4w × z=1.5/K=1). Mid-session caught + corrected EPA L2 ecoregion mis-naming (8.3 = Southeastern USA Plains, NOT semi-arid prairies; that's 9.4). Glossary + figures log added to PHASE6_VALIDATION_MEMO.md.
+**Updated**: 2026-06-16 ~EOD — **Phase 6 case-year time-series suite (Fig 6 + Fig 7 + Fig 8) COMPLETE.** 67 new figures in `/data/figures/phase6/`: domain overview (1), per-stratum case-year (57: 43 eco×LC + 9 per-eco + 5 per-LC), per-eco LC overlay (9). Case years = {2017, 2019, 2021, 2023} selected from local USDM extent table (2019 = wet counterfactual; 2023 = extreme growing-season peak). Layout follows Juliana's stacked NDVI/derivative/USDM panels with median + IQR ribbon. Empirical growing-season computation (00c) attempted with both Juliana 15% rule and derivative-threshold @ 25%; both produced biologically-implausible windows for Midwest multi-LC data (gradual greenup shoulders + cyclic spline edge effects). **Decision: parked empirical GS; using fixed Mar 1–Sep 30 calendar default.**
 
 ## Active run
 
@@ -8,12 +8,22 @@
 
 ## Next session pickup
 
+**Originally queued (still pending):**
 - **Figure 3**: Section A × Section B 2×2 mechanism map (where do the two analyses agree vs disagree per eco × LC?)
 - **Figure 4**: four-mechanism eco map (from continuous_spei_nlcd) with Section B annotations
 - **Figure 5**: headline op-points heatmap (best HSS per signal × direction collapsed across strata)
 - **Follow-on**: flash-drought subset analysis — define USDM transitions of ≥2 classes in ≤4 weeks as "flash", re-score skill against that subset (cheap, no new model fits needed). Use existing event_detection_nlcd_10y.rds.
-- **Carryover from prior session** (still pending): 8.1 + 5.2 grass-worst DJF-excluded diagnostic; 8.4 Ozark "USDM-WORKS-but-SPEI-SILENT" deep dive
-- **Verify**: any earlier figures (`continuous_spei_nlcd`, `categorical_usdm_nlcd`) that may have ecoregion-name labels — re-verify they use canonical L2_name from pixel_to_ecoregion_l2.rds (see new `feedback_verify_epa_l2_names.md` memory).
+
+**Carryover from prior sessions (still pending):**
+- 8.1 + 5.2 grass-worst DJF-excluded diagnostic (carryover from 2026-06-12 EOD — test snow contamination in cold ecoregions)
+- 8.4 Ozark "USDM-WORKS-but-SPEI-SILENT" deep dive (carryover from 2026-06-12 — reconcile categorical_usdm vs continuous_spei discrepancy)
+- Verify earlier figures (`continuous_spei_nlcd`, `categorical_usdm_nlcd`) use canonical L2_name per `feedback_verify_epa_l2_names.md`
+
+**New from this session:**
+- **Revisit 05_*.R scripts** — at session start the plan was to refactor `05a_timeseries_quick.R` / `05b_animation_maps.R` / `05c_create_yearly_gifs.R`. Now that Fig 6/7/8 cover most of the time-series visualization need, decide: (a) deprecate 05a in favor of Fig 6 wrapper, (b) keep 05b/c animation as-is, (c) move all into `10_phase6_figures.R`.
+- **Empirical growing-season redux** — 00c_compute_growing_seasons.R is half-built. Saved table at `/data/gam_models/growing_seasons_stratum.rds` is from the failed derivative-threshold attempt. To resume: try amplitude-50% rule (Option B from session discussion) or hybrid (derivative for SOS @ 50%, NDVI-symmetry for EOS). Both should give tighter windows than the 25%/15% versions. Re-wire renderers to consume the lookup once a method works.
+- **NDVI + SPEI ensemble signal test** — Section B showed only 4-5% concurrent firing between NDVI and SPEI. Test whether a logical-OR ensemble at the headline op-point beats either alone (cheap; reuse event_detection_nlcd_10y.rds).
+- **Figure-reviewer polish pass** — bump legend.key.size 0.4 → 0.5 cm if Fig 6/7/8 go on slides; verify all titles use canonical L2_name (sample check on a few of the 71 figures).
 
 ## Session Summary (2026-06-15) — Section B event_detection_nlcd built + run
 
