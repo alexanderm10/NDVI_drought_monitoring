@@ -1,10 +1,19 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-17 EOD — **Two new figures built today**: (1) **Fig 9 (flash drought scatter)** — 3 color-encoding variants (LC / eco / dual), per-pixel IQR cross-bars with collapsed-IQR overlay (cross-in-circle), gate-consistent baseline for the 9.4 grass highlight, per-subset PIXEL_N_MIN gate (5 for All+D1, 3 for D2 strict), and figure-reviewer pass with all must-fixes applied. (2) **Fig 10 a/b/c (firing climatology)** — weekly stacked-fraction bars of NDVI/SPEI firing categories (both/NDVI only/SPEI only/neither) across the year. Three companion figures: domain-wide with sparkline volume context (10a), per-LC facet_grid (10b), per-eco facet_grid with month labels under every panel (10c). Palette synced to Fig 1/1b complementarity convention (NDVI=blue, SPEI=orange, both=green, neither=grey).
+**Updated**: 2026-06-17 EOD — **Big session**: Fig 9 (flash drought scatter, 3 variants) + Fig 10 a/b/c (firing climatology) + 3 new analysis sections productionized in script 09: `flash_drought`, `ensemble_or`, `ensemble_multi`. The ensemble work surfaced an important pair-of-signals finding: **`ndvi_z OR spei_4w` is the strongest cross-family ensemble** (not `ndvi_z OR spei_13w` which we initially tested) — Section B's headline SPEI window (13w) is NOT the optimal partner for NDVI. spei_4w consistently wins as both the best single signal AND the best ensemble partner across all 3 z thresholds tested. **Naive OR ensemble lifts hit rate +14-20 pts but doesn't beat the best single signal on HSS (POD up, FAR up roughly cancel).**
 
-**New finding from Fig 10**: Seasonally asymmetric complementarity — **SPEI leads onset year-round; NDVI leads recovery in growing season** (esp. natural LCs). "Both" firings are rare (~5-8%) across the year. "Neither" is the modal category in every week (real coverage gap). User observation: NDVI's unique operational value lands particularly on **early-growing-season recovery transitions (MAR-JUN green-up)** — this sharpens the operational claim into "NDVI is a slow/recovery monitor with peak value on early-growing-season vegetation rebound."
+**Carryover for next session**:
+1. **Reconcile 4w vs 13w as the canonical SPEI partner.** ensemble_or used spei_13w (Section B's headline); ensemble_multi shows spei_4w is the better partner across all metrics. Decide which goes into the memo. Likely: revise the operational claim to use spei_4w; treat spei_13w as the medium-window context signal.
+2. **Memo writeup** with figures for collaborators. Substantive findings are now all in hand:
+   - Section A (continuous_spei_nlcd): four-mechanism eco × LC story
+   - Section A++ (categorical_usdm_nlcd): USDM-vs-SPEI discrepancy in 8.4 Ozark
+   - Section B (event_detection_nlcd): spei_4w dominates; 8.3 dark horse for onset
+   - Flash drought (productionized as `section_flash_drought`): NDVI is not a flash monitor; 9.4 grass recovery exception
+   - Firing climatology (Fig 10): seasonally asymmetric complementarity; early-season NDVI recovery sharpens operational claim
+   - Ensemble OR (productionized as `section_ensemble_or` + `section_ensemble_multi`): +15.5/+13.9 pt hit-rate lift from best pair; HSS roughly cancels
+3. Note: HSS improvement may not be the right goal — exploratory mode, see what the data shows.
 
-Fig 9 + Fig 10 findings written to memory ([[firing-climatology-findings]] joins [[flash-drought-findings]]).
+Fig 9 + Fig 10 + ensemble findings written to memory ([[firing-climatology-findings]], [[ensemble-or-findings]] joins [[flash-drought-findings]]).
 
 ## Active run
 
@@ -43,7 +52,7 @@ The user wants to write a brief methods/results memo for colleagues after ~1-2 m
 **Second session-focus**: 8.4 Ozark deep-dive + ensemble test + L2_name verify pass + assemble memo outline.
 
 ## Recent session summaries (full detail below)
-- 2026-06-17 (this session): Fig 9 + Fig 10 a/b/c built (above); `section_flash_drought` productionized in script 09 (`flash_drought_10y.rds` 164 MB / 11.8 min; both per-event hit rate AND temporal-block HSS; tmp exploration script retired).
+- 2026-06-17 (this session): Fig 9 + Fig 10 a/b/c built; `section_flash_drought` + `section_ensemble_or` + `section_ensemble_multi` all productionized in script 09 (3 new RDS outputs in `/data/validation/`); spei_4w identified as the canonical SPEI partner for NDVI ensembles (NOT spei_13w).
 - 2026-06-16: Fig 3+4+5 built; Fig 4 pivoted to complementarity atlas; flash drought exploration.
 - 2026-06-15: Section B `event_detection_nlcd` built + run (180 MB output, 4 hr 19 min wall).
 - 2026-06-12: USDM 5-LC + SPEI 5-LC rerun; 8.4 USDM-WORKS-but-SPEI-SILENT discrepancy surfaced.
@@ -51,7 +60,31 @@ The user wants to write a brief methods/results memo for colleagues after ~1-2 m
 - 2026-06-10: `categorical_usdm` v3 built; Phase 6 reframe.
 - (earlier): align_weekly cache + derivatives rebuild + weekly SPI/SPEI.
 
-## Session Summary (2026-06-17) — Fig 9, Fig 10 a/b/c, productionize section_flash_drought
+## Session Summary (2026-06-17) — Fig 9, Fig 10 a/b/c, + 3 new sections (flash_drought, ensemble_or, ensemble_multi)
+
+### Productionize `section_ensemble_or` (afternoon, ~30 min code + 9.4 min run)
+- Tests whether `ndvi_z OR spei_13w` at the headline op beats either alone. CLI: `--section=ensemble_or --scope=10y [--smoke]`.
+- Inputs/pipeline mirror `section_flash_drought`: load Section B output + USDM + NLCD, restrict to 5-LC universe, recompute fires from align cache, compute per-event hits + temporal-block contingency.
+- **For each {ndvi, spei, or, and} × direction × stratum**: per-event hit rate + POD/FAR/HSS/ETS.
+- **Output**: `ensemble_or_10y.rds` (160 MB xz). Output structure: `events_pixel_or`, `hit_rate_or_lc`, `skill_or_lc`, `skill_lift_wide`, `domain_summary`, `meta`.
+- **Findings**:
+  - Per-event hit rate (POD-equivalent): OR lifts **+19.6 pt onset** (NDVI 24.6% + SPEI 27.0% → OR 46.6%) and **+13.7 pt recovery** (NDVI 23.4% + SPEI 17.7% → OR 37.1%) over best single.
+  - "Both" firings ~5%, "OR" effectively sums NDVI-only + SPEI-only + both. Complementarity is the dominant mode.
+  - Block-based HSS domain-wide: OR is **second-best** (not first) in both directions — POD goes up by ~5 pt but FAR also goes up; HSS roughly cancels. NDVI HSS=+0.010 / SPEI HSS=-0.017 / OR HSS=-0.006 on recovery.
+  - Per-stratum: ~3 of 10 top-lift cells show positive HSS lift; 9.4 grass/crop recovery and 9.2 urban_diffuse recovery are the only meaningful winners.
+
+### Productionize `section_ensemble_multi` (afternoon, ~45 min code + 62.1 min run)
+- Extension to broader ensemble grid: Tier 1 (8 single signals: ndvi_z + 4 deriv windows + 3 SPEI windows) + Tier 3 (3 cross-pairs: ndvi_z + spei_{4w,13w,26w}) × z-sweep (1.0/1.5/2.0) × 2 directions = 66 cells.
+- 48 fire-detection passes (8 signals × 3 z × 2 directions) — main runtime cost.
+- **Output**: `ensemble_multi_10y.rds` (157 KB long format). Structure: `signal_sets` config table, `hit_rate_multi_lc`, `skill_multi_lc`, `lift_pairs_wide`, `meta`. No events_pixel duplication.
+- **Headline findings**:
+  - **`ndvi_z OR spei_4w` is the best cross-pair at every z** — far ahead of spei_13w or spei_26w partners. At z=1.5 (headline): 58.4% onset / 51.9% recovery hit rate, vs 46.6% / 37.1% for the spei_13w pair.
+  - **`spei_4w` is the strongest single signal** at every (z × direction) — beats ndvi_z, deriv_w30_z, all SPEI windows. Confirms Section B's "spei_4w dominates 33/35 onset cells" finding.
+  - Cross-pair lift over best single (z=1.5): **+15.5 pt onset / +13.9 pt recovery** (from spei_4w pair). Over NDVI alone: **+33.8 / +28.5 pt** — ~2.5x lift on hit rate.
+  - **HSS picture stays sober**: cross-pair HSS lift is ≤0 domain-wide weighted across all 18 (pair × z × direction) combos. Per-stratum: ~14/33 strata show positive lift at z=2 recovery — ensemble helps in specific cells, not on the weighted average.
+- **Implication for memo**: the canonical NDVI + SPEI ensemble pair should use spei_4w, not spei_13w. Next session should reconcile this with Section B's headline op choice.
+
+### Productionize `section_flash_drought` (morning, ~30 min code + 12 min full run)
 
 ### Productionize `section_flash_drought` (afternoon, ~30 min code + 12 min full run)
 - Wraps `tmp_flash_drought_exploration.R` (2026-06-16) into a proper section in `09_validate_drought_signal.R` (~310 lines added). CLI: `--section=flash_drought --scope=10y [--smoke]`.

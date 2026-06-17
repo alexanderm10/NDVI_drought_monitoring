@@ -127,7 +127,11 @@ config <- list(
   event_detection_nlcd_10y  = file.path(paths$validation_data, "event_detection_nlcd_10y.rds"),
   event_detection_nlcd_13y  = file.path(paths$validation_data, "event_detection_nlcd_13y.rds"),
   flash_drought_10y         = file.path(paths$validation_data, "flash_drought_10y.rds"),
-  flash_drought_13y         = file.path(paths$validation_data, "flash_drought_13y.rds")
+  flash_drought_13y         = file.path(paths$validation_data, "flash_drought_13y.rds"),
+  ensemble_or_10y           = file.path(paths$validation_data, "ensemble_or_10y.rds"),
+  ensemble_or_13y           = file.path(paths$validation_data, "ensemble_or_13y.rds"),
+  ensemble_multi_10y        = file.path(paths$validation_data, "ensemble_multi_10y.rds"),
+  ensemble_multi_13y        = file.path(paths$validation_data, "ensemble_multi_13y.rds")
 )
 
 # ------------------------------------------------------------------------------
@@ -4762,6 +4766,726 @@ section_flash_drought <- function(scope, smoke = FALSE) {
   invisible(out)
 }
 
+# ==============================================================================
+# section_ensemble_or
+# ==============================================================================
+# Tests whether ndvi_z OR spei_13w at the headline op beats either alone.
+# Motivated by Section B's 4-5% concurrent firing finding + Fig 10's seasonally
+# asymmetric complementarity: signals are largely independent, so the logical
+# OR should lift hit rate substantially over the better single signal.
+#
+# Two skill layers per (eco x LC x direction x signal_set):
+#   1. Per-event hit rate (POD-equivalent) from pixel_event_map at headline op.
+#   2. Temporal-block contingency HSS for the union signal -- fires_or built by
+#      rbind(ndvi_fires, spei_fires) -> contingency sees the union by virtue of
+#      unique(pixel, block) inside compute_temporal_block_contingency.
+#
+# signal_set in {ndvi, spei, or}. The OR signal fires whenever either
+# constituent fires (at z=1.5, K=2 sustained) at the same pixel.
+#
+# Inputs: same as section_flash_drought.
+# Output: ensemble_or_{scope}.rds
+#   - events_pixel_or       : events with per-event hit_or column
+#   - hit_rate_or_lc        : per-stratum hit rates for 3 signal_sets + lift
+#   - skill_or_lc           : POD/FAR/HSS/ETS for 3 signal_sets + lift
+#   - domain_summary        : domain-wide pooled numbers
+#   - meta                  : params, runtime, source files
+# ==============================================================================
+
+ENSEMBLE_OR_HEADLINES <- list(
+  list(signal = "ndvi_z",   z = 1.5, K = 2L, lead_window = 8L),
+  list(signal = "spei_13w", z = 1.5, K = 2L, lead_window = 8L)
+)
+
+section_ensemble_or <- function(scope, smoke = FALSE) {
+  cat("\n=== Section: ensemble_or (scope =", scope,
+      ", smoke =", smoke, ") ===\n")
+  stopifnot(scope %in% c("10y", "13y"))
+
+  in_b_file <- if (scope == "10y") config$event_detection_nlcd_10y else config$event_detection_nlcd_13y
+  in_a_file <- if (scope == "10y") config$align_out_10y           else config$align_out_13y
+  out_file  <- if (scope == "10y") config$ensemble_or_10y         else config$ensemble_or_13y
+
+  if (!file.exists(in_b_file)) {
+    stop("Section B output missing: ", in_b_file,
+         "\n  Run --section=event_detection_nlcd --scope=", scope, " first.")
+  }
+  if (!file.exists(in_a_file)) {
+    stop("align_weekly cache missing: ", in_a_file)
+  }
+  if (!file.exists(config$nlcd_pixel_lookup)) {
+    stop("NLCD lookup missing: ", config$nlcd_pixel_lookup)
+  }
+  cat(sprintf("Section B in: %s (%.0f MB)\n",
+              basename(in_b_file), file.size(in_b_file) / 1e6))
+  cat(sprintf("align cache:  %s (%.1f GB)\n",
+              basename(in_a_file), file.size(in_a_file) / 1e9))
+  cat(sprintf("Output:       %s\n", basename(out_file)))
+
+  t_section <- Sys.time()
+  BLOCK_WEEKS <- 4L
+  LC_LEVELS   <- c("crop", "forest", "grassland", "urban_dense", "urban_diffuse")
+
+  # --- 1. Load Section B output ---
+  cat("\n[1] Load Section B output...\n")
+  out_b <- readRDS_retry(in_b_file)
+  events_pixel    <- as.data.table(out_b$events_pixel)
+  pixel_event_map <- as.data.table(out_b$pixel_event_map)
+  cat(sprintf("  events_pixel:    %s rows\n",
+              format(nrow(events_pixel), big.mark = ",")))
+  cat(sprintf("  pixel_event_map: %s rows\n",
+              format(nrow(pixel_event_map), big.mark = ",")))
+
+  # --- 2. Ensure NLCD + ecoregion present, restrict to standard LCs ---
+  cat("\n[2] Join NLCD juliana + ecoregion (if missing); restrict to 5-LC universe...\n")
+  if (!"nlcd_juliana" %in% names(events_pixel)) {
+    v_nlcd <- as.data.table(readRDS_retry(config$nlcd_pixel_lookup))
+    events_pixel <- merge(events_pixel,
+                          v_nlcd[, .(pixel_id, nlcd_juliana)],
+                          by = "pixel_id", all.x = TRUE)
+    collapse_urban_to_2tier(events_pixel)
+    rm(v_nlcd); gc(verbose = FALSE)
+  }
+  if (!"L2_code" %in% names(events_pixel)) {
+    vp <- as.data.table(readRDS_retry(config$ecoregion_lookup))
+    events_pixel <- merge(events_pixel,
+                          vp[, .(pixel_id, L2_code)],
+                          by = "pixel_id", all.x = TRUE)
+    rm(vp); gc(verbose = FALSE)
+  }
+  events_pixel <- events_pixel[!is.na(L2_code) & L2_code != "0.0" &
+                                nlcd_juliana %in% LC_LEVELS]
+  cat(sprintf("  events after LC+eco filter: %s\n",
+              format(nrow(events_pixel), big.mark = ",")))
+
+  # --- 3. Per-event hit rates: ndvi, spei, OR ---
+  cat("\n[3] Compute per-event hit rates per (stratum x signal_set)...\n")
+  pew <- dcast(pixel_event_map,
+               pixel_id + week_start + event_type ~ headline_signal,
+               value.var = "hit")
+  hit_signals <- intersect(c("ndvi_z", "spei_13w"), names(pew))
+  if (length(hit_signals) < 2L) {
+    stop("pixel_event_map missing expected headline signals; ",
+         "found: ", paste(names(pew), collapse=", "))
+  }
+  ev_hits <- merge(events_pixel[, .(pixel_id, week_start, event_type,
+                                     L2_code, nlcd_juliana)],
+                   pew, by = c("pixel_id", "week_start", "event_type"))
+  ev_hits[, hit_or  := ndvi_z | spei_13w]
+  ev_hits[, hit_and := ndvi_z & spei_13w]  # bonus: AND ensemble for reference
+
+  hit_rate_or_lc <- ev_hits[, .(
+    n_events     = .N,
+    hit_ndvi     = mean(ndvi_z,   na.rm = TRUE),
+    hit_spei     = mean(spei_13w, na.rm = TRUE),
+    hit_or       = mean(hit_or,   na.rm = TRUE),
+    hit_and      = mean(hit_and,  na.rm = TRUE)
+  ), by = .(L2_code, nlcd_juliana, event_type)]
+  # Lift over best single signal (max of ndvi, spei)
+  hit_rate_or_lc[, best_single := pmax(hit_ndvi, hit_spei)]
+  hit_rate_or_lc[, lift_or_pts := 100 * (hit_or - best_single)]
+  cat(sprintf("  hit_rate_or_lc: %s rows\n",
+              format(nrow(hit_rate_or_lc), big.mark = ",")))
+
+  # Domain-wide hit rate summary
+  domain_summary <- list(
+    onset    = ev_hits[event_type == "onset", .(
+      n         = .N,
+      hit_ndvi  = mean(ndvi_z,   na.rm = TRUE),
+      hit_spei  = mean(spei_13w, na.rm = TRUE),
+      hit_or    = mean(hit_or,   na.rm = TRUE),
+      hit_and   = mean(hit_and,  na.rm = TRUE),
+      lift_or_over_best_pts = 100 * (mean(hit_or, na.rm = TRUE) -
+                                      max(mean(ndvi_z,   na.rm = TRUE),
+                                          mean(spei_13w, na.rm = TRUE))))],
+    recovery = ev_hits[event_type == "recovery", .(
+      n         = .N,
+      hit_ndvi  = mean(ndvi_z,   na.rm = TRUE),
+      hit_spei  = mean(spei_13w, na.rm = TRUE),
+      hit_or    = mean(hit_or,   na.rm = TRUE),
+      hit_and   = mean(hit_and,  na.rm = TRUE),
+      lift_or_over_best_pts = 100 * (mean(hit_or, na.rm = TRUE) -
+                                      max(mean(ndvi_z,   na.rm = TRUE),
+                                          mean(spei_13w, na.rm = TRUE))))]
+  )
+  rm(pew); gc(verbose = FALSE)
+
+  # --- 4. Re-detect fires from align cache for block-based HSS ---
+  cat("\n[4] Re-detect fires from align cache (ndvi_z + spei_13w @ headline op)...\n")
+  t_fires <- Sys.time()
+  dt_align <- as.data.table(readRDS_retry(in_a_file))
+  ANOM_COLS    <- "ndvi_anom_mean"
+  NDVI_SIGNALS <- "ndvi_z"
+  keep <- c("pixel_id", "iso_year", "iso_week", "week_start",
+            ANOM_COLS, "spei_13w", "L2_code")
+  dt_align <- dt_align[, ..keep]
+  gc(verbose = FALSE)
+  setorder(dt_align, pixel_id, week_start)
+  drop_px <- zstandardize_signals_per_pixel(dt_align, ANOM_COLS, NDVI_SIGNALS,
+                                            min_valid_weeks = 30L)
+  if (length(drop_px) > 0L) {
+    dt_align <- dt_align[!pixel_id %in% drop_px]
+    cat(sprintf("  dropped %d pixels with <30 valid weeks\n", length(drop_px)))
+  }
+  dt_align[, (ANOM_COLS) := NULL]
+
+  if (smoke) {
+    cat("\n  SMOKE MODE: restricting to ecoregions 9.4 + 8.4 for fire detection\n")
+    dt_align <- dt_align[L2_code %in% c("9.4", "8.4")]
+  }
+
+  fires_list <- list()
+  for (hdl in ENSEMBLE_OR_HEADLINES) {
+    for (dir_ in c("onset", "recovery")) {
+      fires <- detect_fires_global(dt_align, hdl$signal,
+                                   hdl$z, hdl$K, dir_,
+                                   is_raw_spei = grepl("^spei", hdl$signal))
+      if (!is.null(fires)) fires_list[[length(fires_list) + 1L]] <- fires
+    }
+  }
+  fires_all <- rbindlist(fires_list, use.names = TRUE, fill = TRUE)
+  rm(fires_list); gc(verbose = FALSE)
+
+  period_start_wk <- min(dt_align$week_start)
+  period_end_wk   <- max(dt_align$week_start)
+  rm(dt_align); gc(verbose = FALSE)
+  cat(sprintf("  fires: %s rows (%.1f min)\n",
+              format(nrow(fires_all), big.mark = ","),
+              as.numeric(Sys.time() - t_fires, units = "mins")))
+
+  # --- 5. Temporal-block contingency per (stratum x signal_set x direction) ---
+  cat("\n[5] Compute temporal-block HSS for {ndvi, spei, or} x direction...\n")
+  t_skill <- Sys.time()
+  stratum_map <- unique(events_pixel[, .(pixel_id, L2_code, nlcd_juliana)])
+  if (smoke) {
+    stratum_map <- stratum_map[L2_code %in% c("9.4", "8.4")]
+  }
+  stratum_map[, stratum_key := sprintf("%s|%s", L2_code, nlcd_juliana)]
+
+  setkey(fires_all, signal_col, direction)
+
+  build_fires_for_set <- function(signal_set, dir_) {
+    # ndvi -> just NDVI fires; spei -> just SPEI fires; or -> rbind both
+    # (unique inside compute_temporal_block_contingency dedupes pixel-blocks).
+    if (signal_set == "ndvi") {
+      fires_all[.("ndvi_z",   dir_), nomatch = 0L, .(pixel_id, week_start)]
+    } else if (signal_set == "spei") {
+      fires_all[.("spei_13w", dir_), nomatch = 0L, .(pixel_id, week_start)]
+    } else if (signal_set == "or") {
+      rbind(
+        fires_all[.("ndvi_z",   dir_), nomatch = 0L, .(pixel_id, week_start)],
+        fires_all[.("spei_13w", dir_), nomatch = 0L, .(pixel_id, week_start)]
+      )
+    } else {
+      stop("Unknown signal_set: ", signal_set)
+    }
+  }
+
+  skill_rows <- list()
+  for (signal_set in c("ndvi", "spei", "or")) {
+    for (dir_ in c("onset", "recovery")) {
+      ev_sub <- events_pixel[event_type == dir_, .(pixel_id, week_start)]
+      f_sub  <- build_fires_for_set(signal_set, dir_)
+      cont <- compute_temporal_block_contingency(
+        ev_sub, f_sub, stratum_map,
+        block_weeks    = BLOCK_WEEKS,
+        period_start_wk = period_start_wk,
+        period_end_wk   = period_end_wk
+      )
+      if (nrow(cont) > 0L) {
+        cont <- compute_skill_metrics(cont)
+        cont[, c("L2_code", "nlcd_juliana") :=
+                tstrsplit(stratum_key, "|", fixed = TRUE)]
+        cont[, `:=`(signal_set      = signal_set,
+                    direction       = dir_,
+                    z_threshold     = 1.5,
+                    sustained_weeks = 2L,
+                    lead_window     = 8L)]
+        skill_rows[[length(skill_rows) + 1L]] <- cont
+      }
+    }
+  }
+  skill_or_lc <- rbindlist(skill_rows, use.names = TRUE, fill = TRUE)
+  rm(skill_rows, fires_all); gc(verbose = FALSE)
+
+  # --- 5b. Wide-format lift table: skill diff of OR vs best single ---
+  cat("\n[5b] Compute HSS lift (OR vs max(NDVI, SPEI)) per stratum...\n")
+  hss_wide <- dcast(skill_or_lc[, .(L2_code, nlcd_juliana, direction,
+                                     signal_set, hss, pod, far)],
+                    L2_code + nlcd_juliana + direction ~ signal_set,
+                    value.var = c("hss", "pod", "far"))
+  hss_wide[, best_single_hss := pmax(hss_ndvi, hss_spei, na.rm = TRUE)]
+  hss_wide[, lift_or_hss     := hss_or - best_single_hss]
+  hss_wide[, best_single_pod := pmax(pod_ndvi, pod_spei, na.rm = TRUE)]
+  hss_wide[, lift_or_pod     := pod_or - best_single_pod]
+
+  cat(sprintf("  skill_or_lc: %s rows (%.1f min)\n",
+              format(nrow(skill_or_lc), big.mark = ","),
+              as.numeric(Sys.time() - t_skill, units = "mins")))
+
+  # --- 6. Assemble + save ---
+  meta <- list(
+    scope             = scope,
+    scope_years       = if (scope == "10y") 2016:2025 else 2013:2025,
+    headline_op       = "ndvi_z + spei_13w at z=1.5, K=2, lead +/-8wk",
+    headlines         = ENSEMBLE_OR_HEADLINES,
+    block_weeks       = BLOCK_WEEKS,
+    lc_levels         = LC_LEVELS,
+    signal_sets       = c("ndvi", "spei", "or"),
+    or_definition     = "fires_or = union(ndvi_fires, spei_fires) at headline op",
+    period_start_wk   = period_start_wk,
+    period_end_wk     = period_end_wk,
+    smoke             = smoke,
+    n_events_in       = nrow(events_pixel),
+    sources           = list(
+      event_detection_nlcd = in_b_file,
+      align_weekly         = in_a_file,
+      nlcd_pixel_lookup    = config$nlcd_pixel_lookup
+    ),
+    runtime_minutes   = as.numeric(Sys.time() - t_section, units = "mins"),
+    created           = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+  )
+
+  out <- list(
+    events_pixel_or   = events_pixel,
+    hit_rate_or_lc    = hit_rate_or_lc,
+    skill_or_lc       = skill_or_lc,
+    skill_lift_wide   = hss_wide,
+    domain_summary    = domain_summary,
+    meta              = meta
+  )
+
+  cat(sprintf("\nSaving %s...\n", basename(out_file)))
+  saveRDS_validated(out, out_file, compress = "xz")
+  cat(sprintf("  wrote %.2f MB in %.1f min total\n",
+              file.size(out_file) / 1e6, meta$runtime_minutes))
+
+  # --- Quick summary ---
+  options(datatable.print.nrows = 30L, datatable.print.topn = 30L)
+  cat("\n--- Domain-wide hit rates (per-event POD-equivalent) ---\n")
+  for (dir_ in c("onset", "recovery")) {
+    d <- domain_summary[[dir_]]
+    cat(sprintf("  %s n=%s: NDVI=%.1f%%  SPEI=%.1f%%  OR=%.1f%%  AND=%.1f%%  | OR lift over best single = +%.1f pts\n",
+                dir_, format(d$n, big.mark=","),
+                100*d$hit_ndvi, 100*d$hit_spei,
+                100*d$hit_or, 100*d$hit_and,
+                d$lift_or_over_best_pts))
+  }
+
+  cat("\n--- Top 10 strata by HSS lift (OR vs best single), n_blocks_total >= 5000 ---\n")
+  big_strata <- skill_or_lc[signal_set == "or" & n_blocks_total >= 5000L,
+                            .(L2_code, nlcd_juliana, direction)]
+  show <- merge(big_strata, hss_wide, by = c("L2_code", "nlcd_juliana", "direction"))
+  show <- show[is.finite(lift_or_hss)][order(-lift_or_hss)][1:10L]
+  print(show[, .(L2_code, nlcd_juliana, direction,
+                  hss_ndvi = round(hss_ndvi, 3),
+                  hss_spei = round(hss_spei, 3),
+                  hss_or   = round(hss_or, 3),
+                  lift_hss = round(lift_or_hss, 3),
+                  pod_or   = round(pod_or, 3),
+                  far_or   = round(far_or, 3))])
+
+  cat("\n--- Domain-wide HSS comparison (signal_set rollup, weighted by n_blocks_total) ---\n")
+  agg <- skill_or_lc[, .(
+    hss_weighted = weighted.mean(hss, w = n_blocks_total, na.rm = TRUE),
+    pod_weighted = weighted.mean(pod, w = n_blocks_total, na.rm = TRUE),
+    far_weighted = weighted.mean(far, w = n_blocks_total, na.rm = TRUE)
+  ), by = .(signal_set, direction)]
+  print(agg[order(direction, signal_set),
+            .(direction, signal_set,
+              hss = round(hss_weighted, 3),
+              pod = round(pod_weighted, 3),
+              far = round(far_weighted, 3))])
+
+  invisible(out)
+}
+
+# ==============================================================================
+# section_ensemble_multi
+# ==============================================================================
+# Extension of section_ensemble_or to a broader ensemble configuration grid.
+# Tests Tier 1 (8 single-signal baselines) + Tier 3 (3 cross-family pairs)
+# across a 3-z sweep at K=2 fixed. The headline question: does OR'ing a
+# pair beat the best single component, and does that lift hold across z?
+#
+# Signal sets (11 total):
+#   Tier 1 — single (8):  ndvi_z, deriv_w{03,07,14,30}_z, spei_{4,13,26}w
+#   Tier 3 — cross-pair (3): ndvi_z + spei_{4w | 13w | 26w}
+#
+# Op sweep (3 z thresholds, K=2 fixed, lead +/-8wk):
+#   z = 1.0 (lenient), z = 1.5 (headline), z = 2.0 (strict)
+#
+# Two skill layers per cell (= signal_set x z x direction x stratum):
+#   1. Per-event hit rate (POD-equivalent) via match_fires_to_events_vec
+#   2. Temporal-block contingency HSS via compute_temporal_block_contingency
+#      (fires_dt for OR cells = union of constituent fires; the unique()
+#      inside the contingency helper handles dedup of overlap blocks)
+#
+# Inputs:  event_detection_nlcd_{scope}.rds  + align cache + NLCD lookup
+# Output:  ensemble_multi_{scope}.rds (long format; one row per cell)
+#   - signal_sets       : config table (which signals compose each cell)
+#   - hit_rate_multi_lc : long format per (signal_set x z x direction x stratum)
+#   - skill_multi_lc    : long format with POD/FAR/HSS/ETS per cell
+#   - lift_pairs_wide   : wide table per (z x direction x stratum) with
+#                         best_single_hss + pair_hss + lift_hss
+#   - meta              : params, runtime, sources
+# ==============================================================================
+
+ENSEMBLE_MULTI_OPS <- list(
+  list(z = 1.0, K = 2L, lead_window = 8L, label = "lenient"),
+  list(z = 1.5, K = 2L, lead_window = 8L, label = "headline"),
+  list(z = 2.0, K = 2L, lead_window = 8L, label = "strict")
+)
+
+ENSEMBLE_MULTI_SIGNAL_SETS <- list(
+  # Tier 1 — single signals (8)
+  list(name = "ndvi_z",      components = "ndvi_z",       tier = "single"),
+  list(name = "deriv_w03_z", components = "deriv_w03_z",  tier = "single"),
+  list(name = "deriv_w07_z", components = "deriv_w07_z",  tier = "single"),
+  list(name = "deriv_w14_z", components = "deriv_w14_z",  tier = "single"),
+  list(name = "deriv_w30_z", components = "deriv_w30_z",  tier = "single"),
+  list(name = "spei_4w",     components = "spei_4w",      tier = "single"),
+  list(name = "spei_13w",    components = "spei_13w",     tier = "single"),
+  list(name = "spei_26w",    components = "spei_26w",     tier = "single"),
+  # Tier 3 — cross-family OR pairs (3)
+  list(name = "ndvi_z_OR_spei_4w",  components = c("ndvi_z", "spei_4w"),  tier = "cross_pair"),
+  list(name = "ndvi_z_OR_spei_13w", components = c("ndvi_z", "spei_13w"), tier = "cross_pair"),
+  list(name = "ndvi_z_OR_spei_26w", components = c("ndvi_z", "spei_26w"), tier = "cross_pair")
+)
+
+section_ensemble_multi <- function(scope, smoke = FALSE) {
+  cat("\n=== Section: ensemble_multi (scope =", scope,
+      ", smoke =", smoke, ") ===\n")
+  stopifnot(scope %in% c("10y", "13y"))
+
+  in_b_file <- if (scope == "10y") config$event_detection_nlcd_10y else config$event_detection_nlcd_13y
+  in_a_file <- if (scope == "10y") config$align_out_10y           else config$align_out_13y
+  out_file  <- if (scope == "10y") config$ensemble_multi_10y      else config$ensemble_multi_13y
+
+  if (!file.exists(in_b_file)) {
+    stop("Section B output missing: ", in_b_file)
+  }
+  if (!file.exists(in_a_file)) {
+    stop("align_weekly cache missing: ", in_a_file)
+  }
+  if (!file.exists(config$nlcd_pixel_lookup)) {
+    stop("NLCD lookup missing: ", config$nlcd_pixel_lookup)
+  }
+  cat(sprintf("Section B in: %s (%.0f MB)\n",
+              basename(in_b_file), file.size(in_b_file) / 1e6))
+  cat(sprintf("align cache:  %s (%.1f GB)\n",
+              basename(in_a_file), file.size(in_a_file) / 1e9))
+  cat(sprintf("Output:       %s\n", basename(out_file)))
+
+  t_section <- Sys.time()
+  BLOCK_WEEKS <- 4L
+  LC_LEVELS   <- c("crop", "forest", "grassland", "urban_dense", "urban_diffuse")
+
+  # All unique constituent signals
+  all_signals <- unique(unlist(lapply(ENSEMBLE_MULTI_SIGNAL_SETS,
+                                      function(x) x$components)))
+  ndvi_signals <- intersect(all_signals,
+                            c("ndvi_z","deriv_w03_z","deriv_w07_z",
+                              "deriv_w14_z","deriv_w30_z"))
+  spei_signals <- intersect(all_signals, c("spei_4w","spei_13w","spei_26w"))
+  anom_cols <- c(
+    if ("ndvi_z"      %in% ndvi_signals) "ndvi_anom_mean",
+    if ("deriv_w03_z" %in% ndvi_signals) "deriv_w03_anom_mean",
+    if ("deriv_w07_z" %in% ndvi_signals) "deriv_w07_anom_mean",
+    if ("deriv_w14_z" %in% ndvi_signals) "deriv_w14_anom_mean",
+    if ("deriv_w30_z" %in% ndvi_signals) "deriv_w30_anom_mean"
+  )
+  z_thresholds <- sapply(ENSEMBLE_MULTI_OPS, function(o) o$z)
+
+  cat(sprintf("\nSignal sets: %d (8 single + 3 cross-pair)\n",
+              length(ENSEMBLE_MULTI_SIGNAL_SETS)))
+  cat(sprintf("Constituent signals to detect: %d (%d NDVI + %d SPEI)\n",
+              length(all_signals), length(ndvi_signals), length(spei_signals)))
+  cat(sprintf("Op sweep: %s (K=2 fixed, lead +/-8wk fixed)\n",
+              paste(sprintf("z=%.1f", z_thresholds), collapse = ", ")))
+
+  # --- 1. Load Section B events ---
+  cat("\n[1] Load Section B output (events_pixel only)...\n")
+  out_b <- readRDS_retry(in_b_file)
+  events_pixel <- as.data.table(out_b$events_pixel)
+  rm(out_b); gc(verbose = FALSE)
+  cat(sprintf("  events_pixel: %s rows\n", format(nrow(events_pixel), big.mark=",")))
+
+  # --- 2. Join NLCD + ecoregion; restrict to 5-LC universe ---
+  cat("\n[2] Join NLCD juliana + ecoregion; restrict to 5-LC universe...\n")
+  if (!"nlcd_juliana" %in% names(events_pixel)) {
+    v_nlcd <- as.data.table(readRDS_retry(config$nlcd_pixel_lookup))
+    events_pixel <- merge(events_pixel,
+                          v_nlcd[, .(pixel_id, nlcd_juliana)],
+                          by = "pixel_id", all.x = TRUE)
+    collapse_urban_to_2tier(events_pixel)
+    rm(v_nlcd); gc(verbose = FALSE)
+  }
+  if (!"L2_code" %in% names(events_pixel)) {
+    vp <- as.data.table(readRDS_retry(config$ecoregion_lookup))
+    events_pixel <- merge(events_pixel,
+                          vp[, .(pixel_id, L2_code)],
+                          by = "pixel_id", all.x = TRUE)
+    rm(vp); gc(verbose = FALSE)
+  }
+  events_pixel <- events_pixel[!is.na(L2_code) & L2_code != "0.0" &
+                                nlcd_juliana %in% LC_LEVELS]
+  cat(sprintf("  events after LC+eco filter: %s\n",
+              format(nrow(events_pixel), big.mark = ",")))
+
+  # --- 3. Load align cache; slim; z-standardize NDVI signals ---
+  cat("\n[3] Load align cache, slim, z-standardize NDVI signals...\n")
+  dt_align <- as.data.table(readRDS_retry(in_a_file))
+  keep <- c("pixel_id", "iso_year", "iso_week", "week_start",
+            anom_cols, spei_signals, "L2_code")
+  dt_align <- dt_align[, ..keep]
+  gc(verbose = FALSE)
+  cat(sprintf("  align cache slimmed: %s rows x %d cols\n",
+              format(nrow(dt_align), big.mark = ","), ncol(dt_align)))
+
+  setorder(dt_align, pixel_id, week_start)
+  drop_px <- zstandardize_signals_per_pixel(dt_align, anom_cols, ndvi_signals,
+                                            min_valid_weeks = 30L)
+  if (length(drop_px) > 0L) {
+    dt_align <- dt_align[!pixel_id %in% drop_px]
+    cat(sprintf("  dropped %d pixels with <30 valid weeks\n", length(drop_px)))
+  }
+  dt_align[, (anom_cols) := NULL]
+
+  if (smoke) {
+    cat("\n  SMOKE MODE: restricting to ecoregions 9.4 + 8.4 for fire detection\n")
+    dt_align <- dt_align[L2_code %in% c("9.4", "8.4")]
+  }
+
+  # --- 4. Detect fires for all (signal x z x direction) combos ---
+  cat(sprintf("\n[4] Detect fires for %d combos (%d signals x %d z x 2 dir)...\n",
+              length(all_signals) * length(z_thresholds) * 2L,
+              length(all_signals), length(z_thresholds)))
+  t_fires <- Sys.time()
+  fires_list <- list()
+  fire_idx <- 0L
+  total_fires <- length(all_signals) * length(z_thresholds) * 2L
+  for (sig in all_signals) {
+    for (z in z_thresholds) {
+      for (dir_ in c("onset", "recovery")) {
+        fire_idx <- fire_idx + 1L
+        fires <- detect_fires_global(dt_align, sig, z, 2L, dir_,
+                                     is_raw_spei = grepl("^spei", sig))
+        if (!is.null(fires)) {
+          fires_list[[length(fires_list) + 1L]] <- fires
+        }
+        if (fire_idx %% 12L == 0L) {
+          elapsed <- as.numeric(Sys.time() - t_fires, units = "mins")
+          cat(sprintf("    %d/%d fire cells (%.1f min, ETA %.1f min)\n",
+                      fire_idx, total_fires, elapsed,
+                      elapsed * (total_fires - fire_idx) / fire_idx))
+        }
+      }
+    }
+  }
+  fires_all <- rbindlist(fires_list, use.names = TRUE, fill = TRUE)
+  rm(fires_list); gc(verbose = FALSE)
+  period_start_wk <- min(dt_align$week_start)
+  period_end_wk   <- max(dt_align$week_start)
+  rm(dt_align); gc(verbose = FALSE)
+  cat(sprintf("  fires: %s rows (%.1f min)\n",
+              format(nrow(fires_all), big.mark = ","),
+              as.numeric(Sys.time() - t_fires, units = "mins")))
+
+  # --- 5. Per-cell skill computation ---
+  cat("\n[5] Compute per-event hits + temporal-block HSS for each cell...\n")
+  t_skill <- Sys.time()
+  stratum_map <- unique(events_pixel[, .(pixel_id, L2_code, nlcd_juliana)])
+  if (smoke) {
+    stratum_map <- stratum_map[L2_code %in% c("9.4", "8.4")]
+  }
+  stratum_map[, stratum_key := sprintf("%s|%s", L2_code, nlcd_juliana)]
+  setkey(fires_all, signal_col, z_threshold, sustained_weeks, direction)
+
+  build_fires_for_cell <- function(components, z, K, dir_) {
+    # Components is a chr vec of constituent signals; OR = rbind union.
+    parts <- lapply(components, function(sig) {
+      fires_all[.(sig, z, K, dir_), nomatch = 0L,
+                .(pixel_id, week_start)]
+    })
+    rbindlist(parts, use.names = TRUE)
+  }
+
+  hit_rows   <- list()
+  skill_rows <- list()
+  cell_idx <- 0L
+  total_cells <- length(ENSEMBLE_MULTI_SIGNAL_SETS) * length(ENSEMBLE_MULTI_OPS) * 2L
+  for (ss in ENSEMBLE_MULTI_SIGNAL_SETS) {
+    for (op in ENSEMBLE_MULTI_OPS) {
+      for (dir_ in c("onset", "recovery")) {
+        cell_idx <- cell_idx + 1L
+        ev_sub <- events_pixel[event_type == dir_,
+                                .(pixel_id, week_start, L2_code, nlcd_juliana)]
+        f_sub  <- build_fires_for_cell(ss$components, op$z, op$K, dir_)
+        # Per-event hits
+        matched <- match_fires_to_events_vec(ev_sub, f_sub, op$lead_window)
+        ev_sub[, hit := matched$hit]
+        # Aggregate per-stratum hit rate
+        hit_summary <- ev_sub[, .(n_events = .N,
+                                  hit_rate = mean(hit, na.rm = TRUE)),
+                              by = .(L2_code, nlcd_juliana)]
+        hit_summary[, `:=`(signal_set    = ss$name,
+                            tier          = ss$tier,
+                            z_threshold   = op$z,
+                            sustained_weeks = op$K,
+                            lead_window   = op$lead_window,
+                            direction     = dir_)]
+        hit_rows[[length(hit_rows) + 1L]] <- hit_summary
+        # Block-based contingency + skill
+        cont <- compute_temporal_block_contingency(
+          ev_sub[, .(pixel_id, week_start)], f_sub, stratum_map,
+          block_weeks    = BLOCK_WEEKS,
+          period_start_wk = period_start_wk,
+          period_end_wk   = period_end_wk
+        )
+        if (nrow(cont) > 0L) {
+          cont <- compute_skill_metrics(cont)
+          cont[, c("L2_code", "nlcd_juliana") :=
+                  tstrsplit(stratum_key, "|", fixed = TRUE)]
+          cont[, `:=`(signal_set      = ss$name,
+                      tier            = ss$tier,
+                      z_threshold     = op$z,
+                      sustained_weeks = op$K,
+                      lead_window     = op$lead_window,
+                      direction       = dir_)]
+          skill_rows[[length(skill_rows) + 1L]] <- cont
+        }
+        if (cell_idx %% 12L == 0L) {
+          elapsed <- as.numeric(Sys.time() - t_skill, units = "mins")
+          cat(sprintf("    %d/%d cells (%.1f min, ETA %.1f min)\n",
+                      cell_idx, total_cells, elapsed,
+                      elapsed * (total_cells - cell_idx) / cell_idx))
+        }
+      }
+    }
+  }
+  hit_rate_multi_lc <- rbindlist(hit_rows,   use.names = TRUE, fill = TRUE)
+  skill_multi_lc    <- rbindlist(skill_rows, use.names = TRUE, fill = TRUE)
+  rm(hit_rows, skill_rows, fires_all); gc(verbose = FALSE)
+  cat(sprintf("  hit_rate_multi_lc: %s rows; skill_multi_lc: %s rows (%.1f min)\n",
+              format(nrow(hit_rate_multi_lc), big.mark = ","),
+              format(nrow(skill_multi_lc),    big.mark = ","),
+              as.numeric(Sys.time() - t_skill, units = "mins")))
+
+  # --- 6. Cross-pair lift table (HSS) ---
+  cat("\n[6] Build cross-pair lift table (HSS) per (z x direction x stratum)...\n")
+  pair_specs <- Filter(function(ss) ss$tier == "cross_pair",
+                       ENSEMBLE_MULTI_SIGNAL_SETS)
+  lift_rows <- list()
+  for (pair in pair_specs) {
+    a <- pair$components[1]; b <- pair$components[2]
+    pair_name <- pair$name
+    A_skill <- skill_multi_lc[signal_set == a,
+                              .(L2_code, nlcd_juliana, direction, z_threshold,
+                                hss_a = hss, pod_a = pod, far_a = far)]
+    B_skill <- skill_multi_lc[signal_set == b,
+                              .(L2_code, nlcd_juliana, direction, z_threshold,
+                                hss_b = hss, pod_b = pod, far_b = far)]
+    P_skill <- skill_multi_lc[signal_set == pair_name,
+                              .(L2_code, nlcd_juliana, direction, z_threshold,
+                                hss_pair = hss, pod_pair = pod, far_pair = far,
+                                n_blocks_total = n_blocks_total)]
+    merged <- merge(merge(A_skill, B_skill,
+                          by = c("L2_code","nlcd_juliana","direction","z_threshold")),
+                    P_skill,
+                    by = c("L2_code","nlcd_juliana","direction","z_threshold"))
+    merged[, `:=`(pair_name = pair_name,
+                  signal_a  = a,
+                  signal_b  = b,
+                  best_single_hss = pmax(hss_a, hss_b, na.rm = TRUE),
+                  best_single_pod = pmax(pod_a, pod_b, na.rm = TRUE))]
+    merged[, `:=`(lift_hss = hss_pair - best_single_hss,
+                  lift_pod = pod_pair - best_single_pod)]
+    lift_rows[[length(lift_rows) + 1L]] <- merged
+  }
+  lift_pairs_wide <- rbindlist(lift_rows, use.names = TRUE, fill = TRUE)
+  rm(lift_rows)
+
+  # --- 7. Assemble + save ---
+  signal_sets_dt <- rbindlist(lapply(ENSEMBLE_MULTI_SIGNAL_SETS, function(ss) {
+    data.table(name = ss$name, tier = ss$tier,
+               components = paste(ss$components, collapse = " + "))
+  }))
+
+  meta <- list(
+    scope             = scope,
+    scope_years       = if (scope == "10y") 2016:2025 else 2013:2025,
+    op_sweep          = ENSEMBLE_MULTI_OPS,
+    signal_sets       = ENSEMBLE_MULTI_SIGNAL_SETS,
+    block_weeks       = BLOCK_WEEKS,
+    lc_levels         = LC_LEVELS,
+    period_start_wk   = period_start_wk,
+    period_end_wk     = period_end_wk,
+    smoke             = smoke,
+    n_events_in       = nrow(events_pixel),
+    sources           = list(
+      event_detection_nlcd = in_b_file,
+      align_weekly         = in_a_file,
+      nlcd_pixel_lookup    = config$nlcd_pixel_lookup
+    ),
+    runtime_minutes   = as.numeric(Sys.time() - t_section, units = "mins"),
+    created           = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+  )
+
+  out <- list(
+    signal_sets        = signal_sets_dt,
+    hit_rate_multi_lc  = hit_rate_multi_lc,
+    skill_multi_lc     = skill_multi_lc,
+    lift_pairs_wide    = lift_pairs_wide,
+    meta               = meta
+  )
+
+  cat(sprintf("\nSaving %s...\n", basename(out_file)))
+  saveRDS_validated(out, out_file, compress = "xz")
+  cat(sprintf("  wrote %.2f MB in %.1f min total\n",
+              file.size(out_file) / 1e6, meta$runtime_minutes))
+
+  # --- Quick summary ---
+  options(datatable.print.nrows = 50L, datatable.print.topn = 50L)
+  cat("\n--- Domain-wide hit rate by (signal_set x z x direction), weighted by n_events ---\n")
+  hit_agg <- hit_rate_multi_lc[, .(
+    hit_rate = weighted.mean(hit_rate, w = n_events, na.rm = TRUE),
+    n_events_total = sum(n_events)
+  ), by = .(signal_set, tier, z_threshold, direction)]
+  setorder(hit_agg, direction, z_threshold, -hit_rate)
+  print(hit_agg[, .(direction, z_threshold, signal_set, tier,
+                    hit_rate = round(hit_rate, 3),
+                    n_events = n_events_total)])
+
+  cat("\n--- Domain-wide HSS by (signal_set x z x direction), weighted by n_blocks_total ---\n")
+  hss_agg <- skill_multi_lc[, .(
+    hss = weighted.mean(hss, w = n_blocks_total, na.rm = TRUE),
+    pod = weighted.mean(pod, w = n_blocks_total, na.rm = TRUE),
+    far = weighted.mean(far, w = n_blocks_total, na.rm = TRUE)
+  ), by = .(signal_set, tier, z_threshold, direction)]
+  setorder(hss_agg, direction, z_threshold, -hss)
+  print(hss_agg[, .(direction, z_threshold, signal_set, tier,
+                    hss = round(hss, 3),
+                    pod = round(pod, 3),
+                    far = round(far, 3))])
+
+  cat("\n--- Pair lift summary: median lift_hss per (pair x z x direction), n>=3 cells ---\n")
+  pair_lift_agg <- lift_pairs_wide[n_blocks_total >= 5000L,
+                                   .(n_cells = .N,
+                                     median_lift_hss = median(lift_hss, na.rm = TRUE),
+                                     mean_lift_hss   = mean(lift_hss,   na.rm = TRUE),
+                                     n_positive      = sum(lift_hss > 0, na.rm = TRUE),
+                                     median_lift_pod = median(lift_pod, na.rm = TRUE)),
+                                   by = .(pair_name, z_threshold, direction)]
+  setorder(pair_lift_agg, direction, z_threshold, -median_lift_hss)
+  print(pair_lift_agg[, .(direction, z_threshold, pair_name, n_cells,
+                          median_lift_hss = round(median_lift_hss, 3),
+                          n_positive,
+                          median_lift_pod = round(median_lift_pod, 3))])
+
+  invisible(out)
+}
+
 section_qc <- function(scope) {
   cat("\n=== Section: qc (scope =", scope, ") — STUB ===\n")
   cat("Not yet implemented. Will audit:\n")
@@ -4814,6 +5538,8 @@ switch(section_arg,
   event_detection          = section_event_detection(scope_arg, null_reps = null_reps),
   event_detection_nlcd     = section_event_detection_nlcd(scope_arg, null_reps = null_reps, smoke = smoke_flag),
   flash_drought            = section_flash_drought(scope_arg, smoke = smoke_flag),
+  ensemble_or              = section_ensemble_or(scope_arg, smoke = smoke_flag),
+  ensemble_multi           = section_ensemble_multi(scope_arg, smoke = smoke_flag),
   qc                       = section_qc(scope_arg),
   all = {
     section_align_weekly(scope_arg)
@@ -4824,6 +5550,7 @@ switch(section_arg,
     section_continuous_spei_nlcd(scope_arg, null_reps = null_reps)
     section_event_detection_nlcd(scope_arg, null_reps = null_reps)
     section_flash_drought(scope_arg)
+    section_ensemble_or(scope_arg)
     section_qc(scope_arg)
   },
   stop("Unknown section: ", section_arg)
