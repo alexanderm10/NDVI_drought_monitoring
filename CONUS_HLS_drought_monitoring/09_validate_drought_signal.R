@@ -125,7 +125,9 @@ config <- list(
   event_detection_10y       = file.path(paths$validation_data, "event_detection_10y.rds"),
   event_detection_13y       = file.path(paths$validation_data, "event_detection_13y.rds"),
   event_detection_nlcd_10y  = file.path(paths$validation_data, "event_detection_nlcd_10y.rds"),
-  event_detection_nlcd_13y  = file.path(paths$validation_data, "event_detection_nlcd_13y.rds")
+  event_detection_nlcd_13y  = file.path(paths$validation_data, "event_detection_nlcd_13y.rds"),
+  flash_drought_10y         = file.path(paths$validation_data, "flash_drought_10y.rds"),
+  flash_drought_13y         = file.path(paths$validation_data, "flash_drought_13y.rds")
 )
 
 # ------------------------------------------------------------------------------
@@ -4372,6 +4374,394 @@ section_event_detection_nlcd <- function(scope, null_reps = 0L, smoke = FALSE) {
   invisible(out)
 }
 
+# ==============================================================================
+# section_flash_drought
+# ==============================================================================
+# Productionized version of tmp_flash_drought_exploration.R (2026-06-16).
+# Re-scores Section B (event_detection_nlcd) skill on the FLASH DROUGHT subset
+# using an Otkin-style 4-week USDM trajectory definition.
+#
+# Subset definitions (per event_type):
+#   all       : every event (baseline)
+#   flash_d1  : max(USDM in +/-4wk window) >= 1  (any drought)        -- lenient
+#   flash_d2  : max(USDM in +/-4wk window) >= 2  (severe+)            -- strict (Otkin-ish)
+#
+# Two skill scoring layers per (eco x LC x direction x subset x signal):
+#   1. Per-event hit rate (POD-equivalent) from pixel_event_map at headline op.
+#      Matches the exploration script's primary metric. Cheap.
+#   2. Temporal-block contingency HSS (4-wk blocks) for the proper 2x2 skill
+#      panel (POD/FAR/HSS/ETS). Requires re-detecting fires from the align
+#      cache because Section B only stored per-event hits, not fire-week tables.
+#
+# Inputs:
+#   - event_detection_nlcd_{scope}.rds  (events_pixel + pixel_event_map)
+#   - align_weekly cache                (for fire re-detection)
+#   - usdm_4km_weekly_2013_2025.rds     (USDM trajectory)
+#   - valid_pixels_nlcd2019.rds         (LC stratification)
+#
+# Output: flash_drought_{scope}.rds
+#   - events_pixel_flash    : Section B's events + (is_flash_d1, is_flash_d2)
+#   - hit_rate_flash_lc     : per-stratum hit rate per subset (POD-equivalent)
+#   - skill_flash_lc        : per-stratum POD/FAR/HSS/ETS per subset (block-based)
+#   - domain_summary        : domain-wide pooled numbers per subset
+#   - meta                  : params, runtime, source files
+# ==============================================================================
+
+FLASH_DROUGHT_HEADLINES <- list(
+  list(signal = "ndvi_z",   z = 1.5, K = 2L, lead_window = 8L),
+  list(signal = "spei_13w", z = 1.5, K = 2L, lead_window = 8L)
+)
+
+section_flash_drought <- function(scope, smoke = FALSE) {
+  cat("\n=== Section: flash_drought (scope =", scope,
+      ", smoke =", smoke, ") ===\n")
+  stopifnot(scope %in% c("10y", "13y"))
+
+  in_b_file <- if (scope == "10y") config$event_detection_nlcd_10y else config$event_detection_nlcd_13y
+  in_a_file <- if (scope == "10y") config$align_out_10y           else config$align_out_13y
+  out_file  <- if (scope == "10y") config$flash_drought_10y       else config$flash_drought_13y
+
+  if (!file.exists(in_b_file)) {
+    stop("Section B output missing: ", in_b_file,
+         "\n  Run --section=event_detection_nlcd --scope=", scope, " first.")
+  }
+  if (!file.exists(in_a_file)) {
+    stop("align_weekly cache missing: ", in_a_file,
+         "\n  Run --section=align_weekly --scope=", scope, " first.")
+  }
+  if (!file.exists(config$usdm_file)) {
+    stop("USDM weekly cache missing: ", config$usdm_file)
+  }
+  if (!file.exists(config$nlcd_pixel_lookup)) {
+    stop("NLCD lookup missing: ", config$nlcd_pixel_lookup)
+  }
+  cat(sprintf("Section B in: %s (%.0f MB)\n",
+              basename(in_b_file), file.size(in_b_file) / 1e6))
+  cat(sprintf("align cache:  %s (%.1f GB)\n",
+              basename(in_a_file), file.size(in_a_file) / 1e9))
+  cat(sprintf("Output:       %s\n", basename(out_file)))
+
+  t_section <- Sys.time()
+  BLOCK_WEEKS <- 4L
+
+  # --- 1. Load Section B output (events_pixel + pixel_event_map) ---
+  cat("\n[1] Load Section B output...\n")
+  out_b <- readRDS_retry(in_b_file)
+  events_pixel    <- as.data.table(out_b$events_pixel)
+  pixel_event_map <- as.data.table(out_b$pixel_event_map)
+  stopifnot("week_start" %in% names(events_pixel),
+            "headline_signal" %in% names(pixel_event_map))
+  cat(sprintf("  events_pixel:    %s rows\n",
+              format(nrow(events_pixel), big.mark = ",")))
+  cat(sprintf("  pixel_event_map: %s rows\n",
+              format(nrow(pixel_event_map), big.mark = ",")))
+
+  # --- 2. Load USDM + compute rolling-max trajectory ---
+  cat("\n[2] Load USDM + compute rolling-max trajectory...\n")
+  usdm <- as.data.table(readRDS_retry(config$usdm_file))
+  # USDM table uses (week_date = Tuesday, dm_max in {-1,0,1,2,3,4}).
+  # Events use week_start = Monday of the same ISO week.
+  usdm[, week_start := week_date - 1L]
+  setkey(usdm, pixel_id, week_start)
+  # n=5 weeks = current + 4 following (or preceding) ~ Otkin's 4-wk window
+  usdm[, usdm_max_next4 := frollmax(dm_max, n = 5L, align = "left",
+                                    fill = NA, na.rm = TRUE), by = pixel_id]
+  usdm[, usdm_max_prev4 := frollmax(dm_max, n = 5L, align = "right",
+                                    fill = NA, na.rm = TRUE), by = pixel_id]
+  cat(sprintf("  USDM rows: %s\n", format(nrow(usdm), big.mark = ",")))
+
+  # --- 3. Tag events with flash flags ---
+  cat("\n[3] Tag events with flash flags...\n")
+  events_pixel <- merge(events_pixel,
+                        usdm[, .(pixel_id, week_start, usdm_max_next4, usdm_max_prev4)],
+                        by = c("pixel_id", "week_start"), all.x = TRUE)
+  events_pixel[, is_flash_d1 := fifelse(
+    event_type == "onset",     usdm_max_next4 >= 1L,
+    fifelse(event_type == "recovery", usdm_max_prev4 >= 1L, NA))]
+  events_pixel[, is_flash_d2 := fifelse(
+    event_type == "onset",     usdm_max_next4 >= 2L,
+    fifelse(event_type == "recovery", usdm_max_prev4 >= 2L, NA))]
+  rm(usdm); gc(verbose = FALSE)
+  cat(sprintf("  onset:    n=%s  flash_d1=%s (%.1f%%)  flash_d2=%s (%.1f%%)\n",
+              format(events_pixel[event_type=="onset", .N], big.mark=","),
+              format(events_pixel[event_type=="onset", sum(is_flash_d1, na.rm=TRUE)], big.mark=","),
+              100*events_pixel[event_type=="onset", mean(is_flash_d1, na.rm=TRUE)],
+              format(events_pixel[event_type=="onset", sum(is_flash_d2, na.rm=TRUE)], big.mark=","),
+              100*events_pixel[event_type=="onset", mean(is_flash_d2, na.rm=TRUE)]))
+  cat(sprintf("  recovery: n=%s  flash_d1=%s (%.1f%%)  flash_d2=%s (%.1f%%)\n",
+              format(events_pixel[event_type=="recovery", .N], big.mark=","),
+              format(events_pixel[event_type=="recovery", sum(is_flash_d1, na.rm=TRUE)], big.mark=","),
+              100*events_pixel[event_type=="recovery", mean(is_flash_d1, na.rm=TRUE)],
+              format(events_pixel[event_type=="recovery", sum(is_flash_d2, na.rm=TRUE)], big.mark=","),
+              100*events_pixel[event_type=="recovery", mean(is_flash_d2, na.rm=TRUE)]))
+
+  # --- 4. Join NLCD + ecoregion (ensure stratification cols present) ---
+  cat("\n[4] Join NLCD juliana + ecoregion lookup...\n")
+  if (!"nlcd_juliana" %in% names(events_pixel)) {
+    v_nlcd <- as.data.table(readRDS_retry(config$nlcd_pixel_lookup))
+    events_pixel <- merge(events_pixel,
+                          v_nlcd[, .(pixel_id, nlcd_juliana)],
+                          by = "pixel_id", all.x = TRUE)
+    collapse_urban_to_2tier(events_pixel)
+    rm(v_nlcd); gc(verbose = FALSE)
+  }
+  if (!"L2_code" %in% names(events_pixel)) {
+    vp <- as.data.table(readRDS_retry(config$ecoregion_lookup))
+    events_pixel <- merge(events_pixel,
+                          vp[, .(pixel_id, L2_code)],
+                          by = "pixel_id", all.x = TRUE)
+    rm(vp); gc(verbose = FALSE)
+  }
+  # Drop events lacking strata or LC out-of-set (matches Phase 6 convention)
+  LC_LEVELS <- c("crop", "forest", "grassland", "urban_dense", "urban_diffuse")
+  events_pixel <- events_pixel[!is.na(L2_code) & L2_code != "0.0" &
+                                nlcd_juliana %in% LC_LEVELS]
+  cat(sprintf("  events after LC+eco filter: %s\n",
+              format(nrow(events_pixel), big.mark = ",")))
+
+  # --- 5. Per-event hit rates from pixel_event_map (POD-equivalent) ---
+  cat("\n[5] Compute per-event hit rates per (stratum x subset x signal)...\n")
+  pew <- dcast(pixel_event_map,
+               pixel_id + week_start + event_type ~ headline_signal,
+               value.var = "hit")
+  hit_signals <- intersect(c("ndvi_z", "spei_13w"), names(pew))
+  if (length(hit_signals) < 2L) {
+    stop("pixel_event_map missing expected headline signals; ",
+         "found: ", paste(names(pew), collapse=", "))
+  }
+  ev_hits <- merge(events_pixel[, .(pixel_id, week_start, event_type,
+                                     L2_code, nlcd_juliana,
+                                     is_flash_d1, is_flash_d2)],
+                   pew, by = c("pixel_id", "week_start", "event_type"))
+
+  hit_rate_subset <- function(dt, subset_label) {
+    if (nrow(dt) == 0L) return(NULL)
+    dt[, .(n_events = .N,
+           ndvi_hit = mean(ndvi_z, na.rm = TRUE),
+           spei_hit = mean(spei_13w, na.rm = TRUE),
+           both_hit = mean(ndvi_z & spei_13w, na.rm = TRUE),
+           either_hit = mean(ndvi_z | spei_13w, na.rm = TRUE),
+           ndvi_only_hit = mean(ndvi_z & !spei_13w, na.rm = TRUE),
+           spei_only_hit = mean(!ndvi_z & spei_13w, na.rm = TRUE)),
+       by = .(L2_code, nlcd_juliana, event_type)][, subset := subset_label][]
+  }
+  hit_rate_flash_lc <- rbindlist(list(
+    hit_rate_subset(ev_hits,                              "all"),
+    hit_rate_subset(ev_hits[is_flash_d1 == TRUE],         "flash_d1"),
+    hit_rate_subset(ev_hits[is_flash_d2 == TRUE],         "flash_d2")
+  ), use.names = TRUE, fill = TRUE)
+  cat(sprintf("  hit_rate_flash_lc: %s rows\n",
+              format(nrow(hit_rate_flash_lc), big.mark = ",")))
+
+  # Domain-wide summary (matches exploration table; sanity-check vs RDS)
+  domain_subset <- function(dt, label) {
+    list(
+      label = label, n = nrow(dt),
+      onset    = list(
+        n         = dt[event_type=="onset", .N],
+        ndvi_hit  = dt[event_type=="onset", mean(ndvi_z,   na.rm=TRUE)],
+        spei_hit  = dt[event_type=="onset", mean(spei_13w, na.rm=TRUE)],
+        both      = dt[event_type=="onset", mean(ndvi_z &  spei_13w, na.rm=TRUE)],
+        ndvi_only = dt[event_type=="onset", mean(ndvi_z & !spei_13w, na.rm=TRUE)],
+        spei_only = dt[event_type=="onset", mean(!ndvi_z &  spei_13w, na.rm=TRUE)]
+      ),
+      recovery = list(
+        n         = dt[event_type=="recovery", .N],
+        ndvi_hit  = dt[event_type=="recovery", mean(ndvi_z,   na.rm=TRUE)],
+        spei_hit  = dt[event_type=="recovery", mean(spei_13w, na.rm=TRUE)],
+        both      = dt[event_type=="recovery", mean(ndvi_z &  spei_13w, na.rm=TRUE)],
+        ndvi_only = dt[event_type=="recovery", mean(ndvi_z & !spei_13w, na.rm=TRUE)],
+        spei_only = dt[event_type=="recovery", mean(!ndvi_z &  spei_13w, na.rm=TRUE)]
+      )
+    )
+  }
+  domain_summary <- list(
+    all       = domain_subset(ev_hits,                       "all"),
+    flash_d1  = domain_subset(ev_hits[is_flash_d1 == TRUE],  "flash_d1"),
+    flash_d2  = domain_subset(ev_hits[is_flash_d2 == TRUE],  "flash_d2")
+  )
+
+  # --- 6. Re-detect fires from align cache for temporal-block HSS ---
+  cat("\n[6] Re-detect fires from align cache (ndvi_z + spei_13w @ headline op)...\n")
+  t_fires <- Sys.time()
+  dt_align <- as.data.table(readRDS_retry(in_a_file))
+  ANOM_COLS    <- "ndvi_anom_mean"
+  NDVI_SIGNALS <- "ndvi_z"
+  keep <- c("pixel_id", "iso_year", "iso_week", "week_start",
+            ANOM_COLS, "spei_13w", "L2_code")
+  dt_align <- dt_align[, ..keep]
+  gc(verbose = FALSE)
+  cat(sprintf("  align cache slimmed: %s rows x %d cols\n",
+              format(nrow(dt_align), big.mark = ","), ncol(dt_align)))
+
+  # z-standardize ndvi_z (matches Section B's per-pixel z-standardization)
+  setorder(dt_align, pixel_id, week_start)
+  drop_px <- zstandardize_signals_per_pixel(dt_align, ANOM_COLS, NDVI_SIGNALS,
+                                            min_valid_weeks = 30L)
+  if (length(drop_px) > 0L) {
+    dt_align <- dt_align[!pixel_id %in% drop_px]
+    cat(sprintf("  dropped %d pixels with <30 valid weeks\n", length(drop_px)))
+  }
+  dt_align[, (ANOM_COLS) := NULL]
+
+  if (smoke) {
+    cat("\n  SMOKE MODE: restricting to ecoregions 9.4 + 8.4 for fire detection\n")
+    dt_align <- dt_align[L2_code %in% c("9.4", "8.4")]
+  }
+
+  fires_list <- list()
+  for (hdl in FLASH_DROUGHT_HEADLINES) {
+    for (dir_ in c("onset", "recovery")) {
+      fires <- detect_fires_global(dt_align, hdl$signal,
+                                   hdl$z, hdl$K, dir_,
+                                   is_raw_spei = grepl("^spei", hdl$signal))
+      if (!is.null(fires)) fires_list[[length(fires_list) + 1L]] <- fires
+    }
+  }
+  fires_all <- rbindlist(fires_list, use.names = TRUE, fill = TRUE)
+  rm(fires_list); gc(verbose = FALSE)
+
+  # Period bounds = align cache full date range
+  period_start_wk <- min(dt_align$week_start)
+  period_end_wk   <- max(dt_align$week_start)
+  rm(dt_align); gc(verbose = FALSE)
+  cat(sprintf("  fires: %s rows (%.1f min)\n",
+              format(nrow(fires_all), big.mark = ","),
+              as.numeric(Sys.time() - t_fires, units = "mins")))
+
+  # --- 7. Temporal-block contingency per stratum x subset x signal x direction ---
+  cat("\n[7] Compute temporal-block HSS per (stratum x subset x signal x direction)...\n")
+  t_skill <- Sys.time()
+  # Stratum map: per-pixel (L2_code, nlcd_juliana) for all pixels with events
+  stratum_map <- unique(events_pixel[, .(pixel_id, L2_code, nlcd_juliana)])
+  if (smoke) {
+    stratum_map <- stratum_map[L2_code %in% c("9.4", "8.4")]
+  }
+  stratum_map[, stratum_key := sprintf("%s|%s", L2_code, nlcd_juliana)]
+
+  setkey(fires_all, signal_col, direction)
+  subset_filter <- list(
+    all      = function(dt) dt,
+    flash_d1 = function(dt) dt[is_flash_d1 == TRUE],
+    flash_d2 = function(dt) dt[is_flash_d2 == TRUE]
+  )
+
+  skill_rows <- list()
+  for (subset_name in names(subset_filter)) {
+    ev_sub_full <- subset_filter[[subset_name]](events_pixel)
+    for (hdl in FLASH_DROUGHT_HEADLINES) {
+      sig <- hdl$signal
+      for (dir_ in c("onset", "recovery")) {
+        ev_sub <- ev_sub_full[event_type == dir_,
+                              .(pixel_id, week_start)]
+        f_sub  <- fires_all[.(sig, dir_), nomatch = 0L,
+                            .(pixel_id, week_start)]
+        cont <- compute_temporal_block_contingency(
+          ev_sub, f_sub, stratum_map,
+          block_weeks    = BLOCK_WEEKS,
+          period_start_wk = period_start_wk,
+          period_end_wk   = period_end_wk
+        )
+        if (nrow(cont) > 0L) {
+          cont <- compute_skill_metrics(cont)
+          # Split stratum_key back into L2_code, nlcd_juliana
+          cont[, c("L2_code", "nlcd_juliana") :=
+                  tstrsplit(stratum_key, "|", fixed = TRUE)]
+          cont[, `:=`(subset = subset_name,
+                      signal_col = sig,
+                      direction  = dir_,
+                      z_threshold = hdl$z,
+                      sustained_weeks = hdl$K,
+                      lead_window = hdl$lead_window)]
+          skill_rows[[length(skill_rows) + 1L]] <- cont
+        }
+      }
+    }
+  }
+  skill_flash_lc <- rbindlist(skill_rows, use.names = TRUE, fill = TRUE)
+  rm(skill_rows, fires_all); gc(verbose = FALSE)
+  cat(sprintf("  skill_flash_lc: %s rows (%.1f min)\n",
+              format(nrow(skill_flash_lc), big.mark = ","),
+              as.numeric(Sys.time() - t_skill, units = "mins")))
+
+  # --- 8. Assemble + save ---
+  meta <- list(
+    scope             = scope,
+    scope_years       = if (scope == "10y") 2016:2025 else 2013:2025,
+    flash_d1_def      = "max(USDM in +/-4wk window) >= 1  (any drought)",
+    flash_d2_def      = "max(USDM in +/-4wk window) >= 2  (severe+, Otkin-ish)",
+    headline_op       = "ndvi_z + spei_13w at z=1.5, K=2, lead +/-8wk",
+    headlines         = FLASH_DROUGHT_HEADLINES,
+    block_weeks       = BLOCK_WEEKS,
+    lc_levels         = LC_LEVELS,
+    period_start_wk   = period_start_wk,
+    period_end_wk     = period_end_wk,
+    smoke             = smoke,
+    n_events_in       = nrow(events_pixel),
+    sources           = list(
+      event_detection_nlcd = in_b_file,
+      align_weekly         = in_a_file,
+      usdm_file            = config$usdm_file,
+      nlcd_pixel_lookup    = config$nlcd_pixel_lookup
+    ),
+    runtime_minutes   = as.numeric(Sys.time() - t_section, units = "mins"),
+    created           = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+  )
+
+  # Reorder events_pixel_flash columns for tidiness
+  setcolorder(events_pixel,
+              intersect(c("pixel_id", "week_start", "event_type",
+                          "L2_code", "L2_name", "nlcd_juliana",
+                          "is_flash_d1", "is_flash_d2",
+                          "usdm_max_next4", "usdm_max_prev4"),
+                        names(events_pixel)))
+
+  out <- list(
+    events_pixel_flash = events_pixel,
+    hit_rate_flash_lc  = hit_rate_flash_lc,
+    skill_flash_lc     = skill_flash_lc,
+    domain_summary     = domain_summary,
+    meta               = meta
+  )
+
+  cat(sprintf("\nSaving %s...\n", basename(out_file)))
+  saveRDS_validated(out, out_file, compress = "xz")
+  cat(sprintf("  wrote %.2f MB in %.1f min total\n",
+              file.size(out_file) / 1e6, meta$runtime_minutes))
+
+  # --- Quick summary ---
+  options(datatable.print.nrows = 30L, datatable.print.topn = 30L)
+  cat("\n--- Domain-wide hit rates by subset x event_type ---\n")
+  for (sub in c("all", "flash_d1", "flash_d2")) {
+    d <- domain_summary[[sub]]
+    cat(sprintf("[%s]\n  onset    n=%s  NDVI=%.1f%%  SPEI=%.1f%%  both=%.1f%%  NDVI-only=%.1f%%  SPEI-only=%.1f%%\n",
+                sub, format(d$onset$n, big.mark=","),
+                100*d$onset$ndvi_hit, 100*d$onset$spei_hit,
+                100*d$onset$both, 100*d$onset$ndvi_only, 100*d$onset$spei_only))
+    cat(sprintf("  recovery n=%s  NDVI=%.1f%%  SPEI=%.1f%%  both=%.1f%%  NDVI-only=%.1f%%  SPEI-only=%.1f%%\n",
+                format(d$recovery$n, big.mark=","),
+                100*d$recovery$ndvi_hit, 100*d$recovery$spei_hit,
+                100*d$recovery$both, 100*d$recovery$ndvi_only, 100*d$recovery$spei_only))
+  }
+
+  cat("\n--- Top HSS per (subset x direction) ---\n")
+  for (sub in c("all", "flash_d1", "flash_d2")) {
+    for (dir_ in c("onset", "recovery")) {
+      cat(sprintf("\n[%s %s] top 5 by HSS:\n", sub, dir_))
+      q <- skill_flash_lc[subset == sub & direction == dir_ & is.finite(hss)]
+      if (nrow(q) > 0L) {
+        print(q[order(-hss)][1:5L,
+                .(L2_code, nlcd_juliana, signal_col,
+                  hits, misses, false_alarms,
+                  pod = round(pod, 3), far = round(far, 3),
+                  hss = round(hss, 3), ets = round(ets, 3))])
+      }
+    }
+  }
+
+  invisible(out)
+}
+
 section_qc <- function(scope) {
   cat("\n=== Section: qc (scope =", scope, ") — STUB ===\n")
   cat("Not yet implemented. Will audit:\n")
@@ -4423,6 +4813,7 @@ switch(section_arg,
   continuous_spei_nlcd     = section_continuous_spei_nlcd(scope_arg, null_reps = null_reps),
   event_detection          = section_event_detection(scope_arg, null_reps = null_reps),
   event_detection_nlcd     = section_event_detection_nlcd(scope_arg, null_reps = null_reps, smoke = smoke_flag),
+  flash_drought            = section_flash_drought(scope_arg, smoke = smoke_flag),
   qc                       = section_qc(scope_arg),
   all = {
     section_align_weekly(scope_arg)
@@ -4432,6 +4823,7 @@ switch(section_arg,
     section_continuous_spei(scope_arg, null_reps = null_reps)
     section_continuous_spei_nlcd(scope_arg, null_reps = null_reps)
     section_event_detection_nlcd(scope_arg, null_reps = null_reps)
+    section_flash_drought(scope_arg)
     section_qc(scope_arg)
   },
   stop("Unknown section: ", section_arg)

@@ -213,6 +213,7 @@ Sections: `align_weekly` builds the master pixel-week join (NDVI summaries + USD
 - `continuous_spei_nlcd` — LC-stratified version: full eco × 5-LC grid + per-ecoregion LC-interaction model + Wald slopes-differ test
 - `event_detection_nlcd` — LC-stratified event-anchored skill (2026-06-15): 8 fire signals (ndvi_z + 4 derivative windows + 3 SPEI windows) × 3 z × 3 K × 2 lead × 2 dir × 100 stratum tracks. SPEI joined as both fire signal AND ±8wk trajectory descriptor per event. POD/FAR/HSS/ETS from 4-week temporal-block contingency. Runtime ~5 hr full population
 - `event_detection` — original eco-only version (uses scalar matcher with a known row-ordering bug; superseded by `_nlcd` variant — see [[legacy-event-matcher-bug]] memory)
+- `flash_drought` — Otkin-style flash drought subset re-scoring of Section B (2026-06-17). Re-tags Section B events with `is_flash_d1`/`is_flash_d2` (max USDM in ±4wk window ≥ D1 or D2), then re-runs both (a) per-event hit rate from `pixel_event_map` at headline op AND (b) temporal-block HSS by re-detecting fires from align cache. Output: `flash_drought_{scope}.rds` (~164 MB). Runtime ~12 min. Supersedes `tmp_flash_drought_exploration.R` (deleted 2026-06-17).
 - `qc` — stub
 
 The validation question is **NDVI monitor skill against typical drought measures (USDM, SPEI)**. Lead/lag is a diagnostic byproduct, not an optimization target.

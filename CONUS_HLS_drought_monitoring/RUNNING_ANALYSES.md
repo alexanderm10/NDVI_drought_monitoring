@@ -25,7 +25,7 @@ The user wants to write a brief methods/results memo for colleagues after ~1-2 m
 ### A. High-priority for memo (do next session)
 - ✅ **Fig 9 — flash drought comparison figure** (DONE 2026-06-17). 3 color variants shipped (lc/eco/dual). Per-pixel IQR cross-bars + collapsed-IQR cross-in-circle markers + gate-consistent baselines + figure-reviewer pass.
 - ✅ **Fig 10 a/b/c — firing climatology** (DONE 2026-06-17). Weekly composition by direction × {domain, LC, eco}. Surfaces seasonally asymmetric complementarity directly.
-- **Productionize flash subset into `section_flash_drought` in script 09** — wrap the trajectory + tagging + skill logic cleanly. Add proper HSS computation (4-wk-block contingency on flash subset, not just hit rates). Save `flash_drought_10y.rds`.
+- ✅ **Productionize `section_flash_drought` in script 09** (DONE 2026-06-17). Wraps the trajectory + tagging + skill logic cleanly. Includes both per-event hit rate (POD-equivalent) AND temporal-block HSS (POD/FAR/HSS/ETS) per (eco × LC × subset × signal × direction). Output `flash_drought_10y.rds` (164 MB, 11.8 min runtime). Domain-wide hit rates reproduce exploration script exactly. `tmp_flash_drought_exploration.R` removed.
 - **Verify canonical L2_name in Fig 3, Fig 4 captions/legends** per `feedback_verify_epa_l2_names.md`. Sample check.
 
 ### B. Strengthen the story (do next session if time)
@@ -43,7 +43,7 @@ The user wants to write a brief methods/results memo for colleagues after ~1-2 m
 **Second session-focus**: 8.4 Ozark deep-dive + ensemble test + L2_name verify pass + assemble memo outline.
 
 ## Recent session summaries (full detail below)
-- 2026-06-17 (this session): Fig 9 (flash drought scatter, 3 variants + IQR cross-bars + collapsed-IQR markers + figure-reviewer pass) and Fig 10 a/b/c (firing climatology, palette sync, polish pass with axes="all_x").
+- 2026-06-17 (this session): Fig 9 + Fig 10 a/b/c built (above); `section_flash_drought` productionized in script 09 (`flash_drought_10y.rds` 164 MB / 11.8 min; both per-event hit rate AND temporal-block HSS; tmp exploration script retired).
 - 2026-06-16: Fig 3+4+5 built; Fig 4 pivoted to complementarity atlas; flash drought exploration.
 - 2026-06-15: Section B `event_detection_nlcd` built + run (180 MB output, 4 hr 19 min wall).
 - 2026-06-12: USDM 5-LC + SPEI 5-LC rerun; 8.4 USDM-WORKS-but-SPEI-SILENT discrepancy surfaced.
@@ -51,7 +51,30 @@ The user wants to write a brief methods/results memo for colleagues after ~1-2 m
 - 2026-06-10: `categorical_usdm` v3 built; Phase 6 reframe.
 - (earlier): align_weekly cache + derivatives rebuild + weekly SPI/SPEI.
 
-## Session Summary (2026-06-17) — Fig 9 (flash scatter) + Fig 10 a/b/c (firing climatology)
+## Session Summary (2026-06-17) — Fig 9, Fig 10 a/b/c, productionize section_flash_drought
+
+### Productionize `section_flash_drought` (afternoon, ~30 min code + 12 min full run)
+- Wraps `tmp_flash_drought_exploration.R` (2026-06-16) into a proper section in `09_validate_drought_signal.R` (~310 lines added). CLI: `--section=flash_drought --scope=10y [--smoke]`.
+- **Inputs**: `event_detection_nlcd_10y.rds` (events + pixel_event_map) + `align_weekly` cache (for fire re-detection) + USDM weekly + NLCD lookup.
+- **Pipeline** (8 steps):
+  1. Load Section B output (events_pixel + pixel_event_map)
+  2. Load USDM, compute per-pixel rolling-max trajectory (`frollmax`, n=5, align=left/right)
+  3. Tag events with `is_flash_d1` (max USDM ≥ D1 in ±4wk) and `is_flash_d2` (≥ D2)
+  4. Join NLCD juliana (with urban 2-tier collapse) + ecoregion
+  5. Per-event hit rates from pixel_event_map at headline op (matches exploration)
+  6. Re-detect fires from align cache (`detect_fires_global` for ndvi_z + spei_13w @ z=1.5 K=2)
+  7. Temporal-block contingency per (stratum × subset × signal × direction) via `compute_temporal_block_contingency` (block_weeks=4); skill via `compute_skill_metrics`
+  8. Save `flash_drought_10y.rds` (164 MB xz)
+- **Output structure**: `events_pixel_flash`, `hit_rate_flash_lc` (per-event metrics), `skill_flash_lc` (POD/FAR/HSS/ETS), `domain_summary`, `meta`. Output integrity verified with `xz -t`.
+- **Verification**: domain-wide hit rates from full run match exploration exactly — `[all] onset NDVI=24.6% SPEI=27.0%`, `[flash_d2] onset NDVI=17.1% SPEI=60.8%`. HSS values populated and sensible (low POD, high FAR per the complementarity-dominates finding from Fig 10).
+- **Headline HSS findings (new from proper contingency)**:
+  - Best onset HSS in flash-D2 (n=65K events): **5.2 grass spei_13w HSS=+0.115** (Mixed Wood Shield grass — high signal-to-noise on rare severe events in this ecoregion).
+  - Best recovery HSS in flash-D1 (n=374K events): **9.4 urban_dense ndvi_z HSS=+0.143** (small-N but defensible POD 0.282/FAR 0.882).
+  - 9.4 grass + 9.4 crop recovery HSS ~0.08-0.09 on flash-D1 (SPEI side dominates the volume — consistent with Fig 10 recovery panel showing 9.4 grass blue dominance).
+- **Retired**: `tmp_flash_drought_exploration.R` deleted (productionized; git history preserves).
+- **WORKFLOW.md** updated with `flash_drought` section entry.
+
+### Fig 9 — Flash drought scatter (3 variants, all polished)
 
 ### Fig 9 — Flash drought scatter (3 variants, all polished)
 - 2×3 grid (rows = onset/recovery, cols = all / flash-D1 / flash-D2 strict) of (SPEI hit, NDVI hit) scatter per (eco × LC) stratum.

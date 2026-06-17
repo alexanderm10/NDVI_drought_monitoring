@@ -207,7 +207,9 @@
       "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring diff --stat)",
       "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring diff .claude/settings.local.json)",
       "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring rev-list --count origin/main..HEAD)",
-      "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring add .claude/settings.local.json)"
+      "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring add .claude/settings.local.json)",
+      "Bash(awk '/^section_event_detection_nlcd/,/^section_qc/' CONUS_HLS_drought_monitoring/09_validate_drought_signal.R)",
+      "Bash(xz -t /mnt/malexander/datasets/ndvi_monitor/validation/flash_drought_10y.rds)"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [
