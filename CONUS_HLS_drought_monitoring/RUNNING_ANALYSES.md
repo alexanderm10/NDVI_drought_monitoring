@@ -1,6 +1,10 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-16 EOD — **Two big things landed today**: (1) Phase 6 Fig 3 + Fig 4 + Fig 5 (committed 6da404b); (2) **Flash drought subset exploration** — first analytical look at NDVI vs SPEI skill on rapid-onset / rapid-recovery USDM transitions. The flash result is the headline of the session: **NDVI is not a flash drought monitor**. As we tighten the flash filter (max USDM trajectory ≥D1 → ≥D2 in 4wk), SPEI's hit rate climbs sharply (27 → 44 → 61% for onset) while NDVI's drops (25 → 22 → 17%). NDVI-only firing collapses 20% → 14% → 8%. Vegetation lag (~weeks-to-month) is too long for the meteorological-trigger window. **One striking exception**: 9.4 South Central Semiarid Prairies grass shows NDVI hit rate +25 points on flash recoveries (54% vs 29%) — semiarid grass greens up visibly fast after rapid drought breaks. Full findings + tables + interpretation written to `PHASE6_VALIDATION_MEMO.md` (new section dated 2026-06-16). Exploration script `tmp_flash_drought_exploration.R` + intermediate RDS at `/data/validation/flash_drought_exploration.rds`. Not yet productionized into section_flash_drought in 09; no figure yet built.
+**Updated**: 2026-06-17 EOD — **Two new figures built today**: (1) **Fig 9 (flash drought scatter)** — 3 color-encoding variants (LC / eco / dual), per-pixel IQR cross-bars with collapsed-IQR overlay (cross-in-circle), gate-consistent baseline for the 9.4 grass highlight, per-subset PIXEL_N_MIN gate (5 for All+D1, 3 for D2 strict), and figure-reviewer pass with all must-fixes applied. (2) **Fig 10 a/b/c (firing climatology)** — weekly stacked-fraction bars of NDVI/SPEI firing categories (both/NDVI only/SPEI only/neither) across the year. Three companion figures: domain-wide with sparkline volume context (10a), per-LC facet_grid (10b), per-eco facet_grid with month labels under every panel (10c). Palette synced to Fig 1/1b complementarity convention (NDVI=blue, SPEI=orange, both=green, neither=grey).
+
+**New finding from Fig 10**: Seasonally asymmetric complementarity — **SPEI leads onset year-round; NDVI leads recovery in growing season** (esp. natural LCs). "Both" firings are rare (~5-8%) across the year. "Neither" is the modal category in every week (real coverage gap). User observation: NDVI's unique operational value lands particularly on **early-growing-season recovery transitions (MAR-JUN green-up)** — this sharpens the operational claim into "NDVI is a slow/recovery monitor with peak value on early-growing-season vegetation rebound."
+
+Fig 9 + Fig 10 findings written to memory ([[firing-climatology-findings]] joins [[flash-drought-findings]]).
 
 ## Active run
 
@@ -19,7 +23,8 @@ The user wants to write a brief methods/results memo for colleagues after ~1-2 m
 **What still needs to land before the memo writeup:**
 
 ### A. High-priority for memo (do next session)
-- **Fig 9 — flash drought comparison figure**. Recommended shape: 2×3 grid (rows = direction onset/recovery, cols = subset all/flash-D1/flash-D2) of (NDVI hit, SPEI hit) scatter per stratum, with 1:1 reference line. Visualizes the "NDVI loses on flash, holds on slow" finding directly. Could also add a panel highlighting 9.4 grass recovery as the exception.
+- ✅ **Fig 9 — flash drought comparison figure** (DONE 2026-06-17). 3 color variants shipped (lc/eco/dual). Per-pixel IQR cross-bars + collapsed-IQR cross-in-circle markers + gate-consistent baselines + figure-reviewer pass.
+- ✅ **Fig 10 a/b/c — firing climatology** (DONE 2026-06-17). Weekly composition by direction × {domain, LC, eco}. Surfaces seasonally asymmetric complementarity directly.
 - **Productionize flash subset into `section_flash_drought` in script 09** — wrap the trajectory + tagging + skill logic cleanly. Add proper HSS computation (4-wk-block contingency on flash subset, not just hit rates). Save `flash_drought_10y.rds`.
 - **Verify canonical L2_name in Fig 3, Fig 4 captions/legends** per `feedback_verify_epa_l2_names.md`. Sample check.
 
@@ -38,12 +43,58 @@ The user wants to write a brief methods/results memo for colleagues after ~1-2 m
 **Second session-focus**: 8.4 Ozark deep-dive + ensemble test + L2_name verify pass + assemble memo outline.
 
 ## Recent session summaries (full detail below)
-- 2026-06-16 (this session): Fig 3+4+5 built; Fig 4 pivoted to complementarity atlas; flash drought exploration (above).
+- 2026-06-17 (this session): Fig 9 (flash drought scatter, 3 variants + IQR cross-bars + collapsed-IQR markers + figure-reviewer pass) and Fig 10 a/b/c (firing climatology, palette sync, polish pass with axes="all_x").
+- 2026-06-16: Fig 3+4+5 built; Fig 4 pivoted to complementarity atlas; flash drought exploration.
 - 2026-06-15: Section B `event_detection_nlcd` built + run (180 MB output, 4 hr 19 min wall).
 - 2026-06-12: USDM 5-LC + SPEI 5-LC rerun; 8.4 USDM-WORKS-but-SPEI-SILENT discrepancy surfaced.
 - 2026-06-11: Phase 6 reframe; Section A `continuous_spei` complete; Section C `within_week_diagnostic` complete.
 - 2026-06-10: `categorical_usdm` v3 built; Phase 6 reframe.
 - (earlier): align_weekly cache + derivatives rebuild + weekly SPI/SPEI.
+
+## Session Summary (2026-06-17) — Fig 9 (flash scatter) + Fig 10 a/b/c (firing climatology)
+
+### Fig 9 — Flash drought scatter (3 variants, all polished)
+- 2×3 grid (rows = onset/recovery, cols = all / flash-D1 / flash-D2 strict) of (SPEI hit, NDVI hit) scatter per (eco × LC) stratum.
+- **3 color-encoding variants** rendered side-by-side for comparison: `_color_lc` (NLCD fill — cleanest), `_color_eco` (ecoregion fill — categorical ECO_PAL after reviewer feedback), `_color_dual` (LC fill + eco border ring). User declined to pick a single winner ("still exploring"); all three kept.
+- **Per-pixel IQR cross-bars** (Option A in design discussion) — point sits at the mean of per-pixel hit rates, cross-bars span 25th-75th percentile. Required two semantic fixes:
+  - Initial cross-bars used per-event mean (point) and per-pixel IQR (bars) — point sat OUTSIDE the IQR for strata with heterogeneous event counts. Switched both to per-pixel statistics for internal consistency.
+  - PIXEL_N_MIN gate tuned per-subset (5 for All+D1 plentiful, 3 for D2-strict sparse — preserves the 9.4 grass + crop recovery cells that would otherwise drop).
+- **Collapsed-IQR overlay** (Option C) — cross-in-circle (shape 13) marker on points where per-pixel rates concentrate in a single quantization bin (no meaningful IQR to show). Universally applied (not just dual variant) for visual consistency.
+- **Gate-consistent highlight baseline** — 9.4 grass recovery "NDVI lift over all-recovery" computed using the same per-pixel gate as the comparison cell, so D1 highlight (+24 pt) and D2 highlight (+8 pt) are apples-to-apples within their regime.
+- **Figure-reviewer pass** (3 agents in parallel) caught: caption truncation/density, highlight arrow disconnection, Unicode rendering risk, dual-variant ring-on-ring conflict, ECO bivariate palette muddling. All must-fixes applied: ASCII-ified subtitle/caption, tightened nudge, bumped label sizes to project's 2.8 minimum, switched overlay to shape 13 universally, swapped ECO_PAL_BIVAR → ECO_PAL.
+- Files: `10_phase6_figures.R::make_fig9_flash_drought()` (~250 lines), outputs `phase6_fig9_flash_drought_color_{lc,eco,dual}.png`.
+
+### Fig 10 a/b/c — Firing climatology
+- **User-proposed design** (chat-driven): X = ISO week of year (1-52), Y = stacked-fraction bars of firing categories at headline op (both / NDVI only / SPEI only / neither). Direct view of when each signal fires across the year.
+- **Compromise presentation**: stacked fractions in main panel + sparkline of total event count per week (volume context). User: "we'll see more NDVI fires in growing season — is that picked up?" Yes, sparkline shows when events cluster (peak ~60K/week in JJA) so reader can decompose "rate" from "volume."
+- **Three companion figures**:
+  - **10a domain-wide** — patchwork stack of main + sparkline per direction; legend collected at bottom of combined figure.
+  - **10b per-LC** — `facet_grid(direction ~ LC)`, 2×5 panels, month labels under each row via `axes = "all_x"`.
+  - **10c per-eco** — `facet_grid(direction ~ eco)`, 2×9 panels, full EPA L2 names along top, month labels under every panel per user request.
+- **Palette synced** to Fig 1 / Fig 1b convention after user flagged inconsistency: NDVI = blue (#1565C0), SPEI = orange (#EF6C00), both = green (#2E7D32), neither = grey (#E0E0E0).
+- **Polish pass**: collected guides (10a), facet_grid layouts (10b/c), repeated x-axis labels per facet (10b/c), in-panel italic n_events label per cell.
+
+### Substantive findings from Fig 10
+- **Onset is SPEI-led year-round** — orange dominates in every (eco × LC) cell, intensifying in growing season.
+- **Recovery is NDVI-led in growing season** — blue dominates for natural LCs (grass, forest), most strikingly in MAM-JJA-SON.
+- **Concurrent ("both") firings are rare** (~5-8%) — complementarity is the dominant mode, not redundancy.
+- **"Neither" is the modal category in every week** — real coverage gap; ~50-70% of events have no signal fire.
+- **9.2 Corn Belt onset**: SPEI dominant, NDVI conspicuously LOW — REVERSES-crop mechanism from [[continuous-spei-nlcd-findings]] visible in temporal-climatology form.
+- **9.4 South Central Semiarid Prairies recovery**: NDVI MASSIVE (50-60% blue in MAM-SON) — the WORKS-on-recovery exception from [[flash-drought-findings]] dominates the all-events recovery climatology too.
+- **NEW user observation**: NDVI picks up early-growing-season recoveries (MAR-JUN) particularly well. Combined with the flash finding, the operational claim sharpens: **NDVI is a slow/recovery monitor whose unique value is on early-growing-season vegetation rebound.**
+
+### Files modified
+- `10_phase6_figures.R`: +250 lines `make_fig9_flash_drought` + ~220 lines `make_fig10*` helpers/functions, FIRE_PAL constant, WEEK_BREAKS/LABELS, lubridate import, dispatch entries for fig=9, 10a, 10b, 10c.
+- `RUNNING_ANALYSES.md`: this section.
+- New memory: `project_firing_climatology_findings.md`; updated `MEMORY.md` index.
+- Outputs: `phase6_fig9_flash_drought_color_{lc,eco,dual}.png` (~0.85 MB each), `phase6_fig10{a,b,c}_firing_climatology_{domain,lc,eco}.png` (0.30–0.46 MB each).
+
+### Next session candidates
+- **Polish/DRY**: lift FIRE_PAL to module-level (Fig 1, 1b, and 10 now have local copies of the same palette).
+- **Productionize `section_flash_drought` in script 09** — wrap the exploratory pipeline with proper HSS computation, save `flash_drought_10y.rds`.
+- **8.4 Ozark USDM-WORKS-but-SPEI-SILENT deep dive** — reconcile categorical_usdm vs continuous_spei.
+- **NDVI + SPEI ensemble OR test** — 4-5% concurrent firing suggests OR ensemble lifts hit rate by ~10-15 pts.
+- **Memo outline + draft** — substantive findings are all in hand; figures cover the story.
 
 ## Session Summary (2026-06-15) — Section B event_detection_nlcd built + run
 

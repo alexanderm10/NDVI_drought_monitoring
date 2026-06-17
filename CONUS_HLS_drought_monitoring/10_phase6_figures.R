@@ -24,6 +24,7 @@ suppressPackageStartupMessages({
   library(sf)
   library(maps)
   library(patchwork)
+  library(lubridate)
 })
 
 source("00_setup_paths.R")
@@ -1605,6 +1606,542 @@ make_fig5_op_heatmap <- function() {
   invisible(out_path)
 }
 
+# ------------------------------------------------------------------------------
+# Figure 9: Flash drought subset — (SPEI hit, NDVI hit) scatter per stratum
+#
+# 2x3 grid (rows = direction onset/recovery, cols = subset all / flash-D1 /
+# flash-D2-strict). One point per (ecoregion x NLCD class) with n_in_subset
+# >= 50. Reference 1:1 diagonal; points above the diagonal have NDVI advantage,
+# below have SPEI advantage. The bulk of the story: in the flash columns,
+# points migrate downward and rightward (SPEI gains, NDVI loses), EXCEPT
+# 9.4 grass recovery which sits well above the diagonal in the flash columns.
+#
+# Three color-encoding variants are emitted as separate PNGs for comparison:
+#   color_by = "lc"   : fill = NLCD class (LC_PAL), eco code in repel label
+#   color_by = "eco"  : fill = EPA L2 ecoregion (ECO_PAL_BIVAR), LC in label
+#   color_by = "dual" : fill = NLCD, border color = ecoregion (stroke=1.2)
+#
+# Flash defs follow tmp_flash_drought_exploration.R (Otkin-style trajectory):
+#   flash_d2 = max(usdm in +/- 4wk window) >= D2  (strict)
+#   flash_d1 = max(usdm in +/- 4wk window) >= D1  (lenient)
+# ------------------------------------------------------------------------------
+make_fig9_flash_drought <- function() {
+  cat("\n=== Figure 9: Flash drought subset scatter ===\n")
+
+  fd_path <- file.path(paths$validation_data, "flash_drought_exploration.rds")
+  if (!file.exists(fd_path)) {
+    stop("Fig 9 requires flash_drought_exploration.rds; expected at ", fd_path)
+  }
+  fd <- readRDS_retry(fd_path)
+  ev <- as.data.table(fd$ev_full)
+  ev <- ev[nlcd_juliana %in% names(LC_PAL) & L2_code %in% names(ECO_NAMES)]
+
+  # Per-pixel rollup → per-stratum summary. ONE consistent rollup feeds both
+  # the point (per-pixel mean) and the cross-bars (per-pixel IQR), so the
+  # point always sits inside its cross-bar centroid.
+  #
+  # Pipeline per (direction × subset):
+  #   1. Compute each pixel's hit rate = mean(hit_bool) over its events in the subset
+  #   2. Keep pixels with n_events_in_subset >= PIXEL_N_MIN (stability gate)
+  #   3. Per (L2_code × nlcd_juliana × event_type): mean + Q25/Q75 of per-pixel rates
+  #   4. Keep stratum if n_pixels_passing >= STRATUM_PX_MIN
+  #
+  # Note on noise: per-pixel rates at PIXEL_N_MIN=5 are quantized to
+  # {0, 0.2, 0.4, 0.6, 0.8, 1.0}; at PIXEL_N_MIN=3 to {0, 1/3, 2/3, 1}.
+  # IQR can still collapse to zero when the distribution concentrates at one
+  # bin (flagged via iqr_collapsed below). Read non-zero IQRs as upper bounds
+  # on true spatial heterogeneity.
+  #
+  # Per-subset gate: All + D1 use 5 (plentiful data, better granularity);
+  # D2-strict relaxes to 3 because severe flash events are too rare for n=5
+  # (only 2 strata survive at n=5 vs 19 at n=3 — see 2026-06-17 probe).
+  PIXEL_N_MIN_PLENTIFUL <- 5L
+  PIXEL_N_MIN_SPARSE    <- 3L
+  STRATUM_PX_MIN        <- 10L  # min pixels per stratum to report
+  build_stratum <- function(dt, subset_label, pixel_n_min) {
+    pix <- dt[, .(n_px_events = .N,
+                  ndvi_px = mean(ndvi_z, na.rm = TRUE),
+                  spei_px = mean(spei_13w, na.rm = TRUE)),
+              by = .(pixel_id, L2_code, nlcd_juliana, event_type)
+             ][n_px_events >= pixel_n_min]
+    pix[, .(n_pixels = .N,
+            n_events = sum(n_px_events),
+            ndvi_hit = mean(ndvi_px, na.rm = TRUE),
+            spei_hit = mean(spei_px, na.rm = TRUE),
+            ndvi_q25 = quantile(ndvi_px, 0.25, na.rm = TRUE),
+            ndvi_q75 = quantile(ndvi_px, 0.75, na.rm = TRUE),
+            spei_q25 = quantile(spei_px, 0.25, na.rm = TRUE),
+            spei_q75 = quantile(spei_px, 0.75, na.rm = TRUE)),
+        by = .(L2_code, nlcd_juliana, event_type)
+       ][n_pixels >= STRATUM_PX_MIN][, subset := subset_label][]
+  }
+  strat_all <- build_stratum(ev,                          "All events",                  PIXEL_N_MIN_PLENTIFUL)
+  strat_d1  <- build_stratum(ev[is_flash_d1 == TRUE],     "Flash >=D1 in 4wk",            PIXEL_N_MIN_PLENTIFUL)
+  strat_d2  <- build_stratum(ev[is_flash    == TRUE],     "Flash >=D2 in 4wk (strict)",   PIXEL_N_MIN_SPARSE)
+  S <- rbindlist(list(strat_all, strat_d1, strat_d2))
+  S[, show_iqr := TRUE]  # by construction; every row has IQR fields
+  # Flag cells where the per-pixel rate distribution collapsed to a single
+  # quantization bin in EITHER axis — the cross-bar would be zero-length and
+  # invisible. These get an open-ring overlay so they don't read as missing.
+  EPS <- 1e-9
+  S[, iqr_collapsed := (ndvi_q75 - ndvi_q25 < EPS) |
+                       (spei_q75 - spei_q25 < EPS)]
+
+  # Factor orderings
+  S[, subset    := factor(subset, levels = c("All events",
+                                             "Flash >=D1 in 4wk",
+                                             "Flash >=D2 in 4wk (strict)"))]
+  S[, direction := factor(event_type, levels = c("onset", "recovery"),
+                          labels = c("Onset (drought worsens)",
+                                     "Recovery (drought eases)"))]
+  S[, nlcd_juliana := factor(nlcd_juliana, levels = names(LC_PAL))]
+  S[, L2_code      := factor(L2_code,      levels = names(ECO_NAMES))]
+  S[, stratum_label := sprintf("%s %s", L2_code,
+                               LC_SHORT[as.character(nlcd_juliana)])]
+
+  # Label rule (per panel): the standout cells.
+  #   - 5 points furthest from the 1:1 diagonal (either direction), OR
+  #   - any point in the top-3 by |ndvi_hit - spei_hit|.
+  # Keeps the panels readable while still surfacing extremes.
+  S[, gap_abs := abs(ndvi_hit - spei_hit)]
+  S[, label_me := rank(-gap_abs, ties.method = "first") <= 5,
+    by = .(direction, subset)]
+
+  # Highlight cell: 9.4 grass recovery, in flash subsets. The "exception".
+  # Display the NDVI lift over all-recovery using the SAME per-pixel gate as
+  # the comparison cell (so D2-strict, which uses PIXEL_N_MIN_SPARSE, is
+  # compared to an all-recovery baseline computed at the same gate).
+  S[, is_highlight := L2_code == "9.4" & nlcd_juliana == "grassland" &
+                      direction == "Recovery (drought eases)" &
+                      subset %in% c("Flash >=D1 in 4wk",
+                                    "Flash >=D2 in 4wk (strict)")]
+  baseline_at_gate <- function(min_n) {
+    pix <- ev[event_type == "recovery" & L2_code == "9.4" &
+              nlcd_juliana == "grassland",
+              .(n_px = .N, ndvi_px = mean(ndvi_z, na.rm = TRUE)),
+              by = pixel_id][n_px >= min_n]
+    if (nrow(pix) == 0L) NA_real_ else mean(pix$ndvi_px, na.rm = TRUE)
+  }
+  baseline_plentiful <- baseline_at_gate(PIXEL_N_MIN_PLENTIFUL)
+  baseline_sparse    <- baseline_at_gate(PIXEL_N_MIN_SPARSE)
+  S[is_highlight == TRUE,
+    lift_pts := round(100 * (ndvi_hit - fifelse(
+      subset == "Flash >=D2 in 4wk (strict)",
+      baseline_sparse, baseline_plentiful)))]
+
+  # Axis range: unified across panels so eye comparisons are valid.
+  lo <- max(0,   min(c(S$ndvi_hit, S$spei_hit), na.rm = TRUE) - 0.05)
+  hi <- min(1.0, max(c(S$ndvi_hit, S$spei_hit), na.rm = TRUE) + 0.05)
+
+  # Diagonal-band shading helpers (above-diag = NDVI win; below = SPEI win)
+  band_df <- data.frame(
+    x  = c(lo, hi, hi),
+    y  = c(lo, lo, hi),
+    region = "SPEI advantage"
+  )
+
+  draw_one <- function(color_by = c("lc", "eco", "dual")) {
+    color_by <- match.arg(color_by)
+
+    # Layered build so we can swap aesthetic mapping cleanly per variant.
+    p <- ggplot(S, aes(x = spei_hit, y = ndvi_hit)) +
+      # Sub-diagonal shading (SPEI advantage)
+      geom_polygon(data = band_df, aes(x = x, y = y),
+                   fill = "grey88", alpha = 0.45, inherit.aes = FALSE) +
+      # 1:1 reference
+      geom_abline(slope = 1, intercept = 0, color = "grey40",
+                  linewidth = 0.45, linetype = "dashed") +
+      # Per-pixel IQR cross-bars (under the point)
+      geom_linerange(data = S[show_iqr == TRUE],
+                     aes(y = ndvi_hit, xmin = spei_q25, xmax = spei_q75),
+                     color = "grey45", linewidth = 0.35, alpha = 0.7,
+                     inherit.aes = FALSE) +
+      geom_linerange(data = S[show_iqr == TRUE],
+                     aes(x = spei_hit, ymin = ndvi_q25, ymax = ndvi_q75),
+                     color = "grey45", linewidth = 0.35, alpha = 0.7,
+                     inherit.aes = FALSE)
+
+    if (color_by == "lc") {
+      p <- p + geom_point(aes(fill = nlcd_juliana, size = sqrt(n_events)),
+                          shape = 21, color = "grey15", stroke = 0.4,
+                          alpha = 0.9) +
+        scale_fill_manual(values = LC_PAL, name = "Land cover (NLCD)",
+                          drop = FALSE) +
+        guides(fill = guide_legend(override.aes = list(size = 5)))
+    } else if (color_by == "eco") {
+      # Use ECO_PAL (categorical) rather than ECO_PAL_BIVAR (designed for
+      # 2D position-as-intensity, muddies in dense clusters per ECO reviewer).
+      p <- p + geom_point(aes(fill = L2_code, size = sqrt(n_events)),
+                          shape = 21, color = "grey15", stroke = 0.4,
+                          alpha = 0.9) +
+        scale_fill_manual(values = ECO_PAL, name = "EPA L2 ecoregion",
+                          labels = function(x) sprintf("%s %s", x, ECO_NAMES[x]),
+                          drop = FALSE) +
+        guides(fill = guide_legend(override.aes = list(size = 5), ncol = 2))
+    } else {  # dual
+      p <- p + geom_point(aes(fill = nlcd_juliana, color = L2_code,
+                              size = sqrt(n_events)),
+                          shape = 21, stroke = 1.2, alpha = 0.9) +
+        scale_fill_manual(values = LC_PAL, name = "Land cover (fill)",
+                          drop = FALSE) +
+        scale_color_manual(values = ECO_PAL_BIVAR,
+                           name = "EPA L2 ecoregion (border)",
+                           labels = function(x) sprintf("%s %s", x, ECO_NAMES[x]),
+                           drop = FALSE) +
+        guides(fill  = guide_legend(override.aes = list(size = 5, color = "grey15",
+                                                        stroke = 0.4)),
+               color = guide_legend(override.aes = list(size = 5, fill = "white",
+                                                        stroke = 1.2), ncol = 3))
+    }
+
+    # Collapsed-IQR overlay: open cross-in-circle (shape 13) on top of the
+    # fill point. Signals "per-pixel rate distribution concentrated in one
+    # quantization bin in at least one axis — no meaningful cross-bar to show."
+    # shape=13 (not 1) disambiguates from the dual variant's eco-color border
+    # ring; the internal "+" mark is visible even when the outer circle merges.
+    p <- p +
+      geom_point(data = S[iqr_collapsed == TRUE],
+                 aes(size = sqrt(n_events) + 2.8),
+                 shape = 13, color = "black", stroke = 1.0,
+                 inherit.aes = TRUE)
+
+    p <- p +
+      ggrepel::geom_text_repel(
+        data = S[label_me == TRUE],
+        aes(label = stratum_label),
+        size = 2.9, color = "grey15", fontface = "plain",
+        box.padding = 0.45, point.padding = 0.3,
+        min.segment.length = 0.1, segment.alpha = 0.5, segment.size = 0.3,
+        max.overlaps = Inf, seed = 42
+      ) +
+      # Highlight: arrow + bold label for 9.4 grass recovery in flash panels.
+      # Label shows the NDVI lift relative to all-recovery (memo headline metric).
+      # Tighter nudge keeps the arrow connected to the point (LC reviewer
+      # 2026-06-17: prior nudge_y=0.14 disconnected the arrowhead).
+      ggrepel::geom_label_repel(
+        data = S[is_highlight == TRUE],
+        aes(label = sprintf("9.4 grass\n+%d pt NDVI lift\nover all-recovery",
+                            lift_pts)),
+        size = 3.2, color = "#7F1D1D", fontface = "bold",
+        fill = "#FEF3C7", alpha = 0.95, label.padding = 0.25,
+        nudge_x = -0.06, nudge_y = 0.08,
+        segment.color = "#7F1D1D", segment.size = 0.6,
+        arrow = arrow(length = unit(0.018, "npc"), type = "closed"),
+        min.segment.length = 0, max.overlaps = Inf, seed = 17,
+        inherit.aes = TRUE
+      ) +
+      facet_grid(direction ~ subset) +
+      scale_x_continuous(limits = c(lo, hi),
+                         labels = scales::percent_format(accuracy = 1),
+                         expand = c(0, 0)) +
+      scale_y_continuous(limits = c(lo, hi),
+                         labels = scales::percent_format(accuracy = 1),
+                         expand = c(0, 0)) +
+      scale_size_continuous(range = c(1.8, 7.5), guide = "none") +
+      coord_fixed() +
+      labs(
+        title    = "Figure 9. Flash drought subset -- NDVI vs SPEI per-event hit rate",
+        subtitle = paste0(
+          "One point per (ecoregion x NLCD class) with >=", STRATUM_PX_MIN,
+          " pixels in subset. Above 1:1 = NDVI advantage; below = SPEI advantage."),
+        x = "SPEI_13w hit rate  (z=1.5, K=2, lead +/-8wk)",
+        y = "NDVI_z hit rate  (z=1.5, K=2, lead +/-8wk)",
+        caption = paste(
+          paste0("Per-pixel rollup: pixel hit rate = mean(hit_bool) across its events. Point = mean of per-pixel rates; cross-bars = 25th-75th percentile across pixels."),
+          paste0("Per-subset gate: All + D1 require >=", PIXEL_N_MIN_PLENTIFUL,
+                 " events/pixel (rate quantum 0.20); D2-strict relaxes to >=",
+                 PIXEL_N_MIN_SPARSE, " (quantum 0.33) due to event rarity. ",
+                 "Flash defs (Otkin-style 4-wk USDM trajectory): D1+ lenient; D2+ strict."),
+          paste0("Point size ~ sqrt(n_events). Cross-bars conflate spatial heterogeneity with Bernoulli noise. ",
+                 "Cross-in-circle (X) = IQR collapsed in >=1 axis (per-pixel rates concentrated in a single bin)."),
+          paste0("As the flash filter tightens (left -> right), points migrate right and down: SPEI hit climbs, NDVI drops. ",
+                 "Exception: 9.4 South Central Semiarid Prairies grass on flash recovery (semiarid grass greens up faster than meteorological signal normalizes)."),
+          "Sources: flash_drought_exploration.rds (2026-06-16) + event_detection_nlcd_10y.rds (2026-06-15).",
+          sep = "\n"
+        )
+      ) +
+      phase6_theme(base_size = 11) +
+      theme(legend.position = "bottom",
+            strip.text       = element_text(face = "bold", size = rel(1.0)),
+            panel.spacing    = unit(0.6, "lines"),
+            plot.caption     = element_text(color = "grey30",
+                                            size = rel(0.85),
+                                            hjust = 0,
+                                            margin = margin(t = 10),
+                                            lineheight = 1.15))
+
+    suffix <- switch(color_by, lc = "color_lc", eco = "color_eco",
+                     dual = "color_dual")
+    out_path <- file.path(FIG_DIR,
+                          sprintf("phase6_fig9_flash_drought_%s.png", suffix))
+    ggsave(out_path, p, width = 15, height = 10.5, dpi = 300, bg = "white")
+    cat(sprintf("  wrote %s (%.2f MB)\n", out_path, file.size(out_path) / 1e6))
+    invisible(out_path)
+  }
+
+  draw_one("lc")
+  draw_one("eco")
+  draw_one("dual")
+  invisible(NULL)
+}
+
+# ------------------------------------------------------------------------------
+# Figure 10: Firing climatology — weekly stacked composition of NDVI/SPEI fires
+#
+# X: ISO week of year (1-52). Y (main panel): stacked fraction of weekly events
+# by firing category (both / NDVI only / SPEI only / neither). Y (sparkline):
+# total event count per week, for volume context (so reader can distinguish
+# "lots of NDVI fires because lots of events" from "high per-event NDVI rate").
+#
+# Three companion figures share the same machinery:
+#   10a "domain"  — pooled across all (eco x LC) strata, faceted by direction
+#   10b "lc"      — faceted by NLCD class x direction (5 x 2 = 10 panels)
+#   10c "eco"     — faceted by EPA L2 ecoregion x direction (9 x 2 = 18 panels)
+#
+# All use headline op (z=1.5, K=2, lead +/- 8wk), pulled from pixel_event_map
+# joined into ev_full by tmp_flash_drought_exploration.R.
+# ------------------------------------------------------------------------------
+
+# Firing-category palette — kept consistent with Fig 1 / Fig 1b complementarity
+# scheme (NDVI = blue, SPEI = orange, both = green, neither = grey).
+FIRE_PAL <- c(
+  "both"        = "#2E7D32",
+  "NDVI only"   = "#1565C0",
+  "SPEI only"   = "#EF6C00",
+  "neither"     = "#E0E0E0"
+)
+FIRE_LEVELS <- c("neither", "SPEI only", "NDVI only", "both")  # stack order bottom->top
+
+#' Build the per-week composition table.
+#' Returns long-format dt with: [group...,] direction, week, fire_cat, n, frac
+#' Plus a marginal totals dt: [group...,] direction, week, n_events
+#' Note: groups by 'direction' (the human-readable factor), not 'event_type'.
+build_firing_climatology <- function(ev, group_cols = character(0)) {
+  by_full <- c(group_cols, "direction", "week", "fire_cat")
+  by_week <- c(group_cols, "direction", "week")
+
+  comp <- ev[, .N, by = by_full]
+  comp[, frac := N / sum(N), by = by_week]
+  comp[, fire_cat := factor(fire_cat, levels = FIRE_LEVELS)]
+
+  totals <- ev[, .(n_events = .N), by = by_week]
+  list(comp = comp, totals = totals)
+}
+
+#' Prep ev_full once: add week, fire_cat, NLCD canonical, eco filter.
+prep_firing_events <- function() {
+  fd_path <- file.path(paths$validation_data, "flash_drought_exploration.rds")
+  if (!file.exists(fd_path)) {
+    stop("Fig 10 requires flash_drought_exploration.rds; expected at ", fd_path)
+  }
+  fd <- readRDS_retry(fd_path)
+  ev <- as.data.table(fd$ev_full)
+  ev <- ev[nlcd_juliana %in% names(LC_PAL) & L2_code %in% names(ECO_NAMES)]
+  # ISO week 1-53; clamp 53 -> 52 (rare boundary year, just collapse)
+  ev[, week := lubridate::isoweek(week_start)]
+  ev[week == 53L, week := 52L]
+  ev[, fire_cat := fcase(
+        ndvi_z &  spei_13w, "both",
+        ndvi_z & !spei_13w, "NDVI only",
+       !ndvi_z &  spei_13w, "SPEI only",
+       !ndvi_z & !spei_13w, "neither")]
+  ev[, direction := factor(event_type, levels = c("onset", "recovery"),
+                           labels = c("Onset (drought worsens)",
+                                      "Recovery (drought eases)"))]
+  ev[]
+}
+
+#' Approximate month-tick positions for an ISO-week x-axis.
+WEEK_BREAKS <- c(1, 5, 9, 14, 18, 22, 27, 31, 35, 40, 44, 48)
+WEEK_LABELS <- c("Jan","Feb","Mar","Apr","May","Jun",
+                 "Jul","Aug","Sep","Oct","Nov","Dec")
+
+#' Build one (main bars + sparkline) compound panel for a given subset.
+#' Returns a patchwork object stacking main over sparkline.
+#' Legend is collected at the combined-figure level via plot_layout(guides="collect").
+firing_panel <- function(comp_sub, totals_sub, panel_title = NULL,
+                          base_size = 11) {
+  main <- ggplot(comp_sub,
+                 aes(x = week, y = frac, fill = fire_cat)) +
+    geom_col(width = 1, color = NA) +
+    scale_fill_manual(values = FIRE_PAL, name = "Firing category",
+                      breaks = c("both","NDVI only","SPEI only","neither"),
+                      drop = FALSE) +
+    scale_x_continuous(breaks = WEEK_BREAKS, labels = WEEK_LABELS,
+                       limits = c(0.5, 52.5), expand = c(0, 0)) +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1L),
+                       expand = c(0, 0), limits = c(0, 1)) +
+    labs(x = NULL, y = "Fraction of events",
+         title = panel_title) +
+    phase6_theme(base_size = base_size) +
+    theme(panel.grid.minor = element_blank(),
+          axis.text.x      = element_blank(),
+          axis.ticks.x     = element_blank(),
+          plot.title       = element_text(face = "bold", size = rel(1.05),
+                                          hjust = 0),
+          legend.position  = "bottom")
+
+  spark <- ggplot(totals_sub,
+                  aes(x = week, y = n_events)) +
+    geom_area(fill = "grey55", color = "grey25", linewidth = 0.3, alpha = 0.7) +
+    scale_x_continuous(breaks = WEEK_BREAKS, labels = WEEK_LABELS,
+                       limits = c(0.5, 52.5), expand = c(0, 0)) +
+    scale_y_continuous(labels = scales::label_number(scale = 1e-3,
+                                                     suffix = "K",
+                                                     accuracy = 1),
+                       breaks = scales::pretty_breaks(n = 3),
+                       expand = expansion(mult = c(0, 0.1))) +
+    labs(x = "Week of year", y = "Events") +
+    phase6_theme(base_size = base_size) +
+    theme(panel.grid.minor = element_blank(),
+          plot.margin      = margin(t = 0, r = 5, b = 5, l = 5))
+
+  main / spark + patchwork::plot_layout(heights = c(4, 1))
+}
+
+# ------------------------------------------------------------------------------
+# Figure 10a: Domain-wide firing climatology
+# ------------------------------------------------------------------------------
+make_fig10a_firing_domain <- function() {
+  cat("\n=== Figure 10a: Firing climatology (domain-wide) ===\n")
+  ev <- prep_firing_events()
+  out <- build_firing_climatology(ev)
+  comp <- out$comp;  totals <- out$totals
+
+  panels <- lapply(levels(comp$direction), function(dir) {
+    firing_panel(
+      comp[direction == dir],
+      totals[direction == dir],
+      panel_title = dir
+    )
+  })
+
+  combined <- (panels[[1]] | panels[[2]]) +
+    patchwork::plot_layout(guides = "collect") &
+    theme(legend.position = "bottom")
+  combined <- combined +
+    patchwork::plot_annotation(
+      title    = "Figure 10a. Firing climatology -- weekly composition of NDVI vs SPEI fires",
+      subtitle = paste0(
+        "Domain-wide (all eco x LC pooled). Each bar shows the fraction of events ",
+        "in that ISO week by firing category at the headline op (z=1.5, K=2, lead +/- 8wk).\n",
+        "Sparkline = total events per week (volume context: the bar composition is a fraction OF the sparkline height)."),
+      caption  = paste(
+        "Firing categories: 'both' = NDVI_z AND SPEI_13w fired; 'NDVI only' / 'SPEI only' = one but not the other; 'neither' = neither fired within the +/- 8wk lead window.",
+        "Source: flash_drought_exploration.rds (2026-06-16) joined with event_detection_nlcd_10y.rds (2026-06-15) at the headline op.",
+        sep = "\n"
+      ),
+      theme    = theme(plot.title    = element_text(face = "bold", size = rel(1.15)),
+                       plot.subtitle = element_text(color = "grey30", size = rel(0.9)),
+                       plot.caption  = element_text(color = "grey30", size = rel(0.8),
+                                                    hjust = 0,
+                                                    margin = margin(t = 8),
+                                                    lineheight = 1.15))
+    )
+
+  out_path <- file.path(FIG_DIR, "phase6_fig10a_firing_climatology_domain.png")
+  ggsave(out_path, combined, width = 14, height = 7.5, dpi = 300, bg = "white")
+  cat(sprintf("  wrote %s (%.2f MB)\n", out_path, file.size(out_path) / 1e6))
+  invisible(out_path)
+}
+
+# ------------------------------------------------------------------------------
+# Figure 10b/c: per-LC and per-ecoregion firing climatology
+# Shared faceted layout (main bars only; total n_events shown as facet subtitle
+# to keep the figure compact when there are many panels).
+# ------------------------------------------------------------------------------
+make_fig10_firing_faceted <- function(scope = c("lc", "eco")) {
+  scope <- match.arg(scope)
+  cat(sprintf("\n=== Figure 10%s: Firing climatology (per-%s) ===\n",
+              if (scope == "lc") "b" else "c", scope))
+  ev <- prep_firing_events()
+
+  if (scope == "lc") {
+    ev[, group := factor(nlcd_juliana, levels = names(LC_PAL))]
+    fname <- "phase6_fig10b_firing_climatology_lc.png"
+    fig_no <- "Figure 10b"
+    fig_w <- 18; fig_h <- 9
+    group_label <- "Land cover (NLCD)"
+    pool_note <- "Pooled across all ecoregions within LC."
+    # 2 rows (direction) x 5 cols (LC)
+    facet_spec <- facet_grid(direction ~ group, axes = "all_x")
+  } else {
+    ev[, group := factor(L2_code, levels = names(ECO_NAMES),
+                         labels = paste0(names(ECO_NAMES), " ", ECO_NAMES))]
+    fname <- "phase6_fig10c_firing_climatology_eco.png"
+    fig_no <- "Figure 10c"
+    fig_w <- 22; fig_h <- 9
+    group_label <- "EPA L2 ecoregion"
+    pool_note <- "Pooled across all NLCD classes within ecoregion."
+    # 2 rows (direction) x 9 cols (eco); narrower panels but wide canvas
+    # axes = "all_x" forces month labels under EACH panel (timeline cue).
+    facet_spec <- facet_grid(direction ~ group, axes = "all_x")
+  }
+
+  out <- build_firing_climatology(ev, group_cols = "group")
+  comp <- out$comp;  totals <- out$totals
+  # Per-facet total n_events shown via subtitle annotation per panel
+  facet_totals <- totals[, .(n_events = sum(n_events)), by = .(group, direction)]
+  facet_totals[, n_label := sprintf("n = %s", format(n_events, big.mark = ","))]
+
+  p <- ggplot(comp, aes(x = week, y = frac, fill = fire_cat)) +
+    geom_col(width = 1, color = NA) +
+    # In-panel n_events label so the per-facet sample size is visible without
+    # baking it into the strip text (which is shared across direction rows).
+    geom_text(data = facet_totals,
+              aes(x = 26, y = 0.97, label = n_label),
+              inherit.aes = FALSE,
+              color = "grey25", size = 2.8, fontface = "italic",
+              vjust = 1, hjust = 0.5) +
+    facet_spec +
+    scale_fill_manual(values = FIRE_PAL, name = "Firing category",
+                      breaks = c("both","NDVI only","SPEI only","neither"),
+                      drop = FALSE) +
+    scale_x_continuous(breaks = WEEK_BREAKS, labels = WEEK_LABELS,
+                       limits = c(0.5, 52.5), expand = c(0, 0)) +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1L),
+                       expand = c(0, 0), limits = c(0, 1)) +
+    labs(
+      x = "Week of year",
+      y = "Fraction of events",
+      title    = sprintf("%s. Firing climatology -- weekly NDVI/SPEI composition by %s",
+                          fig_no, group_label),
+      subtitle = paste0(
+        "Rows = direction (onset/recovery); columns = ", group_label,
+        ". Bar = fraction of week's events by firing category at headline op (z=1.5, K=2, lead +/- 8wk). ",
+        "In-panel italics = total n_events in that cell."),
+      caption  = paste(
+        "Firing categories: 'both' = NDVI_z AND SPEI_13w fired; 'NDVI only' / 'SPEI only' = one but not the other; 'neither' = neither fired within the +/- 8wk lead window.",
+        sprintf("Month labels repeated under every panel for timeline reference. %s", pool_note),
+        "Source: flash_drought_exploration.rds (2026-06-16) + event_detection_nlcd_10y.rds (2026-06-15).",
+        sep = "\n"
+      )
+    ) +
+    phase6_theme(base_size = 11) +
+    theme(legend.position  = "bottom",
+          strip.text       = element_text(face = "bold", size = rel(0.92),
+                                          lineheight = 1.1),
+          strip.text.y     = element_text(angle = -90),
+          panel.grid.minor = element_blank(),
+          panel.spacing.x  = unit(0.4, "lines"),
+          panel.spacing.y  = unit(0.6, "lines"),
+          axis.text.x      = element_text(size = rel(0.85)),
+          plot.title       = element_text(face = "bold", size = rel(1.15)),
+          plot.subtitle    = element_text(color = "grey30", size = rel(0.9)),
+          plot.caption     = element_text(color = "grey30", size = rel(0.8),
+                                          hjust = 0,
+                                          margin = margin(t = 10),
+                                          lineheight = 1.15))
+
+  out_path <- file.path(FIG_DIR, fname)
+  ggsave(out_path, p, width = fig_w, height = fig_h, dpi = 300, bg = "white")
+  cat(sprintf("  wrote %s (%.2f MB)\n", out_path, file.size(out_path) / 1e6))
+  invisible(out_path)
+}
+
+make_fig10b_firing_lc  <- function() make_fig10_firing_faceted("lc")
+make_fig10c_firing_eco <- function() make_fig10_firing_faceted("eco")
+
 if (fig_arg %in% c("0",  "all")) make_fig0_domain_map()
 if (fig_arg %in% c("1",  "all")) make_fig1_complementarity()
 if (fig_arg %in% c("1b", "all")) make_fig1b_complementarity_lc()
@@ -1615,5 +2152,9 @@ if (fig_arg %in% c("5",  "all")) make_fig5_op_heatmap()
 if (fig_arg %in% c("6",  "all")) make_fig6_case_year_timeseries()
 if (fig_arg %in% c("7",  "all")) make_fig7_all_strata()
 if (fig_arg %in% c("8",  "all")) make_fig8_eco_lc_overlay()
+if (fig_arg %in% c("9",  "all")) make_fig9_flash_drought()
+if (fig_arg %in% c("10a", "10", "all")) make_fig10a_firing_domain()
+if (fig_arg %in% c("10b", "10", "all")) make_fig10b_firing_lc()
+if (fig_arg %in% c("10c", "10", "all")) make_fig10c_firing_eco()
 
 cat("\nDone.\n")
