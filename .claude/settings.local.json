@@ -209,7 +209,11 @@
       "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring rev-list --count origin/main..HEAD)",
       "Bash(git -C /home/malexander/r_projects/github/NDVI_drought_monitoring add .claude/settings.local.json)",
       "Bash(awk '/^section_event_detection_nlcd/,/^section_qc/' CONUS_HLS_drought_monitoring/09_validate_drought_signal.R)",
-      "Bash(xz -t /mnt/malexander/datasets/ndvi_monitor/validation/flash_drought_10y.rds)"
+      "Bash(xz -t /mnt/malexander/datasets/ndvi_monitor/validation/flash_drought_10y.rds)",
+      "Bash(rm -rf /tmp/usdm_force_fix)",
+      "Bash(DEST=/tmp/usdm_force_fix START=2024-08-06 END=2024-08-06 bash /home/malexander/r_projects/github/NDVI_drought_monitoring/handoff/usdm_data_query/download_usdm.sh)",
+      "Bash(DEST=/tmp/usdm_force_fix START=2024-08-06 END=2024-08-06 FORCE=1 bash /home/malexander/r_projects/github/NDVI_drought_monitoring/handoff/usdm_data_query/download_usdm.sh)",
+      "Bash(rm -rf /tmp/usdm_force_fix /tmp/usdm_force /tmp/usdm_nesting)"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [

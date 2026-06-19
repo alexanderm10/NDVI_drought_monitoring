@@ -81,7 +81,7 @@ pixel_id, x, y, sensor, date, year, yday, NDVI
 
 ---
 
-### Phase 2: Climatological Norms (Complete Years Only)
+### Phase 2: Climatological Norms (DOY-Looped Spatial GAM)
 
 **Purpose:** Establish baseline "normal" phenological patterns for anomaly detection
 
@@ -91,24 +91,27 @@ pixel_id, x, y, sensor, date, year, yday, NDVI
 - **Update Trigger:** When full year of data available (e.g., 2025-12-31 complete → update to 2013-2025)
 - **Rationale:** Prevents seasonal bias from partial years; maintains stable reference during year
 
-**GAM Specification:**
+**Approach:** Per-DOY spatial-smooth GAMs pooling ±7 days across all baseline years (Juliana's spatial-norms methodology, scaled to MIDWEST).
+
+**GAM Specification** (implemented in [`02_doy_looped_norms.R`](02_doy_looped_norms.R)):
 ```r
-# For each pixel_id:
-gam_norm <- gam(NDVI ~ s(yday, k=12, bs="cc"), data=all_years_pooled)
+# For each DOY in 1..365:
+#   pool observations from (DOY-7 ... DOY+7) across all baseline years
+gam_norm <- gam(NDVI ~ s(x, y), data = df_doy)
 ```
 
 **Parameters:**
-- `s(yday, k=12)`: Cyclic cubic spline with 12 knots
-- `bs="cc"`: Cyclic cubic basis (yday 1 and 365 constrained to match)
-- **No edge padding** (multi-year pooling smooths year boundaries)
+- `s(x, y)`: 2D spatial thin-plate spline with mgcv default basis dimension
+- **±7-day window** around the target DOY captures phenological context without smearing seasonal transitions
+- **All baseline years pooled** at each DOY → climatology is the average pixel-DOY pattern across the rolling window
+
+**Posterior uncertainty:** 100 posterior draws via `post.distns()` (Wood / Gavin Simpson method using `MASS::mvrnorm(coef, vcov)`) give per-pixel, per-DOY mean and 95% CI.
 
 **Output:**
-```
-pixel_id, yday, norm_mean, norm_se
-```
-Where:
-- `norm_mean`: Predicted climatological NDVI for each day-of-year
-- `norm_se`: Standard error of prediction
+- `doy_looped_norms.rds` — summary stats per (pixel × DOY): mean, lwr, upr
+- `baseline_posteriors/doy_NNN.rds` — raw posterior simulations (100 draws per pixel × DOY) for downstream derivative calculations
+
+**Note on basis choice:** The norm-fit GAM uses the mgcv default basis dimension for `s(x, y)`. The year-specific GAM (Phase 3) sets `k=50` explicitly. The two are independent choices — norms are smooth climatology surfaces, year-specific predictions need finer spatial detail to capture year-to-year departures.
 
 ---
 
@@ -284,16 +287,17 @@ See **METHODOLOGY.md** Section 5.2 for detailed operational procedures.
 - Maintains stable reference for within-year comparisons
 - Simplifies operational updates (no mid-year baseline recalculation)
 
-### Why 31-day edge padding?
-- Prevents GAM boundary artifacts (poor fit at yday 1 and 365)
-- Provides context for phenological transitions across year boundaries
-- Empirically validated in Juliana's Chicago analysis
+### Why ±7-day window for the DOY-looped norm fit?
+- Captures phenological context (multi-year average for similar DOYs) without smearing seasonal transitions
+- Pools enough observations for a stable spatial smooth at each DOY
+- Matches Juliana's Chicago implementation
+- Year boundary handled by the cyclic DOY loop, not by explicit edge padding
 
-### Why k=12 knots (baseline climatology)?
-- Captures seasonal phenology (spring green-up, summer peak, fall senescence)
-- Sufficient flexibility without overfitting
-- Standard choice for annual vegetation cycles
-- Cyclic basis ensures smooth year boundaries
+### Why DOY-looped spatial GAM (rather than a single cyclic-temporal GAM per pixel)?
+- The Chicago lineage uses spatial-smooth GAMs per DOY (`NDVI ~ s(x, y)`) rather than temporal-smooth GAMs per pixel (`NDVI ~ s(yday, bs="cc")`)
+- The spatial-smooth approach borrows strength across nearby pixels at each DOY, which is essential at sparse-data DOYs and for handling missing pixel-DOY combinations
+- Per-pixel temporal smoothing would require dense per-pixel time series; at 4 km × ~100 observations per pixel-DOY in the Chicago pilot, the spatial-borrowing approach was more stable
+- We retained this design when scaling to MIDWEST
 
 ### Why k=50 spatial basis (year-specific models)?
 - **Tested options:** k=30, 50, 80, 150 (Jan 2026)

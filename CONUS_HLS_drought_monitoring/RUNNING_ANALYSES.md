@@ -1,23 +1,46 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-17 EOD — **Big session**: Fig 9 (flash drought scatter, 3 variants) + Fig 10 a/b/c (firing climatology) + 3 new analysis sections productionized in script 09: `flash_drought`, `ensemble_or`, `ensemble_multi`. The ensemble work surfaced an important pair-of-signals finding: **`ndvi_z OR spei_4w` is the strongest cross-family ensemble** (not `ndvi_z OR spei_13w` which we initially tested) — Section B's headline SPEI window (13w) is NOT the optimal partner for NDVI. spei_4w consistently wins as both the best single signal AND the best ensemble partner across all 3 z thresholds tested. **Naive OR ensemble lifts hit rate +14-20 pts but doesn't beat the best single signal on HSS (POD up, FAR up roughly cancel).**
+**Updated**: 2026-06-19 EOD — **Memo drafting session**. Full draft of
+`PHASE6_RESULTS_MEMO.md` written across all 7 sections (~12,300 words).
+Settles the 4w-vs-13w SPEI partner question (framing A — lead with spei_4w
+empirically). Folds in USDM-NDVI independence research (NDMC inputs catalog:
+VegDRI / QuickDRI / VHI are NDVI-derived). Updates `GAM_METHODOLOGY.md` Phase 2
+norm GAM spec to match production (DOY-looped spatial GAM, not the stale
+cyclic-cubic-on-yday spec).
 
-**Carryover for next session**:
-1. **Reconcile 4w vs 13w as the canonical SPEI partner.** ensemble_or used spei_13w (Section B's headline); ensemble_multi shows spei_4w is the better partner across all metrics. Decide which goes into the memo. Likely: revise the operational claim to use spei_4w; treat spei_13w as the medium-window context signal.
-2. **Memo writeup** with figures for collaborators. Substantive findings are now all in hand:
-   - Section A (continuous_spei_nlcd): four-mechanism eco × LC story
-   - Section A++ (categorical_usdm_nlcd): USDM-vs-SPEI discrepancy in 8.4 Ozark
-   - Section B (event_detection_nlcd): spei_4w dominates; 8.3 dark horse for onset
-   - Flash drought (productionized as `section_flash_drought`): NDVI is not a flash monitor; 9.4 grass recovery exception
-   - Firing climatology (Fig 10): seasonally asymmetric complementarity; early-season NDVI recovery sharpens operational claim
-   - Ensemble OR (productionized as `section_ensemble_or` + `section_ensemble_multi`): +15.5/+13.9 pt hit-rate lift from best pair; HSS roughly cancels
-3. Note: HSS improvement may not be the right goal — exploratory mode, see what the data shows.
+**Carryover for next session** (in priority order):
 
-Fig 9 + Fig 10 + ensemble findings written to memory ([[firing-climatology-findings]], [[ensemble-or-findings]] joins [[flash-drought-findings]]).
+1. **§5.6 flash drought spei_4w table update.** Domain numbers in hand (NDVI
+   24.6%/23.4% vs SPEI 42.9%/38.0% on all events — qualitative finding
+   STRENGTHENS with spei_4w). Per-stratum rerun in flight (PID 335276,
+   step 3 fire detection at session-end). When complete, fold into §5.6
+   and verify 9.4 grass +25pt flash-recovery claim still holds with
+   spei_4w as the comparison signal.
+2. **Build Fig 11 — four-mechanism ecoregion map.** Currently labeled
+   "to be built next session" in §5.2 and §7.1. Cover figure for the
+   memo. ~2 hr build effort; data is ready.
+3. **User full read-through of memo prose.** All 7 sections drafted;
+   awaiting full review.
+4. (After review) cleanup `tmp_flash_drought_spei4w_rerun.R` from the
+   working tree — throwaway script kept while §5.6 update is pending.
 
 ## Active run
 
-(none)
+**PID 335276 — Flash drought spei_4w per-stratum re-analysis**
+- Container: `conus-hls-drought-monitor`
+- Script: `tmp_flash_drought_spei4w_rerun.R` (throwaway, not in git)
+- Started: 2026-06-19 ~15:54 CDT
+- ELAPSED at session-end: ~7 min; first run took 10 min total
+- Log: `CONUS_HLS_drought_monitoring/logs/flash_drought_spei4w_rerun.log`
+- Output: `/mnt/malexander/datasets/ndvi_monitor/validation/tmp_flash_drought_spei4w_rerun.rds` (286 KB on first run; will be overwritten)
+- Monitor: `docker exec conus-hls-drought-monitor tail -f /workspace/logs/flash_drought_spei4w_rerun.log`
+- **Purpose**: re-compute per-event flash-drought hit rates using spei_4w
+  as the SPEI partner (replacing the original spei_13w from
+  `flash_drought_10y.rds`). Output: `domain_summary` + `stratum_summary`
+  per (eco × LC × subset × direction).
+- **Next-session action**: read the saved RDS, update §5.6 of
+  PHASE6_RESULTS_MEMO.md with the new numbers (both domain and per-stratum
+  9.4 grass cell).
 
 ## Toward methods/results memo (1-2 more sessions)
 
