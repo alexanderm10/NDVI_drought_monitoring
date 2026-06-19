@@ -1,0 +1,3 @@
+# download_usdm.py uses only the Python 3.8+ standard library.
+# download_usdm.sh uses bash + wget + sha256sum + unzip (all standard).
+# No pip install required.
