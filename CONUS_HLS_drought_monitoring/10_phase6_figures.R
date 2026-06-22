@@ -2142,6 +2142,283 @@ make_fig10_firing_faceted <- function(scope = c("lc", "eco")) {
 make_fig10b_firing_lc  <- function() make_fig10_firing_faceted("lc")
 make_fig10c_firing_eco <- function() make_fig10_firing_faceted("eco")
 
+# ------------------------------------------------------------------------------
+# Figure 11: Four-mechanism ecoregion map (cover figure for §5.2)
+# Color-codes each Midwest L2 ecoregion by its operational NDVI validation
+# signature: WORKS / SILENT / REVERSES-CROP / REVERSES-GRASS.
+# Single-panel choropleth, state outlines overlaid, L2_code label per polygon
+# at point-on-surface. 9.3 marked "*" for the grass-only WORKS caveat.
+# ------------------------------------------------------------------------------
+make_fig11_mechanism_map <- function() {
+  cat("\n=== Figure 11: Three-window mechanism map + beta trajectory ===\n")
+
+  eco_sf <- readRDS_retry(file.path(paths$validation_data,
+                                    "ecoregions_midwest_l2.rds"))
+  # Midwest DEWS analysis bbox in EPSG:5070 — defines the visible map extent.
+  # Source eco polygons cover the full EPA L2 footprint; validation pixels
+  # are clipped to this 1976 x 1212 km box. Clip polygons + viewport to it.
+  mw_ext <- readRDS_retry(file.path(paths$validation_data,
+                                    "midwest_extent.rds"))
+  bb_mw  <- mw_ext$bbox_albers
+  bbox_poly <- st_as_sfc(st_bbox(c(xmin = unname(bb_mw["xmin"]),
+                                    xmax = unname(bb_mw["xmax"]),
+                                    ymin = unname(bb_mw["ymin"]),
+                                    ymax = unname(bb_mw["ymax"])),
+                                  crs = st_crs(5070)))
+
+  # --- Per-(eco x window) mean beta from continuous_spei_nlcd_10y.rds
+  # Heatmap shows beta directly; |beta| > 0.05 is a *heuristic* threshold for
+  # the ALIGNED / SILENT / REVERSED categorization, documented in caption.
+  # Categorical bins not used as fill — too lossy; the diverging palette
+  # carries magnitude.
+  sp <- readRDS_retry(file.path(paths$validation_data,
+                                "continuous_spei_nlcd_10y.rds"))
+  ft <- as.data.table(sp$fit_table_lc)
+  ft <- ft[signal_col == "ndvi_z" & model_type == "isowk_fe" &
+           dom_filter == "dom" &
+           nlcd_juliana %in% c("crop","forest","grassland",
+                                "urban_dense","urban_diffuse") &
+           !is.na(L2_code)]
+  mech_by_window <- ft[, .(beta_mean = mean(beta, na.rm = TRUE)),
+                       by = .(L2_code, spei_col)]
+
+  # --- Dissolve + clip eco polygons (shared geometry across all 3 panels)
+  eco_sf <- eco_sf[!eco_sf$NA_L2CODE %in% c("0.0", "8.5"), ]
+  eco_sf$L2_code <- as.character(eco_sf$NA_L2CODE)
+  l2_codes <- sort(unique(eco_sf$L2_code))
+  diss_geoms <- lapply(l2_codes, function(cc) {
+    st_union(eco_sf[eco_sf$L2_code == cc, ])
+  })
+  eco_dissolved <- st_sf(
+    L2_code  = l2_codes,
+    geometry = do.call(c, lapply(diss_geoms, st_geometry)),
+    crs = st_crs(eco_sf)
+  )
+  eco_dissolved <- suppressWarnings(st_intersection(eco_dissolved, bbox_poly))
+  eco_dissolved <- suppressWarnings(st_collection_extract(eco_dissolved, "POLYGON"))
+  eco_dissolved <- eco_dissolved[!st_is_empty(eco_dissolved), ]
+
+  # Label points (same across all 3 panels)
+  lab_pts <- do.call(rbind, lapply(seq_len(nrow(eco_dissolved)), function(i) {
+    geom <- st_geometry(eco_dissolved)[[i]]
+    parts <- if (inherits(geom, "MULTIPOLYGON")) {
+      st_cast(st_sfc(geom, crs = st_crs(eco_dissolved)), "POLYGON")
+    } else {
+      st_sfc(geom, crs = st_crs(eco_dissolved))
+    }
+    biggest <- parts[which.max(st_area(parts))]
+    pt <- suppressWarnings(st_point_on_surface(biggest))
+    coords <- st_coordinates(pt)
+    data.frame(
+      L2_code = eco_dissolved$L2_code[i],
+      x = coords[1], y = coords[2]
+    )
+  }))
+  # 6.2 is a thin sliver in the upper-left of the Midwest extent — its
+  # natural label point sits at the panel edge. Nudge inward + downward.
+  lab_pts$y[lab_pts$L2_code == "6.2"] <- lab_pts$y[lab_pts$L2_code == "6.2"] - 40e3
+  lab_pts$x[lab_pts$L2_code == "6.2"] <- lab_pts$x[lab_pts$L2_code == "6.2"] + 25e3
+
+  # State outlines (mirror Fig 0)
+  states <- st_as_sf(map("state", plot = FALSE, fill = TRUE))
+  states <- st_transform(states, 5070)
+  bbox_xy <- c(xmin = unname(bb_mw["xmin"]) - 10e3,
+               xmax = unname(bb_mw["xmax"]) + 10e3,
+               ymin = unname(bb_mw["ymin"]) - 10e3,
+               ymax = unname(bb_mw["ymax"]) + 10e3)
+
+  # --- Diverging palette for continuous beta (red = REVERSED, grey = near
+  # zero, green = ALIGNED). Limits set to symmetrically cover all observed
+  # eco-mean beta values across the three windows.
+  HEAT_LOW  <- "#D84315"   # deep orange-red (negative, REVERSED)
+  HEAT_MID  <- "#F5F5F5"   # near-white grey (neutral)
+  HEAT_HIGH <- "#2E7D32"   # forest green (positive, ALIGNED)
+  HEAT_LIM  <- c(-0.25, 0.25)
+  HEAT_BR   <- c(-0.2, -0.1, 0, 0.1, 0.2)
+
+  windows <- data.table(
+    spei_col = c("spei_4w", "spei_13w", "spei_26w"),
+    label    = c("SPEI 4-week (~1 month)",
+                 "SPEI 13-week (~3 months)",
+                 "SPEI 26-week (~6 months)")
+  )
+
+  make_map_panel <- function(spei_col_in, panel_label) {
+    mech_w <- mech_by_window[spei_col == spei_col_in,
+                              .(L2_code, beta_mean)]
+    eco_w  <- merge(eco_dissolved, mech_w, by = "L2_code")
+    ggplot() +
+      geom_sf(data = eco_w, aes(fill = beta_mean),
+              color = "grey20", linewidth = 0.4) +
+      geom_sf(data = states, fill = NA, color = "grey45", linewidth = 0.25) +
+      geom_label(data = lab_pts,
+                 aes(x = x, y = y, label = L2_code),
+                 size = 3.9, fontface = "bold",
+                 label.padding = unit(0.18, "lines"),
+                 label.r       = unit(0.10, "lines"),
+                 fill = "white", color = "grey15",
+                 alpha = 0.9, label.size = 0.25) +
+      coord_sf(xlim = bbox_xy[c("xmin","xmax")],
+               ylim = bbox_xy[c("ymin","ymax")],
+               crs  = st_crs(5070), expand = FALSE) +
+      scale_fill_gradient2(low = HEAT_LOW, mid = HEAT_MID, high = HEAT_HIGH,
+                            midpoint = 0,
+                            limits   = HEAT_LIM,
+                            breaks   = HEAT_BR,
+                            oob      = scales::squish,
+                            name     = bquote(paste("Mean ", beta, "(NDVI z ~ SPEI) across LCs"))) +
+      labs(title = panel_label) +
+      phase6_theme(base_size = 11) +
+      theme(
+        plot.title       = element_text(face = "bold", hjust = 0.5,
+                                        size = rel(1.15)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text  = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "none",
+        plot.margin = margin(t = 4, r = 4, b = 4, l = 4)
+      )
+  }
+
+  panels <- lapply(seq_len(nrow(windows)), function(i) {
+    make_map_panel(windows$spei_col[i], windows$label[i])
+  })
+  names(panels) <- windows$spei_col
+
+  # --- Line panel: per-ecoregion beta trajectory across SPEI windows
+  line_dt <- mech_by_window[L2_code %in% names(ECO_NAMES)]
+  line_dt[, win_label := factor(
+    spei_col,
+    levels = c("spei_4w", "spei_13w", "spei_26w"),
+    labels = c("4w (~1 mo)", "13w (~3 mo)", "26w (~6 mo)")
+  )]
+  # Numeric x for ggrepel to work cleanly (factor scales lose nudge precision)
+  line_dt[, win_x := as.integer(win_label)]
+
+  line_panel <- ggplot(line_dt, aes(x = win_x, y = beta_mean,
+                                     color = L2_code, group = L2_code)) +
+    # Shaded SILENT band
+    annotate("rect", xmin = 0.5, xmax = 3.5, ymin = -0.05, ymax = 0.05,
+             fill = "grey92", alpha = 0.7) +
+    geom_hline(yintercept = 0, color = "grey25", linewidth = 0.4) +
+    geom_hline(yintercept = c(-0.05, 0.05), color = "grey55",
+               linewidth = 0.3, linetype = "dashed") +
+    geom_line(linewidth = 1.0, alpha = 0.9) +
+    geom_point(size = 2.8) +
+    ggrepel::geom_label_repel(
+      data = line_dt[win_x == 3],
+      aes(label = sprintf("%s %s", L2_code, ECO_NAMES[L2_code])),
+      nudge_x        = 0.15,
+      hjust          = 0,
+      direction      = "y",
+      size           = 3.4,
+      fontface       = "bold",
+      color          = "grey15",
+      fill           = "white",
+      alpha          = 0.92,
+      label.size     = 0.15,
+      label.padding  = unit(0.15, "lines"),
+      label.r        = unit(0.08, "lines"),
+      box.padding    = 0.30,
+      point.padding  = 0.20,
+      segment.color  = "grey55",
+      segment.size   = 0.3,
+      max.iter       = 5000
+    ) +
+    scale_color_manual(values = ECO_PAL, guide = "none") +
+    scale_x_continuous(
+      breaks = 1:3,
+      labels = levels(line_dt$win_label),
+      limits = c(0.7, 4.6),  # extra right room for ggrepel labels
+      expand = expansion(mult = c(0.02, 0))
+    ) +
+    scale_y_continuous(
+      limits = c(-0.27, 0.27),
+      breaks = seq(-0.25, 0.25, 0.1)
+    ) +
+    annotate("label", x = 0.72, y = 0.235, label = "ALIGNED  (β > +0.05)",
+             hjust = 0, vjust = 0, size = 3.2, color = "#1B5E20",
+             fontface = "italic",
+             fill = "white", label.padding = unit(0.18, "lines"),
+             label.size = 0) +
+    annotate("label", x = 0.72, y = -0.235, label = "REVERSED  (β < -0.05)",
+             hjust = 0, vjust = 1, size = 3.2, color = "#BF360C",
+             fontface = "italic",
+             fill = "white", label.padding = unit(0.18, "lines"),
+             label.size = 0) +
+    annotate("label", x = 0.72, y = 0.030, label = "SILENT band",
+             hjust = 0, vjust = 0, size = 3.0, color = "grey35",
+             fontface = "italic",
+             fill = "white", label.padding = unit(0.15, "lines"),
+             label.size = 0) +
+    labs(
+      x = NULL,
+      y = bquote(paste("Mean ", beta, "(NDVI z ~ SPEI) across LCs")),
+      title = "β trajectory by ecoregion — coupling magnitude across SPEI windows"
+    ) +
+    phase6_theme(base_size = 11) +
+    theme(
+      plot.title       = element_text(face = "bold", hjust = 0.5,
+                                      size = rel(1.15)),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor   = element_blank(),
+      axis.text.x        = element_text(size = 10, face = "bold"),
+      axis.text.y        = element_text(size = 9),
+      axis.title.y       = element_text(size = 10),
+      legend.position    = "none",
+      plot.margin        = margin(t = 4, r = 4, b = 4, l = 4)
+    )
+
+  # --- Patchwork composition: maps row on top, line panel below.
+  # `guides = "collect"` pulls the maps' shared β colorbar to the bottom.
+  maps_row <- patchwork::wrap_plots(panels, nrow = 1)
+  combined <- (maps_row / line_panel) +
+    patchwork::plot_layout(heights = c(1, 0.95), guides = "collect") &
+    theme(legend.position = "bottom",
+          legend.title    = element_text(face = "bold", size = 10,
+                                          margin = margin(r = 14)),
+          legend.text     = element_text(size = 9),
+          legend.key.width  = unit(2.2, "cm"),
+          legend.key.height = unit(0.4, "cm"))
+
+  combined <- combined +
+    plot_annotation(
+      title    = "Vegetation-meteorology coupling emerges only at long SPEI integration",
+      subtitle = paste(strwrap(paste0(
+        "Top: per-ecoregion mean beta(NDVI z ~ SPEI) at three integration ",
+        "windows. Bottom: same beta values plotted as trajectories. At ",
+        "1-month integration all 9 ecoregions sit in the REVERSED band; ",
+        "ALIGNED coupling (beta > +0.05) emerges only at 6-month integration ",
+        "and only in the semiarid west (9.4, 6.2). REVERSED coupling ",
+        "persists at every window in managed cropland (9.2) and northern ",
+        "boreal-influenced grass (5.2, 8.1)."
+      ), width = 130), collapse = "\n"),
+      caption  = paste(
+        "Eco-mean beta collapses (eco x LC) heterogeneity broken out in Section 5.2",
+        "(e.g. 9.3 sits near zero on the eco-mean rule at 26w, but grass alone shows",
+        "beta = +0.07; 9.2 mean is driven by REVERSED-CROP while grass is near-zero).",
+        "|beta| > 0.05 is a heuristic boundary for ALIGNED / SILENT / REVERSED;",
+        "the heatmap and trajectory show beta continuously. Source:",
+        "continuous_spei_nlcd_10y.rds. EPA L2 ecoregions: Omernik & Griffith (2014).",
+        sep = "\n"
+      ),
+      theme = theme(plot.title    = element_text(face = "bold", size = 14),
+                    plot.subtitle = element_text(color = "grey30",
+                                                  margin = margin(b = 6)),
+                    plot.caption  = element_text(color = "grey40", size = 8,
+                                                  hjust = 0,
+                                                  margin = margin(t = 8)),
+                    plot.margin   = margin(t = 10, r = 14, b = 10, l = 14))
+    )
+
+  out_path <- file.path(FIG_DIR, "phase6_fig11_three_window_mechanism_map.png")
+  ggsave(out_path, combined, width = 16, height = 11, dpi = 300, bg = "white")
+  cat(sprintf("  wrote %s (%.2f MB)\n", out_path, file.size(out_path) / 1e6))
+  invisible(out_path)
+}
+
 if (fig_arg %in% c("0",  "all")) make_fig0_domain_map()
 if (fig_arg %in% c("1",  "all")) make_fig1_complementarity()
 if (fig_arg %in% c("1b", "all")) make_fig1b_complementarity_lc()
@@ -2156,5 +2433,6 @@ if (fig_arg %in% c("9",  "all")) make_fig9_flash_drought()
 if (fig_arg %in% c("10a", "10", "all")) make_fig10a_firing_domain()
 if (fig_arg %in% c("10b", "10", "all")) make_fig10b_firing_lc()
 if (fig_arg %in% c("10c", "10", "all")) make_fig10c_firing_eco()
+if (fig_arg %in% c("11", "all")) make_fig11_mechanism_map()
 
 cat("\nDone.\n")

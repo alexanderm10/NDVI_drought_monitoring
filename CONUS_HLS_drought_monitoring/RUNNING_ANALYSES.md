@@ -1,46 +1,36 @@
 # Currently Running Analyses
 
-**Updated**: 2026-06-19 EOD — **Memo drafting session**. Full draft of
-`PHASE6_RESULTS_MEMO.md` written across all 7 sections (~12,300 words).
-Settles the 4w-vs-13w SPEI partner question (framing A — lead with spei_4w
-empirically). Folds in USDM-NDVI independence research (NDMC inputs catalog:
-VegDRI / QuickDRI / VHI are NDVI-derived). Updates `GAM_METHODOLOGY.md` Phase 2
-norm GAM spec to match production (DOY-looped spatial GAM, not the stale
-cyclic-cubic-on-yday spec).
+**Updated**: 2026-06-22 EOD — **Memo finalization session**. Three
+substantive memo updates landed: §5.6 spei_4w rewrite (science/ecology
+framing instead of "NDVI beats SPEI"), Fig 11 built as 3-window hybrid
+(continuous β heatmap + per-eco trajectory line panel), and a
+domain-wide terminology rename (WORKS → ALIGNED, REVERSES → REVERSED)
+applied across all 33 occurrences in the memo. §5.2 now has the
+window-dependence narrative — the four-mechanism picture only resolves
+at spei_26w; at spei_4w the entire domain reads REVERSED, which is an
+ecological finding about integration timescales, not a methodological
+artifact. Memo is internally consistent end-to-end (read-through this
+session verified TL;DR ↔ §5.2 ↔ §5.6 ↔ §5.7 ↔ §6.1 numbers).
+
+**Active runs**: none.
 
 **Carryover for next session** (in priority order):
 
-1. **§5.6 flash drought spei_4w table update.** Domain numbers in hand (NDVI
-   24.6%/23.4% vs SPEI 42.9%/38.0% on all events — qualitative finding
-   STRENGTHENS with spei_4w). Per-stratum rerun in flight (PID 335276,
-   step 3 fire detection at session-end). When complete, fold into §5.6
-   and verify 9.4 grass +25pt flash-recovery claim still holds with
-   spei_4w as the comparison signal.
-2. **Build Fig 11 — four-mechanism ecoregion map.** Currently labeled
-   "to be built next session" in §5.2 and §7.1. Cover figure for the
-   memo. ~2 hr build effort; data is ready.
-3. **User full read-through of memo prose.** All 7 sections drafted;
-   awaiting full review.
-4. (After review) cleanup `tmp_flash_drought_spei4w_rerun.R` from the
-   working tree — throwaway script kept while §5.6 update is pending.
-
-## Active run
-
-**PID 335276 — Flash drought spei_4w per-stratum re-analysis**
-- Container: `conus-hls-drought-monitor`
-- Script: `tmp_flash_drought_spei4w_rerun.R` (throwaway, not in git)
-- Started: 2026-06-19 ~15:54 CDT
-- ELAPSED at session-end: ~7 min; first run took 10 min total
-- Log: `CONUS_HLS_drought_monitoring/logs/flash_drought_spei4w_rerun.log`
-- Output: `/mnt/malexander/datasets/ndvi_monitor/validation/tmp_flash_drought_spei4w_rerun.rds` (286 KB on first run; will be overwritten)
-- Monitor: `docker exec conus-hls-drought-monitor tail -f /workspace/logs/flash_drought_spei4w_rerun.log`
-- **Purpose**: re-compute per-event flash-drought hit rates using spei_4w
-  as the SPEI partner (replacing the original spei_13w from
-  `flash_drought_10y.rds`). Output: `domain_summary` + `stratum_summary`
-  per (eco × LC × subset × direction).
-- **Next-session action**: read the saved RDS, update §5.6 of
-  PHASE6_RESULTS_MEMO.md with the new numbers (both domain and per-stratum
-  9.4 grass cell).
+1. **User full read-through of memo prose.** Major edits landed today;
+   user flagged they need to read end-to-end. No machine review can
+   substitute for this. Substantive changes since last read-through:
+   §5.6, §5.2 (Fig 11 reference + window-dependence paragraph + 9.3
+   table-vs-figure reconciliation), §1 TL;DR (item 4 ecology framing),
+   §7 task list (item #1 removed, renumbered 1–12), terminology
+   throughout.
+2. **Cleanup `tmp_flash_drought_spei4w_rerun.R`** from working tree.
+   Throwaway script that produced the §5.6 spei_4w numbers; its job
+   is done. Keep until user confirms read-through is complete in case
+   they want to re-verify the numbers; then delete.
+3. **Optional follow-ups** from §7 if scope expands:
+   - Snow-contamination DJF-excluded test for 5.2 + 8.1 grass (§7 item 1)
+   - 8.4 Ozark deep-dive on USDM-ALIGNED-but-SPEI-SILENT pattern (§7 item 2)
+   - Weighted/learned ensembles (§7 item 4)
 
 ## Toward methods/results memo (1-2 more sessions)
 
@@ -75,13 +65,64 @@ The user wants to write a brief methods/results memo for colleagues after ~1-2 m
 **Second session-focus**: 8.4 Ozark deep-dive + ensemble test + L2_name verify pass + assemble memo outline.
 
 ## Recent session summaries (full detail below)
-- 2026-06-17 (this session): Fig 9 + Fig 10 a/b/c built; `section_flash_drought` + `section_ensemble_or` + `section_ensemble_multi` all productionized in script 09 (3 new RDS outputs in `/data/validation/`); spei_4w identified as the canonical SPEI partner for NDVI ensembles (NOT spei_13w).
+- 2026-06-22 (this session): Memo finalization. §5.6 spei_4w rewrite (drops "NDVI beats SPEI" framing in favor of ecology framing); Fig 11 built as 3-window hybrid (continuous β heatmap maps + per-eco β trajectory line panel); WORKS/REVERSES → ALIGNED/REVERSED terminology rename across all 33 occurrences in memo; §5.2 window-dependence narrative added (four-mechanism picture only resolves at spei_26w; spei_4w reads REVERSED domain-wide is itself an ecological finding); end-to-end coherence read-through; stale `phase6_fig11_four_mechanism_map.png` deleted from disk; Fig 7 noted as supplementary in §5.2.
+- 2026-06-19: Memo full draft across all 7 sections (~12,300 words); spei_4w-vs-13w canonical SPEI partner question settled (framing A — empirical lead); GAM_METHODOLOGY.md Phase 2 norm spec aligned with production.
+- 2026-06-17: Fig 9 + Fig 10 a/b/c built; `section_flash_drought` + `section_ensemble_or` + `section_ensemble_multi` all productionized in script 09 (3 new RDS outputs in `/data/validation/`); spei_4w identified as the canonical SPEI partner for NDVI ensembles (NOT spei_13w).
 - 2026-06-16: Fig 3+4+5 built; Fig 4 pivoted to complementarity atlas; flash drought exploration.
 - 2026-06-15: Section B `event_detection_nlcd` built + run (180 MB output, 4 hr 19 min wall).
 - 2026-06-12: USDM 5-LC + SPEI 5-LC rerun; 8.4 USDM-WORKS-but-SPEI-SILENT discrepancy surfaced.
 - 2026-06-11: Phase 6 reframe; Section A `continuous_spei` complete; Section C `within_week_diagnostic` complete.
 - 2026-06-10: `categorical_usdm` v3 built; Phase 6 reframe.
 - (earlier): align_weekly cache + derivatives rebuild + weekly SPI/SPEI.
+
+## Session Summary (2026-06-22) — Memo finalization: §5.6 rewrite, Fig 11 hybrid, ALIGNED/REVERSED rename, coherence pass
+
+### §5.6 flash drought rewrite (morning, ~30 min)
+- Re-checked the spei_4w rerun output (`tmp_flash_drought_spei4w_rerun.rds`, ran 2026-06-19 16:04). Confirmed NDVI hit rates are byte-identical between old (spei_13w) and new (spei_4w) results across all 272 strata — max delta = 0 — because the rerun only switches the SPEI comparator, not the NDVI side.
+- **Substantive finding from recheck**: the +25 pt within-NDVI flash-recovery lift in 9.4 grass is *real and unique* (only stratum with within-NDVI D2 lift > +20 pt; 9.4 crop is a distant second at +12 pt). But the prior "NDVI beats the meteorological signal" framing **does not survive spei_4w**: SPEI lifts even harder on 9.4 grass (+31 pt on D2 recovery, 45% → 77%), and SPEI wins by 22 pt on the absolute level. The +25 pt is a within-NDVI subset effect, not a cross-signal win.
+- **Reframed §5.6**: dropped the "beats SPEI" framing; replaced with ecology framing — "the only stratum where NDVI provides corroborating, biologically grounded vegetation evidence of the meteorological recovery on a flash timescale. Elsewhere, the absence of an NDVI lift on flash subsets is itself the finding" (vegetation can't integrate 4-week excursions in eastern forests, irrigated corn, or temperature-limited northern grass).
+- **Cross-references updated**: §1 TL;DR item 4 dropped "+25 pt advantage" language; §7.1 finding #4 dropped "clearly beats the meteorological signal" claim. Both replaced with within-NDVI baseline-lift framing.
+- **Domain tables swapped** to spei_4w numbers: All-onset SPEI 27.0% → 42.9%, D1 44.2% → 61.7%, D2 60.8% → 81.0%. NDVI numbers unchanged (24.6/22.3/17.1%). Inline summary updated.
+
+### Fig 11 — built as 3-window hybrid (afternoon, ~3 hr including 3 design iterations)
+- **Three design iterations before landing on the final hybrid:**
+  1. Single-panel categorical map (WORKS/SILENT/REVERSES-CROP/REVERSES-GRASS at spei_26w only). Cover-figure clean but hid the timescale-dependence finding.
+  2. Three-panel categorical maps (4w / 13w / 26w, same 3-tier categorization). Showed cross-panel transition (W:0/S:0/R:9 → W:2/S:4/R:3) but lost magnitude info to discretization.
+  3. Three-panel **continuous β heatmap (top row) + per-eco β trajectory line panel (bottom row)** — final version. Continuous palette (orange-grey-green diverging) shows magnitude AND direction without threshold artifacts; trajectory panel makes the integration-dependence mechanism visually explicit (9.4 climbs −0.07 → +0.19; 5.2/8.1/9.2 flat-negative; 6.2 crosses zero between 13w and 26w).
+- **Ecology framing for the figure**: the 4-mechanism picture only resolves at spei_26w. At spei_4w eco-mean β is negative across **every** Midwest ecoregion. This is ecological: vegetation tracks *integrated* water balance on its own response timescale, not weekly excursions. REVERSED is structural (irrigation/management/snow) and survives every window.
+- **Mean-rule aggregation across LCs per (eco × window)** for figure simplicity. Caveat: 9.3 falls to SILENT under eco-mean at 26w (β = +0.026) even though its grass cell alone is ALIGNED (β = +0.07). The §5.2 table view (per-LC) and Fig 11 view (eco-mean) genuinely diverge for 9.3 — explicitly reconciled in the 9.3 mystery bullet.
+- **3 figure-reviewer passes** caught: caption clipping at left edge, ggrepel labels colliding with reference lines, annotations overlapping data lines, pale ECO_PAL colors hard to read on white, β glyph rendering, colorbar title overlap. All addressed in iteration 3.
+- **Files**: `10_phase6_figures.R::make_fig11_mechanism_map()` (~260 lines, replaces the v1 categorical version), outputs `phase6_fig11_three_window_mechanism_map.png` (1.41 MB, 16×11 in). Stale `phase6_fig11_four_mechanism_map.png` from v1 deleted from disk.
+
+### Terminology rename: WORKS/REVERSES → ALIGNED/REVERSED (~10 min)
+- User flagged "WORKS" and "REVERSES" as carrying value-judgment baggage incompatible with the science/ecology framing the memo has been moving toward. Renamed throughout memo via sed bulk-replace: REVERSES-CROP → REVERSED-CROP (5 occurrences), REVERSES-GRASS → REVERSED-GRASS (5), bare REVERSES → REVERSED (9), bare WORKS → ALIGNED (13). 33 occurrences total of ALIGNED/SILENT/REVERSED across the memo now; 0 of the old terms.
+- **SILENT unchanged** — ecologically apt term, no value judgment.
+- "**four-mechanism**" terminology preserved (8 occurrences) — still accurate because the §5.2 per-LC table has 4 distinct mechanism rows (ALIGNED, SILENT, REVERSED-CROP, REVERSED-GRASS). Fig 11 collapses to 3 categories at the eco-mean level; the two views are explicitly reconciled in §5.2.
+
+### Coherence read-through (~20 min)
+- TL;DR numbers verified against §5.2 table (9.4 +0.18 mean; 9.2 crop −0.10; 5.2/8.1 grass −0.10).
+- §5.7 OR ensemble lifts (+15.5 onset / +13.9 recovery pt) verified against z=1.5 table.
+- §5.6 flash-recovery +25 pt verified against `tmp_flash_drought_spei4w_rerun.rds` 9.4 grassland recovery cell.
+- §5.4 8.3 grass HSS = 0.473 verified.
+- §5 sections build coherently (5.1 gate → 5.2 state → 5.3 USDM → 5.4 events → 5.5 complementarity → 5.6 flash → 5.7 ensemble → 5.8 climatology).
+- §6.1–6.4 internally consistent with renamed terms.
+- §7 task list renumbered cleanly 1–12 after task #1 removal.
+
+### §5.2 9.3 mystery reconciliation (new bullet)
+- Previous "9.3 mystery" bullet described it as ALIGNED-with-grass-only-caveat. Under the new Fig 11 eco-mean rule it falls in SILENT at 26w. Rewrote bullet to make this dual classification explicit and reconcile both views: "9.3 *is* ALIGNED if you look at grasslands alone (β = +0.063), but the LC heterogeneity within 9.3 averages the eco-mean down to β ≈ +0.026 — below the |β| > 0.05 ALIGNED threshold the figure uses. The figure is conservative because it collapses across LCs; the table is faithful to the per-LC structure. Use both views together."
+
+### Files modified
+- `10_phase6_figures.R`: +278 lines (full rewrite of `make_fig11_mechanism_map`; 3 iterations preserved in working history).
+- `PHASE6_RESULTS_MEMO.md`: +181/-69 lines (§5.6 rewrite, Fig 11 reference, window-dependence paragraph, 9.3 reconciliation, terminology rename, §7 renumber, §5.2 Fig 7 supplementary mention).
+- `RUNNING_ANALYSES.md`: this section + carryover update.
+- Stale `phase6_fig11_four_mechanism_map.png` deleted.
+
+### Carryover (in priority order)
+1. **User full read-through of memo prose** — substantive edits landed today.
+2. **Cleanup `tmp_flash_drought_spei4w_rerun.R`** after read-through confirms.
+3. Optional follow-ups (§7 items 1-4): snow-contamination test, 8.4 Ozark deep-dive, weighted ensembles.
+
+---
 
 ## Session Summary (2026-06-17) — Fig 9, Fig 10 a/b/c, + 3 new sections (flash_drought, ensemble_or, ensemble_multi)
 
