@@ -213,7 +213,8 @@
       "Bash(rm -rf /tmp/usdm_force_fix)",
       "Bash(DEST=/tmp/usdm_force_fix START=2024-08-06 END=2024-08-06 bash /home/malexander/r_projects/github/NDVI_drought_monitoring/handoff/usdm_data_query/download_usdm.sh)",
       "Bash(DEST=/tmp/usdm_force_fix START=2024-08-06 END=2024-08-06 FORCE=1 bash /home/malexander/r_projects/github/NDVI_drought_monitoring/handoff/usdm_data_query/download_usdm.sh)",
-      "Bash(rm -rf /tmp/usdm_force_fix /tmp/usdm_force /tmp/usdm_nesting)"
+      "Bash(rm -rf /tmp/usdm_force_fix /tmp/usdm_force /tmp/usdm_nesting)",
+      "Bash(docker exec *)"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [
@@ -222,6 +223,29 @@
       "/tmp",
       "/mnt/malexander/datasets/ndvi_monitor/validation",
       "/mnt/malexander/datasets/ndvi_monitor/figures/phase6"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_FILE_PATH\" | grep -qE '\\.R$'; then Rscript -e \"tryCatch(parse('$CLAUDE_FILE_PATH'), error=function(e) { cat('SYNTAX ERROR in', '$CLAUDE_FILE_PATH', '\\n'); cat(conditionMessage(e), '\\n'); quit(status=1) })\" 2>&1; fi"
+          },
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_FILE_PATH\" | grep -qE '\\.py$'; then python3 -m py_compile \"$CLAUDE_FILE_PATH\" 2>&1 && echo \"[py ok] $CLAUDE_FILE_PATH\" || echo \"[py SYNTAX ERROR] $CLAUDE_FILE_PATH\"; fi"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "JOBS=$(ps aux | grep -E '(Rscript|python3?|bash.*nohup)' | grep -v grep | wc -l); if [ \"$JOBS\" -gt 0 ]; then echo \"REMINDER: $JOBS background job(s) still running. Verify PID and tail log before closing session.\"; fi"
+      }
     ]
   }
 }
