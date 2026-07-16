@@ -14,16 +14,21 @@
 
 ## 1. Executive summary
 
+> **Trent, Christy, Lindsay** — I'm sharing this now as a working draft, not a finished product. The pipeline is complete and the numbers are real, but I'd like your read on the interpretation before we settle on any framing. The four-mechanism story below is where I feel least certain — particularly the northern grass result in the Mixed Wood ecoregions (5.2 Mixed Wood Shield, 8.1 Mixed Wood Plains), which may be a snow-contamination artifact rather than a real ecological signal and I haven't ruled that out. The SPEI-4w and complementarity findings feel more robust to me. Please push back wherever something reads as overreaching; that's exactly what I need at this stage.
+
 **Question.** Can a per-pixel NDVI monitor built on NASA's Harmonized
 Landsat–Sentinel-2 (HLS) record serve as a useful ecological-drought
 monitor across the Midwest regional DEWS — and if so, where and how?
 
-**Data and methods.** We aggregated 30 m HLS NDVI observations to a
-4 km weekly grid (~130,000 pixels × 520 weeks, 2013–2025) covering a
-1976 × 1212 km bounding box that approximates the NIDIS Midwest DEWS
-footprint. Per-pixel anomalies were estimated by extending Juliana's
-Chicago-domain DOY-looped spatial GAM methodology to the Midwest scale
-(§4.1–4.2). We validated the resulting NDVI signals against two
+**Data and methods.** We spatially aggregated 30 m HLS NDVI
+observations to a 4 km grid, estimated per-pixel NDVI anomalies at
+each day-of-year via DOY-looped spatial GAMs (extending Juliana's
+Chicago-domain methodology to the Midwest scale; §4.1–4.2), and
+collapsed the resulting DOY-level anomaly estimates to a weekly grain
+(~130,000 pixels × 520 weeks, 2013–2025) matching the temporal
+resolution of the reference datasets. The analysis domain is a
+1976 × 1212 km bounding box approximating the NIDIS Midwest DEWS
+footprint. We validated the resulting NDVI signals against two
 independent references — USDM (categorical, operational, partially
 NDVI-dependent) and gridMET-derived SPEI (continuous, meteorological,
 fully independent) — through three complementary lenses: continuous
@@ -36,50 +41,53 @@ by EPA Level II ecoregion × NLCD land cover (crop / forest / grassland
 **Headline findings.**
 
 1. **The Midwest-aggregate NDVI signal is approximately zero.** Within
-   ecoregions, the signal decomposes into **four distinct operational
-   signatures** — ALIGNED in semiarid rangelands (β ≈ +0.18 in 9.4),
+   ecoregions, the signal appears to decompose into **four distinct
+   response signatures** — ALIGNED in semiarid rangelands (β ≈ +0.18 in 9.4 South Central Semiarid Prairies),
    SILENT in mesic-buffered systems (β ≈ −0.05 in 8.2/8.3/8.4),
-   REVERSED-CROP in the corn belt (β = −0.10 in 9.2 cropland, +0.0 in
+   REVERSED-CROP in the corn belt (β = −0.10 in 9.2 Temperate Prairies cropland, +0.0 in
    grass), and REVERSED-GRASS in northern Mixed Wood ecoregions (a
    pattern consistent with dormant-season snow contamination of grass
-   NDVI, not yet definitively tested). The aggregate near-zero is the
-   cancellation of these opposite-sign regional responses.
-2. **The 4-week SPEI window beats the conventional 3-month SPEI window
-   for matching USDM events.** Across 35 (eco × LC) cells, spei_4w
-   wins 33 onset cells and 30 recovery cells as the strongest single
-   signal. SPEI-3 (~13-week), the conventional default, is dominated.
-   The canonical NDVI–SPEI ensemble uses spei_4w as the meteorological
-   partner.
-3. **NDVI and SPEI catch largely different events.** Only 4–5 % of
-   USDM transitions have both NDVI and SPEI firing concurrently;
-   NDVI uniquely catches ~19 % of events SPEI misses (and vice versa
-   for SPEI). The OR ensemble lifts per-event hit rate by +15.5 pt
-   on onset and +13.9 pt on recovery over the best single signal,
-   though HSS is roughly unchanged (POD up, FAR up cancel).
-4. **NDVI is a slow-drought monitor, not a flash-drought monitor.** As
-   the flash-drought filter tightens, SPEI's hit rate climbs sharply
-   while NDVI's hit rate drops. The one informative exception is 9.4
-   semiarid grass, where NDVI's hit rate lifts +25 pt on flash
-   recoveries vs. its baseline — biologically grounded confirmation
-   of the meteorological signal on the one ecoregion×LC whose
-   vegetation can respond on a 4-week timescale.
-5. **The strongest single operational result is 8.3 SE Plains
+   NDVI, but not yet tested). The aggregate near-zero appears to reflect
+   the cancellation of these opposite-sign regional responses.
+2. **The 4-week SPEI window appears to outperform the conventional
+   3-month SPEI window for matching USDM events.** Across 35 (eco × LC)
+   cells, spei_4w wins 33 onset cells and 30 recovery cells as the
+   strongest single signal. SPEI-3 (~13-week), the conventional default,
+   rarely wins. Based on these results, spei_4w emerges as the stronger
+   meteorological partner for NDVI in this domain.
+3. **NDVI and SPEI appear to catch largely different events.** Only
+   4–5 % of USDM transitions have both NDVI and SPEI firing
+   concurrently; NDVI uniquely catches ~19 % of events SPEI misses (and
+   vice versa for SPEI). The OR ensemble lifts per-event hit rate by
+   +15.5 pt on onset and +13.9 pt on recovery over the best single
+   signal, though HSS is roughly unchanged (POD up, FAR up cancel).
+4. **These results suggest NDVI may function as a slow-drought monitor
+   rather than a flash-drought detector.** As the flash-drought filter
+   tightens, SPEI's hit rate climbs sharply while NDVI's hit rate drops.
+   One potentially informative exception is 9.4 South Central Semiarid Prairies grass, where
+   NDVI's hit rate lifts +25 pt on flash recoveries vs. its baseline —
+   consistent with the faster vegetation response in semiarid rangeland,
+   though the sample is one ecoregion × LC combination.
+5. **The strongest single result in our dataset is 8.3 Southeastern USA Plains
    grassland: HSS = 0.47 for onset detection.** Twelve of the top-20
-   onset cells in the full table are 8.3 strata.
+   onset cells in the full table are 8.3 Southeastern USA Plains strata, which may reflect
+   genuine skill or the particular USDM-transition climatology of that
+   region (maybe?).
 
-**Operational bottom line.** The HLS-NDVI monitor is useful as a
-**complementary** signal to existing meteorological products, with
-operational value concentrated in (a) concurrent state monitoring of
-natural-cover semiarid rangelands, (b) event-timing alignment in humid
-mixed-cover ecoregions, and (c) early-growing-season recovery detection
-across most of the domain. It is **not** a replacement for SPEI as the
-primary meteorological drought signal, **not** appropriate as a
-flash-drought monitor, and **not** a reliable indicator in managed
-cropland where the signal can run opposite to the meteorological
-deficit. Skill magnitudes are statistically robust at our sample sizes
-but operationally modest in most strata; the value of the monitor is
-structural (where it adds information beyond existing products) rather
-than magnitude-based.
+**Operational bottom line.** These results suggest the HLS-NDVI monitor
+may serve as a useful **complementary** signal to existing meteorological
+products, with potential operational value in (a) concurrent state
+monitoring of natural-cover semiarid rangelands, (b) event-timing
+alignment in humid mixed-cover ecoregions, and (c) early-growing-season
+recovery detection across much of the domain. It does not appear to
+function as a replacement for SPEI as the primary meteorological drought
+signal, does not appear appropriate as a standalone flash-drought
+monitor, and shows limited reliability as a drought indicator in managed
+cropland where the signal can run counter to the meteorological deficit.
+Skill magnitudes are statistically robust at our sample sizes but
+operationally modest in most strata; the value, if confirmed, is
+structural — where the monitor adds information beyond existing products
+— rather than magnitude-based.
 
 **Caveats.** USDM is not fully independent of NDVI — three NDVI-derived
 composites (VegDRI, QuickDRI, VHI) are formal USDM inputs (§3.3). The
@@ -99,28 +107,27 @@ not a result.
 ### 2.1 Ecological drought and the measurement gap
 
 Drought is conventionally framed along three intersecting axes:
-**meteorological** (precipitation deficit), **hydrological** (streamflow
-and reservoir deficit), and **agricultural** (soil moisture and crop
-yield impact). A fourth framing, **ecological drought** — the response
+meteorological (precipitation deficit), hydrological (streamflow
+and reservoir deficit), and agricultural (soil moisture and crop
+yield impact). A fourth framing, ecological drought — the response
 of natural and managed vegetation to compound water-balance,
 temperature, and management stresses — has emerged more recently as
 distinct from the older three. Ecological drought is the drought
-condition that actually matters for carbon uptake, forest mortality,
+condition that exerts more influence over carbon uptake, forest mortality,
 wildlife habitat, water-use planning, and the long-term integrity of
 managed landscapes. It is also the drought axis we have the *least
 direct way to measure*.
 
 The standard U.S. drought monitoring products approach ecological
-impact only indirectly. The **U.S. Drought Monitor (USDM)** serves as
+impact only indirectly. The U.S. Drought Monitor (USDM) serves as
 the operational categorical product — weekly, expert-authored, six-class
 severity, the reference for disaster declarations and assistance — but
 it integrates many drought axes into a single classification rather
-than reporting on vegetation state per se. **Meteorological indices**
+than reporting on vegetation state per se. Meteorological indices
 (SPI, SPEI, PDSI, EDDI) characterize the water-balance *driver* of
-ecological stress, not the vegetation *response*. **Existing vegetation
-products** (VegDRI, QuickDRI, VHI; §3.3) build on coarser-resolution
+ecological stress, not the vegetation *response*. Existing vegetation products (VegDRI, QuickDRI, VHI; §3.3) build on coarser-resolution
 NDVI from AVHRR and MODIS to capture vegetation condition, and feed
-into the USDM author workflow as inputs — but they were not designed
+into the USDM author workflow as inputs, but they were not designed
 specifically to measure ecological drought as a stand-alone signal at
 the spatial and temporal resolution needed for sub-regional planning.
 
@@ -133,13 +140,13 @@ Landsat 8 / 9 + Sentinel-2 A / B harmonized to 30 m surface
 reflectance, 2013–present) is the densest harmonized vegetation
 observation record we can build a monitor on; what remains is to
 evaluate whether the resulting NDVI signal *carries skill against
-established drought references*, and where it does and does not. This
-is an empirical question — not assumed.
+established drought references*, and where it does and does not.
 
 ### 2.2 Why two reference datasets, not one
 
-The choice to validate against both USDM and SPEI is deliberate. They
-answer different questions, and reporting both prevents reading a single
+The choice to validate against both USDM and SPEI is intended to provide multiple perspectives on
+the performance of NDVI as a drought indicator. Each answers different
+questions, and reporting both prevents reading a single
 finding as the whole story.
 
 - **USDM tells us "is the monitor operationally useful?"** A vegetation
@@ -162,7 +169,7 @@ which case its operational value is in spatial resolution and timing
 rather than in detecting new events), or whether it is detecting
 vegetation stress that the meteorological signal alone does not show.
 
-### 2.3 The prior work — Juliana's Chicago-domain analyses
+### 2.3 The prior work: Juliana's Chicago-domain analyses
 
 Methods development for this project began with Juliana's Chicago-area
 work (described in [§4.1](#41-the-prior-work---julianas-chicago-domain-spatial-gam)),
@@ -194,7 +201,7 @@ urban-rural gradient. The within-Chicago patterns might or might not
 hold when the analysis crosses semiarid prairie, mesic forest, intensive
 corn belt, and northern Mixed Wood ecoregions in a single grid.
 
-### 2.4 What this work scales up — and what it tests
+### 2.4 What this work scales up and what it tests
 
 The Midwest regional DEWS work documented here scales the Chicago
 approach by roughly two orders of magnitude in area (~200× larger by
@@ -229,7 +236,7 @@ brings three new tests:
 Questions (1) and (2) are largely settled by the existence of the
 working pipeline and the cross-ecoregion stratified results that
 follow: the pipeline runs (with the operational caveats noted in §3.7);
-the LC patterns are not constant across ecoregions (and the within-9.2
+the LC patterns are not constant across ecoregions (and the within-9.2 Temperate Prairies
 crop-vs-grass split in §4.6 is a clean example of why ecoregion × LC
 matters). The remainder of this memo focuses on (3).
 
@@ -259,13 +266,13 @@ after Fmask filtering compared with the 40 %-scene-cap approach.
 The NDVI record begins in 2013 (Landsat 8 launch), with Sentinel-2A
 contributing from late 2015 and Sentinel-2B from mid 2017. Landsat 9 launched
 late 2021. The four-mission ensemble means satellite revisit density rises
-monotonically over the record — a caveat we return to in §3.7.
+monotonically over the record; a caveat we return to in §3.7.
 
 ### 3.2 Analysis domain — approximating the Midwest regional DEWS
 
-Despite the working directory name (`CONUS_HLS_drought_monitoring/`), the
+The
 analysis was scoped to approximate the NIDIS Midwest regional Drought
-Early Warning System (DEWS) footprint rather than the full CONUS. The
+Early Warning System (DEWS) footprint. The
 domain is a 1976 × 1212 km rectangular bounding box in EPSG:5070 Albers
 (`midwest_extent.rds`); after applying land-cover and data-density
 filters, we retained **129,310 4 km pixels** as the working population.
@@ -276,7 +283,7 @@ Michigan, Illinois, Wisconsin, Missouri), and another six contribute
 between 2 % and 6 % (North Dakota, Indiana, Kentucky, Ohio, Colorado,
 Montana). Four additional states (Wyoming, West Virginia, Virginia,
 Tennessee) are present only as marginal tails (<2 % each).
-**Fig 0** ([phase6_fig0_domain_reference_map.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig0_domain_reference_map.png))
+**Fig 1** ([phase6_fig0_domain_reference_map.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig0_domain_reference_map.png))
 shows the domain extent, EPA Level II ecoregion polygons, and modal
 NLCD land-cover class on the working 4 km grid.
 
@@ -416,7 +423,7 @@ domain (canonical names from `pixel_to_ecoregion_l2.rds`, per
 
 Ecoregions are not land-cover classes — they are climate-and-biophysical
 regions, several of which contain heterogeneous land cover internally
-(e.g., the Temperate Prairies ecoregion 9.2 is dominated by row-crop
+(e.g., the Temperate Prairies ecoregion 9.2 Temperate Prairies is dominated by row-crop
 agriculture in practice, despite the name). We therefore stratify by
 **ecoregion × land cover** jointly in the headline analyses; ecoregion
 alone is reported only as supporting context.
@@ -434,9 +441,10 @@ only in 2013–2015, +Sentinel-2A from late 2015, +Sentinel-2B from mid 2017,
 SD to across-week SD dropped from ~0.375 in 2016 to ~0.23 in 2023–2025 — i.e.,
 the weekly aggregate becomes a tighter estimate of the underlying weekly mean
 as more missions contribute. This does not invalidate the GAM-based anomalies
-(which are estimated per pixel-week with their own uncertainty), but it
-means cross-year comparisons should be read with the understanding that
-later years have lower observation noise than earlier years.
+(which are estimated per pixel-DOY and then collapsed to weekly means,
+carrying per-DOY uncertainty forward), but it means cross-year
+comparisons should be read with the understanding that later years
+have lower observation noise than earlier years.
 
 **(b) Pre-Sentinel-2 winter gap (2014–2015).** Six day-of-year windows in
 2014 (Feb 14–16) and 2015 (Jan 15–17) are permanently missing from the
@@ -556,8 +564,8 @@ In the validation results that follow we refer to the magnitude signal as
 ### 4.4 Weekly alignment with reference datasets
 
 For validation we joined the per-pixel weekly NDVI products to USDM and
-SPI/SPEI on a common (pixel × ISO-week) grid. NDVI anomalies were
-aggregated to weekly means and counts; USDM weekly classes were attached
+SPI/SPEI on a common (pixel × ISO-week) grid. GAM-derived per-DOY NDVI
+anomalies were collapsed to weekly means and observation counts; USDM weekly classes were attached
 by ISO-week; SPI/SPEI at three windows (4 / 13 / 26 weeks) were attached
 on the same week index. Per-pixel z-standardization
 ((signal − pixel mean) / pixel SD across the full record) was computed on
@@ -571,8 +579,7 @@ files, to ensure consistent weekly alignment.
 
 ### 4.5 Validation framework — three questions, three lenses
 
-A drought monitor can be "good" in several distinct senses, and the
-distinctions matter operationally. We organized the validation around
+A drought monitor can be "good" in several distinct senses. We organized the validation around
 three questions, each implemented as an analysis in
 [09_validate_drought_signal.R](09_validate_drought_signal.R) and each
 answering to a different downstream use of the monitor:
@@ -596,7 +603,7 @@ operationally very different.
 
 Throughout the memo we report each lens on its own terms and resist the
 temptation to collapse them into a single headline. A monitor can be
-strong on event timing in 8.3 Southeastern Plains (§5.4) but silent on
+strong on event timing in 8.3 Southeastern USA Plains (§5.4) but silent on
 continuous state agreement there (§5.2) — both findings are true; they
 just answer different questions.
 
@@ -625,11 +632,11 @@ The data confirmed both axes carry independent signal:
 - **Ecoregion-level heterogeneity.** A simple Midwest-aggregate
   regression of NDVI z on SPEI 13w gives β ≈ −0.04 — essentially zero.
   Within-ecoregion the same regression reveals slopes ranging from +0.18
-  in the South Central Semiarid Prairies (9.4, expected positive
-  response) to −0.12 in the Temperate Prairies (9.2, *opposite* sign).
+  in the South Central Semiarid Prairies (9.4 South Central Semiarid Prairies, expected positive
+  response) to −0.12 in the Temperate Prairies (9.2 Temperate Prairies, *opposite* sign).
   These two ecoregions are adjacent in the central Plains; aggregating
   across them cancels the signal to near-zero.
-- **LC-mediated modulation within ecoregion.** Within 9.2 (the
+- **LC-mediated modulation within ecoregion.** Within 9.2 Temperate Prairies (the
   reversed-sign Temperate Prairies / corn belt), the −0.12 ecoregion
   slope decomposes to β = −0.10 ± 0.01 in crop pixels and
   β = −0.01 ± 0.02 in grass pixels. A by-ecoregion view alone would
@@ -685,7 +692,7 @@ unless otherwise noted, and all skill metrics are computed on the
 full population (10 years, ~129K pixels) rather than smoke-test
 subsets.
 
-### 5.1 Gate decision — weekly aggregation preserves the per-pixel signal
+### 5.1 Gate decision: weekly aggregation preserves the per-pixel signal
 
 The first analysis we ran was a per-pixel diagnostic confirming that
 weekly aggregation was the right working grain. For each
@@ -707,14 +714,13 @@ through the rest of the analysis:
   the understanding that later years have lower observation noise.
 - **2016 wk-50 snow contamination hotspot.** Roughly 5,000 upper-Midwest
   pixels showed elevated within-week SD in mid-December 2016 that the
-  Fmask snow flag did not capture. We left the data in (per the
-  systematic-over-tailored principle) and flag it where dormant-season
+  Fmask snow flag did not capture. We left the data in and flag it where dormant-season
   anomalies are read in subsequent analyses.
 
 The remainder of §5 operates on the weekly join cache
 (`ndvi_drought_join_weekly_10y.rds`, ~68 M pixel-week rows).
 
-### 5.2 State agreement — the four-mechanism story (continuous SPEI)
+### 5.2 State agreement: the four-mechanism story (continuous SPEI)
 
 The first headline result came from a fixed-effects regression of
 NDVI z-scores on raw SPEI within each (eco × LC) stratum, at three
@@ -737,14 +743,14 @@ signatures**:
 | **REVERSED-GRASS** | 5.2 Mixed Wood Shield, 8.1 Mixed Wood Plains | All negative, **grass is worst** (5.2: crop −0.060, forest −0.070, grass −0.100) | Northern boreal-influenced ecoregions; leading mechanistic hypothesis is dormant-season snow contamination of grass NDVI (untested as of this draft; flagged in §7). |
 
 The geographic and timescale-dependent structure of these signatures
-is summarized in **Fig 11**
+is summarized in **Fig 2**
 ([phase6_fig11_three_window_mechanism_map.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig11_three_window_mechanism_map.png)),
-the cover figure for the validation story. Fig 11 has two rows: the
+the cover figure for the validation story. Fig 2 has two rows: the
 top row shows the eco-mean β as a continuous diverging heatmap (red ↔
 grey ↔ green centered at zero) for each of the three SPEI integration
 windows; the bottom row plots the same per-ecoregion β as trajectories
 across the windows. For per-ecoregion LC decomposition visuals (the
-data underneath the eco-mean), see **Fig 8** (per-eco LC overlays:
+data underneath the eco-mean), see **Fig 3** (per-eco LC overlays:
 `phase6_fig8_eco{5p2,6p2,8p1,8p2,8p3,8p4,9p2,9p3,9p4}_lc_overlay.png`),
 which display the case-year NDVI anomaly time series for each ecoregion
 broken out by land cover. A more comprehensive supplementary set
@@ -757,12 +763,12 @@ in this memo to keep the figure inventory focused.
 table above is read off `spei_26w` (the 6-month integration); at
 shorter windows the picture compresses dramatically. At `spei_4w` (1
 month), eco-mean β is negative across **every** Midwest ecoregion —
-the entire domain reads REVERSED. At `spei_13w` (3 months), only 9.4
+the entire domain reads REVERSED. At `spei_13w` (3 months), only 9.4 South Central Semiarid Prairies
 crosses into the ALIGNED tier; 6.2/8.3/8.4 transition toward SILENT;
 the rest remain REVERSED. The full four-mechanism picture above only
-resolves at `spei_26w`, where ALIGNED appears in semiarid west (9.4,
-6.2), SILENT in mesic-buffered systems (8.2, 8.3, 8.4, plus 9.3 under
-the eco-mean rule), and REVERSED persists in 9.2, 5.2, 8.1. The
+resolves at `spei_26w`, where ALIGNED appears in semiarid west (9.4 South Central Semiarid Prairies,
+6.2 Western Cordillera), SILENT in mesic-buffered systems (8.2 Central USA Plains, 8.3 Southeastern USA Plains, 8.4 Ozark/Ouachita-Appalachian Forests, plus 9.3 West-Central Semiarid Prairies under
+the eco-mean rule), and REVERSED persists in 9.2 Temperate Prairies, 5.2 Mixed Wood Shield, 8.1 Mixed Wood Plains. The
 implication is ecological, not methodological: vegetation greenness
 tracks *integrated* water balance, not weekly meteorological
 excursions, and the integration window required to detect the
@@ -773,18 +779,18 @@ contamination) that do not average out at longer timescales.
 
 Two extensions of the four-mechanism picture warrant explicit mention:
 
-- **The 9.3 mystery — table view vs. figure view.** 9.3 is the cell
+- **The 9.3 West-Central Semiarid Prairies mystery — table view vs. figure view.** 9.3 West-Central Semiarid Prairies is the cell
   where the per-LC table above (which classifies it ALIGNED, with the
-  "grass only" caveat) and Fig 11 (which classifies it SILENT under the
+  "grass only" caveat) and Fig 2 (which classifies it SILENT under the
   eco-mean rule at 26w) genuinely diverge. Both readings are correct:
-  9.3 *is* ALIGNED if you look at grasslands alone (β = +0.063), but
-  the LC heterogeneity within 9.3 (crop −0.018, forest flat) averages
+  9.3 West-Central Semiarid Prairies *is* ALIGNED if you look at grasslands alone (β = +0.063), but
+  the LC heterogeneity within 9.3 West-Central Semiarid Prairies (crop −0.018, forest flat) averages
   the eco-mean down to β ≈ +0.026 — below the |β| > 0.05 ALIGNED
   threshold the figure uses. The figure is conservative because it
   collapses across LCs; the table is faithful to the per-LC structure.
-  Use both views together: 9.3 grass is operationally meaningful;
-  9.3-as-a-whole is not.
-- **The corn-belt urban-density split.** Within 9.2, the dense urban
+  Use both views together: 9.3 West-Central Semiarid Prairies grass is operationally meaningful;
+  9.3 West-Central Semiarid Prairies-as-a-whole is not.
+- **The corn-belt urban-density split.** Within 9.2 Temperate Prairies, the dense urban
   stratum joined the crop reversal pattern (β = −0.072, n = 91),
   while diffuse urban behaved like grass (β = −0.008, n = 214). This
   is the *only* ecoregion in the analysis where dense and diffuse
@@ -801,7 +807,7 @@ had permutation-null z-scores > 100; the signals were statistically
 robust at our 67 M pixel-week sample size, even when modest in
 explanatory variance.
 
-### 5.3 Categorical concurrence — USDM agrees with SPEI in some ecoregions and disagrees in others
+### 5.3 Categorical concurrence: USDM agrees with SPEI in some ecoregions and disagrees in others
 
 A parallel analysis (`categorical_usdm_nlcd`) computed within-drought
 Spearman ρ between NDVI z (sign-flipped: positive ρ = NDVI below-normal
@@ -813,29 +819,29 @@ The headline finding was that the USDM-side picture **does not cleanly
 replicate the four-mechanism SPEI story**. Three patterns of
 disagreement matter:
 
-1. **8.4 Ozark: SILENT on SPEI, but ALIGNED on USDM.** 8.4 showed
+1. **8.4 Ozark/Ouachita-Appalachian Forests: SILENT on SPEI, but ALIGNED on USDM.** 8.4 Ozark/Ouachita-Appalachian Forests showed
    β ≈ −0.05 on SPEI (slight wrong-direction across LCs, the SILENT
    pattern), but USDM ρ ranged +0.016 to +0.148 across LCs, with grass
    the most-sampled cell at ρ = +0.042 (n = 184K) and a small-N
    dense-urban cell at ρ = +0.148 (suspect for sample size). USDM
-   declarations in 8.4 appear to track something the meteorological
+   declarations in 8.4 Ozark/Ouachita-Appalachian Forests appear to track something the meteorological
    water-balance signal alone does not — possibly streamflow,
    reservoir, or other inputs that USDM authors integrate in this
    region.
 2. **8.2 Central USA Plains grass: mild negative on SPEI, sharply
-   negative on USDM.** 8.2|grass shows ρ = −0.171 (the most-negative
+   negative on USDM.** 8.2 Central USA Plains|grass shows ρ = −0.171 (the most-negative
    cell in the table, n = 16K within-drought weeks), against an SPEI
-   β = −0.030. USDM thinks 8.2 grass is doing the opposite of what
+   β = −0.030. USDM thinks 8.2 Central USA Plains grass is doing the opposite of what
    NDVI says, at much larger magnitude than the meteorological
    signal alone would predict.
 3. **ALIGNED replicates but magnitudes shrink 3–4× from SPEI to USDM.**
-   9.4 SPEI β ranges +0.16 to +0.20; 9.4 USDM ρ ranges +0.01 to +0.05.
+   9.4 South Central Semiarid Prairies SPEI β ranges +0.16 to +0.20; 9.4 South Central Semiarid Prairies USDM ρ ranges +0.01 to +0.05.
    This is the expected signature of USDM-as-lagging-categorical-product:
    the meteorological signal (SPEI) is strong and clean; the
    categorical USDM signal is weaker and noisier because expert weekly
    binning adds latency and information loss.
 
-**The 9.2 urban-density split that was visible on SPEI is absent on
+**The 9.2 Temperate Prairies urban-density split that was visible on SPEI is absent on
 USDM.** On SPEI, dense urban (β = −0.072) joined crop's reversal while
 diffuse urban (β = −0.008) behaved like grass. On USDM, both urban
 tiers cluster around ρ ≈ −0.045 — they do not differentiate. SPEI's
@@ -843,11 +849,11 @@ continuous water-balance picks up a surface-management gradient that
 USDM's categorical expert-consensus product does not.
 
 The best USDM intensification skill cell at meaningful sample size was
-**8.2 urban_dense, HSS = +0.020, POD = 0.077, FAR = 0.892, n = 223K**.
+**8.2 Central USA Plains urban_dense, HSS = +0.020, POD = 0.077, FAR = 0.892, n = 223K**.
 Small in absolute magnitude but statistically real; worth flagging for
 follow-up.
 
-### 5.4 Event-anchored skill — spei_4w dominates; 8.3 SE Plains is the operational sweet spot
+### 5.4 Event-anchored skill — spei_4w dominates; 8.3 Southeastern USA Plains is the operational sweet spot
 
 A third analysis (`event_detection_nlcd`) anchored skill on USDM
 *transitions* rather than on USDM levels. We defined drought events at
@@ -857,9 +863,9 @@ derivative windows, three SPEI windows), how skillfully did each
 *fire* near the transitions? Skill was scored via 4-week temporal-block
 POD/FAR/HSS contingency, per (eco × LC × dom).
 
-Two findings dominate:
+Two findings stand out:
 
-**(a) `spei_4w` is the strongest single signal across the board.** Of
+**(a)** `spei_4w` **is the strongest single signal across the board.** Of
 35 (eco × LC × dom) cells with ≥5,000 events, spei_4w won 33 of 35
 onset cells and 30 of 35 recovery cells; derivatives won 3 + 5 cells;
 the longer SPEI windows (13w, 26w) almost never won. Domain-weighted
@@ -875,25 +881,25 @@ is.** We discuss the operational implication of this in §5.7.
 
 **(b) 8.3 Southeastern USA Plains is the operational dark horse.**
 The best onset HSS in the full 50-stratum table was **0.473** at
-**8.3 grassland (dom) × spei_4w × z = 1.5 / K = 1**, n = 6,480
-(POD = 0.526, FAR = 0.473). Twelve of the top-20 onset cells were 8.3
-strata. 8.3 — the Southeastern USA Plains, spanning Arkansas /
+**8.3 Southeastern USA Plains grassland (dom) × spei_4w × z = 1.5 / K = 1**, n = 6,480
+(POD = 0.526, FAR = 0.473). Twelve of the top-20 onset cells were 8.3 Southeastern USA Plains
+strata. 8.3 Southeastern USA Plains — the Southeastern USA Plains, spanning Arkansas /
 Missouri Ozark foothills / East Texas / Louisiana / parts of MS/TN —
 is a humid subtropical mixed grass-crop-forest region with episodic
 summer storms that produce sharp SPEI excursions. Both USDM
 declarations and spei_4w fires responded on aligned weeks-to-month
 timescales, and the result was operationally meaningful onset
-detection. **Fig 2** ([phase6_fig2_eco83_deepdive.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig2_eco83_deepdive.png))
-is the 8.3 deep-dive panel showing per-LC HSS and per-signal skill
+detection. **Fig 4** ([phase6_fig2_eco83_deepdive.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig2_eco83_deepdive.png))
+is the 8.3 Southeastern USA Plains deep-dive panel showing per-LC HSS and per-signal skill
 ranking.
 
-This finding sits in tension with §5.2: 8.3 was in the SILENT tier of
+This finding sits in tension with §5.2: 8.3 Southeastern USA Plains was in the SILENT tier of
 the SPEI state-agreement table (β ≈ −0.03 across LCs). The same
 ecoregion is silent on concurrent state and excellent on event-timing
 alignment. This is a clean example of the three-lens framing in §4.5
 paying off: the lenses answer different questions and a stratum can
 score well on one while being silent on another. Both findings are real.
-**Fig 3** ([phase6_fig3_section_a_vs_b_scatter.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig3_section_a_vs_b_scatter.png))
+**Fig 5** ([phase6_fig3_section_a_vs_b_scatter.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig3_section_a_vs_b_scatter.png))
 plots Section A (state agreement β) against Section B (event-detection
 HSS) per (eco × LC) stratum, visualizing exactly this kind of
 cross-lens disagreement.
@@ -902,18 +908,18 @@ Two additional patterns from the full event-detection table:
 
 - **Recovery > onset detectability.** 50% of strata had positive
   recovery HSS vs. 40% for onset; the best recovery cell was
-  **8.3 grass × deriv_w07_z × z = 1.5 / K = 2 at HSS = +0.223**
+  **8.3 Southeastern USA Plains grass × deriv_w07_z × z = 1.5 / K = 2 at HSS = +0.223**
   (n = 6,448). Greening events left a cleaner signature than stressed
   onsets.
 - **9.3 West-Central Semiarid Prairies had the weakest meteorological
-  signature at USDM onset.** At 9.3 onset, mean SPEI-13w post-event
+  signature at USDM onset.** At 9.3 West-Central Semiarid Prairies onset, mean SPEI-13w post-event
   was −0.44 and only 51.6% of events crossed SPEI ≤ −1 in the window
-  (vs ~65–70% in most other ecoregions). USDM declared drought in 9.3
+  (vs ~65–70% in most other ecoregions). USDM declared drought in 9.3 West-Central Semiarid Prairies
   with thinner SPEI evidence; the drivers were likely soil moisture,
   streamflow, or agricultural reports, not precipitation deficit alone.
 
 **Caveat:** the HSS magnitudes are bounded by the imbalance of the
-USDM transition base rate. HSS = 0.47 in 8.3 grass is the cell where
+USDM transition base rate. HSS = 0.47 in 8.3 Southeastern USA Plains grass is the cell where
 the operational claim is strongest; most cells sit between −0.05 and
 +0.10. The operational story is that a few cells work *very well* and
 most cells provide modest skill — not that NDVI uniformly tracks USDM
@@ -938,26 +944,26 @@ uniquely caught ~19% of events that SPEI missed, and SPEI uniquely
 caught 14–22% that NDVI missed.
 
 Per-ecoregion the complementarity rate ranged from ~30% combined hit
-rate in mesic forest ecoregions to ~50% in 8.3 SE Plains. **Fig 1**
+rate in mesic forest ecoregions to ~50% in 8.3 Southeastern USA Plains. **Fig 6**
 ([phase6_fig1_ndvi_spei_complementarity.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig1_ndvi_spei_complementarity.png))
 is the per-ecoregion 100%-stacked bar of {both / NDVI-only / SPEI-only
-/ neither} at the headline op. **Fig 4**
+/ neither} at the headline op. **Fig 7**
 ([phase6_fig4_complementarity_atlas.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig4_complementarity_atlas.png))
 maps the per-pixel rate at which NDVI fired without SPEI; it is the
 most direct visualization of where a vegetation monitor adds operational
 information beyond the meteorological signal alone.
 
-LC-stratified complementarity (**Fig 1b**,
+LC-stratified complementarity (**Fig 8**,
 [phase6_fig1b_ndvi_spei_complementarity_lc.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig1b_ndvi_spei_complementarity_lc.png))
 sharpens the picture further:
 
-- **Crop onset**: 8.3 had the largest "both" segment — Southeastern
+- **Crop onset**: 8.3 Southeastern USA Plains had the largest "both" segment — Southeastern
   USA Plains cropland (Arkansas / east Texas / Louisiana / Mississippi
-  delta), *not* the corn belt. 8.2 + 9.4 crop showed strong NDVI-only
+  delta), *not* the corn belt. 8.2 Central USA Plains + 9.4 South Central Semiarid Prairies crop showed strong NDVI-only
   segments, possibly via irrigation-stress signatures.
 - **Forest onset**: 8.2 Central USA Plains forest had the largest
   NDVI-only share — forest NDVI carried information SPEI missed there.
-- **Grass onset**: 8.3 grass had the clearest "both" segment;
+- **Grass onset**: 8.3 Southeastern USA Plains grass had the clearest "both" segment;
   6.2 Western Cordillera grass was nearly all "neither" at this
   threshold (low signal-to-noise in semiarid grass at z = 1.5).
 - **Recovery (all LCs)**: NDVI-only dominated almost everywhere. SPEI
@@ -968,7 +974,7 @@ The complementarity finding sets up the question §5.7 takes on: if
 NDVI and SPEI catch different events, can we combine them into a
 better ensemble?
 
-### 5.6 Flash drought subset — NDVI is a slow monitor, not a flash detector
+### 5.6 Flash drought subset — positioning NDVI as a slow monitor
 
 A targeted analysis (`section_flash_drought`) subset events to the
 Otkin-style *flash drought* subset: events where the USDM trajectory
@@ -985,7 +991,7 @@ the per-event hit-rate analysis with `spei_4w` for this memo
 ([phase6_fig9_flash_drought_color_dual.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig9_flash_drought_color_dual.png),
 with companion LC and ecoregion variants
 `phase6_fig9_flash_drought_color_{lc,eco}.png`) shows the
-per-stratum NDVI–SPEI flash-drought scatter; **Fig 6**
+per-stratum NDVI–SPEI flash-drought scatter; **Fig 10**
 ([phase6_fig6_case_year_anom_deriv.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig6_case_year_anom_deriv.png))
 gives concrete case-year time-series of NDVI anomalies and derivatives
 during representative drought years.
@@ -1017,12 +1023,11 @@ vegetation *response* on a weeks-to-month lag. A 4-week look-ahead
 window is approximately the vegetation lag time itself; NDVI simply
 has not had time to respond when the flash event is declared.
 
-**One ecologically informative cell.** **9.4 South Central Semiarid
-Prairies grass shows NDVI hit rate +25 percentage points on flash
-recoveries vs. all recoveries (54% vs 29%)**, and 9.4 crop shows
+**One ecologically informative cell.** **9.4 South Central Semiarid Prairies grass shows NDVI hit rate +25 percentage points on flash
+recoveries vs. all recoveries (54% vs 29%)**, and 9.4 South Central Semiarid Prairies crop shows
 +12 pt. These are the only two strata in the 35-cell matrix with a
 within-NDVI flash-recovery lift above +5 pt; everything else is flat
-or declining (third place: 8.3 forest at +2.6 pt). The pattern matches
+or declining (third place: 8.3 Southeastern USA Plains forest at +2.6 pt). The pattern matches
 the underlying ecology: warm-season C4 grasses on the southern Plains
 respond to moisture pulses on a 1–3 week timescale that fits inside
 the 4-week flash-recovery window, and dryland crops in the same
@@ -1038,10 +1043,12 @@ canopy signal in (e.g.) eastern forests, irrigated corn-belt crops, or
 northern grasslands where the temperature ceiling on growth limits how
 quickly canopies can respond.
 
-The headline framing for the memo follows: **NDVI is a slow-drought
-monitor, not a flash detector.** It belongs in the operational toolkit
-as a complement to meteorological signals on slow / baseline events,
-not as a flash-warning replacement for SPEI.
+The picture that emerges is consistent with NDVI functioning as a
+slow-drought monitor rather than a flash detector — a complement to
+meteorological signals on sustained baseline events, less suited to
+rapid-onset detection where vegetation response lags the meteorological
+trigger. Whether that framing holds across domains beyond the Midwest
+is a hypothesis, not yet a result.
 
 ### 5.7 Ensemble — `ndvi_z OR spei_4w` is the canonical NDVI–SPEI pair
 
@@ -1088,7 +1095,7 @@ Full-transparency tables at three z thresholds (domain-weighted):
 
 Two clean findings emerge across all three z thresholds:
 
-**(a) `spei_4w` is the best SPEI partner for NDVI — not the
+**(a)** `spei_4w` **is the best SPEI partner for NDVI — not the
 conventional SPEI-3 (~13-week) window.** At every z threshold and
 every direction, the `ndvi_z OR spei_4w` pair beats `OR spei_13w` and
 `OR spei_26w` on both hit rate and HSS. This is consistent with the
@@ -1096,7 +1103,7 @@ single-signal finding from §5.4 (spei_4w dominates 33/35 onset cells),
 but it is a stronger statement: the 4-week SPEI window is the right
 partner for NDVI in this domain, not the conventional 3-month default.
 We adopt `ndvi_z OR spei_4w` as the canonical NDVI–SPEI ensemble for
-the remainder of the memo and any downstream operational claim. (Fig 5,
+the remainder of the memo and any downstream operational claim. (Fig 11,
 the op-point heatmap, gives a visual at-a-glance ranking of best HSS
 across all (signal × direction) cells.)
 
@@ -1122,7 +1129,7 @@ The operational reading depends on what metric matters:
   is to flag specific (eco × LC) cells where it adds skill that the
   meteorological signal alone misses.
 - **Per-stratum exceptions exist.** A handful of cells — including
-  9.4 grass / crop on recovery and 9.2 urban_diffuse on recovery —
+  9.4 South Central Semiarid Prairies grass / crop on recovery and 9.2 Temperate Prairies urban_diffuse on recovery —
   do show positive HSS lift from the OR ensemble. These are the
   cells where NDVI carries operational information beyond what
   spei_4w already provides.
@@ -1144,10 +1151,10 @@ appropriate for an operational product. Flagged in §7 as future work.
 
 A final descriptive analysis plotted the weekly composition of NDVI
 and SPEI fires across the calendar year, by direction and by stratum.
-**Fig 10a** ([phase6_fig10a_firing_climatology_domain.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig10a_firing_climatology_domain.png))
-shows the domain-pooled climatology, **Fig 10b**
+**Fig 12a** ([phase6_fig10a_firing_climatology_domain.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig10a_firing_climatology_domain.png))
+shows the domain-pooled climatology, **Fig 12b**
 ([phase6_fig10b_firing_climatology_lc.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig10b_firing_climatology_lc.png))
-the per-LC breakdown, and **Fig 10c**
+the per-LC breakdown, and **Fig 12c**
 ([phase6_fig10c_firing_climatology_eco.png](../../../../mnt/malexander/datasets/ndvi_monitor/figures/phase6/phase6_fig10c_firing_climatology_eco.png))
 the per-ecoregion breakdown. The picture sharpens the operational claim
 about complementarity (§5.5) into a *seasonal* statement:
@@ -1161,11 +1168,11 @@ about complementarity (§5.5) into a *seasonal* statement:
   firings rise sharply across natural land covers (especially in
   ALIGNED-tier ecoregions). This is the seasonally specific window in
   which NDVI's contribution is most distinct from SPEI.
-- **9.4 grass recovery NDVI is very high in growing-season weeks.**
-  Consistent with the 9.4 ALIGNED mechanism (§5.2) and the 9.4 grass
+- **9.4 South Central Semiarid Prairies grass recovery NDVI is very high in growing-season weeks.**
+  Consistent with the 9.4 South Central Semiarid Prairies ALIGNED mechanism (§5.2) and the 9.4 South Central Semiarid Prairies grass
   flash-recovery exception (§5.6).
-- **9.2 corn-belt onset NDVI is conspicuously low across all weeks.**
-  Consistent with the 9.2 REVERSED-CROP mechanism (§5.2) — NDVI does
+- **9.2 Temperate Prairies corn-belt onset NDVI is conspicuously low across all weeks.**
+  Consistent with the 9.2 Temperate Prairies REVERSED-CROP mechanism (§5.2) — NDVI does
   not catch drought onset in managed cropland because the vegetation
   signal is decoupled from the meteorological deficit there.
 
@@ -1185,8 +1192,8 @@ faster detector.
 
 The picture that emerges across the three validation lenses is not
 "NDVI is a viable drought monitor" or "NDVI is not viable" — it is
-"NDVI is viable in specific operational niches that we can now name
-explicitly." The niches:
+"NDVI may be viable in specific operational niches we can begin to
+characterize." The emerging picture:
 
 1. **Concurrent state agreement in semiarid rangelands (ALIGNED tier).**
    In 9.4 South Central Semiarid Prairies, 6.2 Western Cordillera,
@@ -1195,12 +1202,12 @@ explicitly." The niches:
    (β = +0.16 to +0.20 at SPEI-26w). For users asking "what is the
    continuous drought state of this rangeland right now," NDVI is
    an operational answer in these ecoregions.
-2. **Event-anchored skill in humid mixed cover (8.3 SE Plains).** The
+2. **Event-anchored skill in humid mixed cover (8.3 Southeastern USA Plains).** The
    strongest single operational result in this work is HSS = 0.47 for
    NDVI-derived signals matched to USDM onset events in the
    Southeastern USA Plains. For users asking "did the USDM transition
    in this region get caught by an independent signal," the answer in
-   8.3 is yes — at meaningful operational skill.
+   8.3 Southeastern USA Plains is yes — at meaningful operational skill.
 3. **Recovery monitoring across the domain.** Across 50 stratified
    cells, 50 % showed positive recovery HSS vs. 40 % for onset, and
    the relative advantage was largest in the early growing season
@@ -1208,8 +1215,8 @@ explicitly." The niches:
    the meteorological signal alone cannot — a structural fact about
    how vegetation and the water balance relate, not a methodological
    choice.
-4. **Flash recovery in semiarid grass (9.4).** The +25 percentage-point
-   NDVI hit-rate lift on flash recoveries in 9.4 grass (§5.6) is the
+4. **Flash recovery in semiarid grass (9.4 South Central Semiarid Prairies).** The +25 percentage-point
+   NDVI hit-rate lift on flash recoveries in 9.4 South Central Semiarid Prairies grass (§5.6) is the
    one cell where NDVI's vegetation signal lifts substantially above
    its baseline on a *flash* transition — corroborating (not
    outperforming) the meteorological signal, and only on recovery,
@@ -1239,14 +1246,13 @@ as the primary signal:
    define flash drought events. NDVI cannot warn about flash onsets;
    for that, the meteorological signal must lead.
 3. **Northern mesic ecoregions with grass dormant-season noise
-   (REVERSED-GRASS).** In 5.2 Mixed Wood Shield and 8.1 Mixed Wood
-   Plains, the grass NDVI signal runs the wrong way (β = −0.09 to
+   (REVERSED-GRASS).** In 5.2 Mixed Wood Shield and 8.1 Mixed Wood Plains, the grass NDVI signal runs the wrong way (β = −0.09 to
    −0.10). The leading hypothesis is dormant-season snow contamination
    of grass NDVI in northern ecoregions; this is not yet tested
    (§7). Users in these regions should treat NDVI-derived drought
    claims for grass cover with skepticism until the mechanism is
    resolved.
-4. **Mesic forest (SILENT tier).** In 8.2, 8.3, and 8.4, the
+4. **Mesic forest (SILENT tier).** In 8.2 Central USA Plains, 8.3 Southeastern USA Plains, and 8.4 Ozark/Ouachita-Appalachian Forests, the
    continuous NDVI–SPEI relationship is essentially absent
    (|β| < 0.05). Forest canopies buffer against water-balance
    anomalies through deeper rooting and longer leaf retention. NDVI
@@ -1256,18 +1262,19 @@ as the primary signal:
 
 ### 6.3 Operational positioning — a complementary monitor in a specific niche
 
-Synthesizing across §6.1 and §6.2, the operational claim we are
-willing to defend is this: **the per-pixel HLS-NDVI monitor is a
-useful complementary signal to existing meteorological drought
-products, with operational value concentrated in (a) state monitoring
-of natural-cover semiarid rangelands, (b) event-timing alignment in
-humid mixed-cover ecoregions like 8.3, and (c) early-growing-season
-recovery detection across most of the domain. It is not a replacement
-for SPEI as the primary meteorological drought signal, and it is not
-appropriate as a flash-drought monitor. In managed cropland, the
-NDVI signal can run opposite to the meteorological signal and should
-not be used as a drought indicator without explicit acknowledgment
-of the irrigation/management confound.**
+Synthesizing across §6.1 and §6.2, our provisional interpretation —
+and we'd welcome your read on whether this framing holds — is that
+**the per-pixel HLS-NDVI monitor may serve as a useful complementary
+signal to existing meteorological drought products, with potential
+operational value in (a) state monitoring of natural-cover semiarid
+rangelands, (b) event-timing alignment in humid mixed-cover ecoregions
+like 8.3 Southeastern USA Plains, and (c) early-growing-season recovery detection across much
+of the domain. It does not appear to function as a replacement for SPEI
+as the primary meteorological drought signal, and does not appear
+appropriate as a standalone flash-drought monitor. In managed cropland,
+the NDVI signal can run counter to the meteorological signal, and
+drought characterization there should be treated cautiously without
+accounting for the irrigation/management confound.**
 
 The natural place this monitor sits in an operational stack:
 
@@ -1294,8 +1301,8 @@ Three of Juliana's key findings replicate at the Midwest scale:
   aggregation.** Juliana's Chicago work showed urban / forest / grass
   / crop responding differently to the same regional events; we see
   the same effect across the Midwest, with the additional finding
-  that the LC effect is itself ecoregion-dependent (the 9.2 crop
-  reversal is not the 9.4 crop response).
+  that the LC effect is itself ecoregion-dependent (the 9.2 Temperate Prairies crop
+  reversal is not the 9.4 South Central Semiarid Prairies crop response).
 - **The Juliana NLCD-class collapse is the right working schema.**
   Crop / forest / grassland / urban / other captured the operationally
   meaningful contrasts; the only extension we needed was splitting
@@ -1305,7 +1312,7 @@ Three of Juliana's key findings replicate at the Midwest scale:
 The new findings the Midwest scale-up surfaces — that Juliana's
 single-metropolitan-area picture cannot show — are the **cross-biome
 heterogeneity** (the four-mechanism story; §5.2) and the **across-LC
-behavior within ecoregion** (the 9.2 corn-belt mechanism; §5.3). These
+behavior within ecoregion** (the 9.2 Temperate Prairies corn-belt mechanism; §5.3). These
 required a domain that spans both semiarid and mesic biomes and
 contains substantial managed cropland; Chicago, as a single
 metropolitan area inside one ecoregion (8.1 Mixed Wood Plains), could
@@ -1317,7 +1324,7 @@ A pattern visible across §5.2, §5.4, and §5.7: the headline skill
 metrics are **statistically robust at our sample sizes but small in
 absolute magnitude**. Best continuous-state β values are 0.16–0.20
 (r² ≈ 2–4 % within stratum). The best categorical-USDM HSS is +0.05.
-The best event-anchored HSS is +0.47 in 8.3 grass — a stratum that
+The best event-anchored HSS is +0.47 in 8.3 Southeastern USA Plains grass — a stratum that
 contains 6,480 events; most strata sit between −0.05 and +0.10.
 Best ensemble HSS is +0.10 at the domain-weighted level.
 
@@ -1337,8 +1344,8 @@ Three things to keep in mind reading these numbers:
    its scientific weight.
 3. **A few cells work very well, most cells work modestly.** This is
    the right characterization rather than "the monitor works
-   uniformly across the domain." 8.3 grass at HSS = 0.47 is the
-   operational sweet spot; 9.4 semiarid is the state-agreement
+   uniformly across the domain." 8.3 Southeastern USA Plains grass at HSS = 0.47 is the
+   operational sweet spot; 9.4 South Central Semiarid Prairies is the state-agreement
    sweet spot; the rest of the domain provides modest skill that is
    nevertheless operationally interpretable when stratified
    appropriately.
@@ -1370,9 +1377,9 @@ The implication for the validation findings:
   benchmark.** SPEI is computed from precipitation and ET only and
   has no NDVI input. NDVI–SPEI agreement reports cleanly on whether
   vegetation tracks meteorological drought as theory predicts.
-- **The disagreement findings remain meaningful.** 8.4 USDM-ALIGNED-
+- **The disagreement findings remain meaningful.** 8.4 Ozark/Ouachita-Appalachian Forests USDM-ALIGNED-
   but-SPEI-SILENT (§5.3) tells us something USDM authors are
-  responding to in 8.4 that the meteorological signal alone does not
+  responding to in 8.4 Ozark/Ouachita-Appalachian Forests that the meteorological signal alone does not
   contain; this finding is not weakened by USDM's dependence on NDVI
   composites because the disagreement is about what USDM has *beyond*
   the vegetation signal.
@@ -1395,23 +1402,23 @@ order; this is a punch list, not an exhaustive research agenda.
 ### Near-term (close out the current validation cycle)
 
 1. **Test the snow-contamination hypothesis for REVERSED-GRASS
-   ecoregions.** The 5.2 + 8.1 grass-worst β pattern is consistent
+   ecoregions.** The 5.2 Mixed Wood Shield + 8.1 Mixed Wood Plains grass-worst β pattern is consistent
    with dormant-season snow inflating NDVI on northern grass cover.
-   Re-run the continuous-SPEI fit on a DJF-excluded subset for 5.2 +
-   8.1 specifically. If grass β jumps toward zero / positive when
+   Re-run the continuous-SPEI fit on a DJF-excluded subset for 5.2 Mixed Wood Shield +
+   8.1 Mixed Wood Plains specifically. If grass β jumps toward zero / positive when
    winter is excluded → snow hypothesis supported; if unchanged →
    look elsewhere. ~1–2 hr including re-fits.
-2. **Deep-dive 8.4 Ozark.** The USDM-ALIGNED-but-SPEI-SILENT pattern
-   in 8.4 (§5.3) is the cleanest case where USDM authors are
+2. **Deep-dive 8.4 Ozark/Ouachita-Appalachian Forests.** The USDM-ALIGNED-but-SPEI-SILENT pattern
+   in 8.4 Ozark/Ouachita-Appalachian Forests (§5.3) is the cleanest case where USDM authors are
    responding to something the meteorological water balance does not
    contain. Worth pulling streamflow / soil-moisture / agricultural-
    report inputs and asking what specifically aligns with USDM
-   declarations in 8.4. Could inform future input choices for
+   declarations in 8.4 Ozark/Ouachita-Appalachian Forests. Could inform future input choices for
    vegetation-based monitors in that ecoregion. Half-day to one-day
    investigation.
 3. **L2_name verification across all figures and tables.** A subset
-   of session-era figures used incorrect ecoregion names (e.g., 8.3
-   mislabeled as "S Central Semi-Arid Prairies" — that's 9.4). All
+   of session-era figures used incorrect ecoregion names (e.g., 8.3 Southeastern USA Plains
+   mislabeled as "S Central Semi-Arid Prairies" — that's 9.4 South Central Semiarid Prairies). All
    figures cited in this memo use canonical names from
    `pixel_to_ecoregion_l2.rds`, but a sample check of the figure
    files themselves before external distribution is worthwhile.
