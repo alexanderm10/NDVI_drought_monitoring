@@ -127,7 +127,7 @@ p_timeseries <- ggplot(timeseries_df, aes(x = date)) +
   # Styling
   scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
   labs(
-    title = "Domain-Wide NDVI Anomalies (2013-2024)",
+    title = sprintf("Domain-Wide NDVI Anomalies (%d-%d)", min(timeseries_df$year), max(timeseries_df$year)),
     subtitle = "Spatial average across all pixels with uncertainty bounds",
     x = "Date",
     y = "NDVI Anomaly (deviation from long-term normal)",
@@ -177,7 +177,7 @@ p_faceted <- ggplot(timeseries_df, aes(x = yday)) +
   facet_wrap(~ year, ncol = 3) +
   scale_x_continuous(breaks = month_breaks, labels = month_labels) +
   labs(
-    title = "NDVI Anomalies by Year (2013-2024)",
+    title = sprintf("NDVI Anomalies by Year (%d-%d)", min(timeseries_df$year), max(timeseries_df$year)),
     subtitle = "Seasonal progression for each year",
     x = NULL,
     y = "NDVI Anomaly",

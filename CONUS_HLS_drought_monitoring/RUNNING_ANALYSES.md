@@ -1,5 +1,42 @@
 # Currently Running Analyses
 
+**Updated**: 2026-07-16 ~15:40 — **05 animation-map refresh (overnight)**.
+The 05 visualization set is being rerun against the May-2026 anomaly rebuild
+(`modeled_ndvi_anomalies/`, 2013–2025, 129,310 px). The prior GIFs were from
+Dec-2025 / Jan-2026 and were missing 2025 entirely.
+
+**Active runs** (in container `conus-hls-drought-monitor`, `/data` = `/mnt/malexander/datasets/ndvi_monitor`):
+
+- **05b_animation_maps.R** — PID 1570. Regenerates weekly frames (~480) +
+  master GIF. Log: `/data/logs/05b_animation_20260716.log`
+  (host: `.../ndvi_monitor/logs/`). Reads are XZ-decompression-bound
+  (~58 min for the 13-file loop in 05a); full 05b ETA 2–4 hr.
+- **Chain runner** — PID 1652 (detached bash). Waits for 05b to exit, then
+  runs **05c_create_yearly_gifs.R** ONLY if the 05b log contains
+  "Animation and maps complete". Log: `/data/logs/05c_yearly_gifs_20260716.log`.
+
+**Completed this session**:
+- **05a_timeseries_quick.R** — rerun OK (2013–2025, 129,310 px verified).
+  Fresh `timeseries_domain_anomalies.png` + `timeseries_by_year_faceted.png`.
+  Script edited so plot titles derive the year range from the data (were
+  hardcoded "2013-2024"); the two rendered PNGs still show the old title —
+  a re-render was deferred (another ~1 hr of reads; decide next session).
+- Installed ImageMagick in the container (ephemeral, like `.netrc` — re-install
+  after any container rebuild: `docker exec -u 0 <c> apt-get install -y imagemagick`).
+
+**Morning check-in**:
+```bash
+tail -20 /mnt/malexander/datasets/ndvi_monitor/logs/05b_animation_20260716.log
+tail -20 /mnt/malexander/datasets/ndvi_monitor/logs/05c_yearly_gifs_20260716.log
+ls -lt /mnt/malexander/datasets/ndvi_monitor/figures/MIDWEST/anomalies_*.gif   # expect 2013–2025 (14 files)
+ls /mnt/malexander/datasets/ndvi_monitor/figures/MIDWEST/animation_frames/ | wc -l
+```
+Then audit: frame count, 14 yearly GIFs incl. 2025, GIF sizes ~8 MB each.
+
+---
+
+## Prior session
+
 **Updated**: 2026-06-22 EOD — **Memo finalization session**. Three
 substantive memo updates landed: §5.6 spei_4w rewrite (science/ecology
 framing instead of "NDVI beats SPEI"), Fig 11 built as 3-window hybrid
