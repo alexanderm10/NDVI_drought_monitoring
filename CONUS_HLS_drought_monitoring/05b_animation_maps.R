@@ -47,6 +47,15 @@ cat("=== Animation and Spatial Maps ===\n")
 cat("Output directory:", config$output_dir, "\n")
 cat("WARNING: This script is memory intensive and takes 45-60 minutes\n\n")
 
+# Convert a (year, week_of_year) pair to a readable "week starting" calendar
+# date. week_of_year = floor((yday - 1) / aggregate_days), so week w begins on
+# yday (w * aggregate_days + 1).
+wk_to_datestr <- function(year, woy, agg = config$aggregate_days) {
+  start_yday <- woy * agg + 1
+  d <- as.Date(sprintf("%d-%03d", year, start_yday), format = "%Y-%j")
+  format(d, "%b %d, %Y")
+}
+
 # Create output directory if needed
 if (!dir.exists(config$output_dir)) {
   dir.create(config$output_dir, recursive = TRUE)
@@ -147,6 +156,10 @@ sample_weeks <- weekly_anoms %>%
 for (wk in sample_weeks) {
   week_data <- weekly_anoms %>% filter(week_label == wk)
 
+  wk_year <- as.integer(substr(wk, 1, 4))
+  wk_woy  <- as.integer(sub(".*W", "", wk))
+  wk_datestr <- wk_to_datestr(wk_year, wk_woy)
+
   p_map <- ggplot(week_data, aes(x = x, y = y, fill = mean_anom)) +
     geom_raster() +
     geom_sf(data = states_albers, fill = NA, color = "black", linewidth = 0.3, inherit.aes = FALSE) +
@@ -157,7 +170,7 @@ for (wk in sample_weeks) {
     ) +
     coord_sf(expand = FALSE) +
     labs(
-      title = sprintf("NDVI Anomalies: %s", wk),
+      title = sprintf("NDVI Anomaly — Week of %s", wk_datestr),
       subtitle = sprintf("%s pixels", format(nrow(week_data), big.mark = ","))
     ) +
     theme_void() +
@@ -203,17 +216,19 @@ for (i in 1:nrow(all_weeks)) {
   wk <- all_weeks$week_label[i]
   week_data <- weekly_anoms %>% filter(week_label == wk)
 
+  wk_datestr <- wk_to_datestr(all_weeks$year[i], all_weeks$week_of_year[i])
+
   p_frame <- ggplot(week_data, aes(x = x, y = y, fill = mean_anom)) +
     geom_raster() +
     geom_sf(data = states_albers, fill = NA, color = "black", linewidth = 0.3, inherit.aes = FALSE) +
     scale_fill_gradient2(
       low = "brown", mid = "white", high = "darkgreen",
       midpoint = 0, limits = c(-0.3, 0.3), oob = scales::squish,
-      name = "NDVI\\nAnomaly"
+      name = "NDVI Anomaly"
     ) +
     coord_sf(expand = FALSE) +
     labs(
-      title = sprintf("NDVI Anomalies: %s", wk),
+      title = sprintf("NDVI Anomaly — Week of %s", wk_datestr),
       subtitle = sprintf("%s pixels", format(nrow(week_data), big.mark = ","))
     ) +
     theme_void(base_size = 14) +
@@ -236,40 +251,20 @@ close(pb)
 cat(sprintf("\n  Saved %d frames to: %s\n", nrow(all_weeks), frames_dir))
 
 # ==============================================================================
-# CREATE ANIMATED GIF
+# COMBINED ANIMATED GIF — intentionally skipped
 # ==============================================================================
+# A single GIF of all ~670 weekly frames is unusable: it exceeds ImageMagick's
+# default 1 GiB disk resource limit during assembly and, even if raised, would
+# be a huge, choppy file spanning the full multi-year record. The useful,
+# readable products are the PER-YEAR GIFs built by 05c_create_yearly_gifs.R
+# (~50 frames each). Remove any stale combined stub from prior runs.
 
-cat("\nCreating animated GIF...\n")
-gif_output <- file.path(config$output_dir, "anomalies_animated.gif")
-
-# Check if ImageMagick convert is available
-convert_available <- system("which convert", ignore.stdout = TRUE, ignore.stderr = TRUE) == 0
-
-if (convert_available) {
-  cat("  Using ImageMagick to create GIF...\n")
-
-  # Create GIF using convert command
-  convert_cmd <- sprintf(
-    "convert -delay 20 -loop 0 %s/frame_*.png %s",
-    frames_dir, gif_output
-  )
-
-  result <- system(convert_cmd, ignore.stdout = FALSE, ignore.stderr = FALSE)
-
-  if (result == 0 && file.exists(gif_output)) {
-    gif_size_mb <- file.size(gif_output) / 1024^2
-    cat(sprintf("  ✓ GIF created successfully: %s (%.1f MB)\n",
-                basename(gif_output), gif_size_mb))
-  } else {
-    warning("Failed to create GIF with ImageMagick")
-    cat(sprintf("  Manual command:\n    %s\n", convert_cmd))
-  }
-} else {
-  cat("  ImageMagick 'convert' not found - skipping GIF creation\n")
-  cat(sprintf("  To create GIF manually, run:\n"))
-  cat(sprintf("    convert -delay 20 -loop 0 %s/frame_*.png %s\n",
-              frames_dir, gif_output))
+combined_stub <- file.path(config$output_dir, "anomalies_animated.gif")
+if (file.exists(combined_stub)) {
+  file.remove(combined_stub)
+  cat(sprintf("\n  Removed stale combined GIF stub: %s\n", basename(combined_stub)))
 }
+cat("\n  (Combined all-years GIF intentionally skipped — run 05c for per-year GIFs.)\n")
 
 # ==============================================================================
 # SUMMARY
@@ -280,8 +275,6 @@ cat("Animation and maps complete!\n\n")
 cat("Output files:\n")
 cat(sprintf("  1. Sample maps: map_sample_*.png (%d files)\n", length(sample_weeks)))
 cat(sprintf("  2. Animation frames: animation_frames/*.png (%d frames)\n", nrow(all_weeks)))
-if (convert_available && file.exists(gif_output)) {
-  cat(sprintf("  3. Animated GIF: %s\n", basename(gif_output)))
-}
 cat(sprintf("\nAll files saved to: %s\n", config$output_dir))
-cat("\nFor quick time series plots, run: 05a_timeseries_quick.R\n")
+cat("\nNext: run 05c_create_yearly_gifs.R for per-year GIFs.\n")
+cat("For quick time series plots, run: 05a_timeseries_quick.R\n")
